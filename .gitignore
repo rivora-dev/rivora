@@ -12,3 +12,9 @@
 # Environment
 .env
 .env.local
+
+# Local Rivora store (operational data, never committed)
+.rivora/
+
+# Internal docs (not published with the public repo)
+docs/internal/

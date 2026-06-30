@@ -35,11 +35,6 @@
 - [GITHUB_LABELS.md](GITHUB_LABELS.md) — recommended issue and PR labels
 - [18-Roadmap.md](18-Roadmap.md) — roadmap and planned phases
 
-## Launch
-
-- [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md) — launch checklist
-- [LAUNCH_DEMO_SCRIPT.md](LAUNCH_DEMO_SCRIPT.md) — launch demo script
-
 ## Architecture decisions
 
 - [adr/0017-design-partner-feedback-before-provider-connectors.md](adr/0017-design-partner-feedback-before-provider-connectors.md) — feedback before provider connectors
