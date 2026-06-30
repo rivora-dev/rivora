@@ -188,6 +188,78 @@ rivora remember --from-evidence <evidence-id>
 rivora feedback <memory-id> approve
 ```
 
+## Cloudflare Connector
+
+The Cloudflare connector reads Pages and Workers deployment evidence from the
+Cloudflare REST API and maps it into the same `EvidenceItem` model used by the
+Git, GitHub, and Vercel connectors. Cloudflare evidence kinds include:
+
+- `CloudflarePagesDeployment`
+- `CloudflareWorkerDeployment`
+
+Example:
+
+```bash
+export CLOUDFLARE_API_TOKEN=
+rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20
+rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20
+rivora ingest cloudflare pages --account <account-id> --project <project-name> --since 7d
+rivora ingest cf pages --account <account-id> --project <project-name> --limit 20
+rivora ingest cf worker --account <account-id> --script <script-name> --limit 20
+```
+
+### Authentication
+
+Cloudflare access is read-only.
+
+- `CLOUDFLARE_API_TOKEN` is required. `CF_API_TOKEN` is accepted as a
+  fallback. If both are set, `CLOUDFLARE_API_TOKEN` takes precedence.
+- Tokens are never stored in `.rivora/`, never printed, never written into
+  evidence bodies, receipts, or test snapshots.
+- The token is passed to `curl` through stdin (`--config -`) so it never
+  appears in the process argument list and is not visible via `ps`.
+- Error messages from `curl` stderr are redacted before they can appear in a
+  `RivoraError`.
+- Create the narrowest Cloudflare API token possible for read-only deployment
+  evidence ingestion.
+
+### Stable Evidence IDs
+
+Cloudflare evidence deduplicates by stable ids of the form:
+
+```text
+cloudflare:pages-deployment:<project-name>:<deployment-id>
+cloudflare:worker-deployment:<script-name>:<deployment-id>
+```
+
+Repeated ingestion of the same project or script does not duplicate the same
+deployment.
+
+### Testing Without Network Access
+
+The connector exposes a `CloudflareClient` trait with two implementations:
+
+- `HttpCloudflareClient` — the real client backed by `curl`.
+- `FixtureCloudflareClient` — a test double that returns preloaded fixture
+  JSON.
+
+All connector and CLI tests use the fixture client. No test requires live
+Cloudflare network access.
+
+### Example Flow
+
+```bash
+export CLOUDFLARE_API_TOKEN=
+rivora init
+rivora ingest cloudflare pages --account <account-id> --project my-pages-app --limit 20
+rivora ingest cloudflare worker --account <account-id> --script my-worker --limit 20
+rivora ask "what changed on cloudflare?"
+rivora ask "what failed recently?"
+rivora evidence list
+rivora remember --from-evidence <evidence-id>
+rivora feedback <memory-id> approve
+```
+
 ## Evidence to Memory
 
 Evidence remains evidence until a human chooses to remember it:
@@ -231,6 +303,10 @@ data and does not require network access.
 - `what changed in github?` shows recent GitHub evidence only.
 - `what merged recently?` shows GitHub PR-merge evidence.
 - `what failed recently?` shows GitHub workflow-failure evidence.
+- `what deployed recently?` shows Vercel deployment evidence.
+- `what changed in vercel?` and `what failed in vercel?` show Vercel evidence.
+- `what changed on cloudflare?` and `what failed in cloudflare?` show
+  Cloudflare evidence.
 
 The CLI does not claim root cause. It suggests the explicit next step:
 
@@ -240,7 +316,7 @@ rivora remember --from-evidence <evidence-id>
 
 ## Intentionally Not Supported Yet
 
-- AWS, Kubernetes, Datadog, or other cloud connectors.
+- AWS, Kubernetes, Datadog, Render, or other cloud connectors.
 - Slack API or OAuth.
 - Ability Runtime.
 - LLM routing.

@@ -37,14 +37,20 @@ and never takes infrastructure actions.
 - `VERCEL_TOKEN` is never stored in `.rivora/`, never printed, and redacted
   in errors. The Vercel connector is read-only; it uses only `GET` requests
   and never creates, rolls back, or promotes deployments.
+- `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) is never stored in `.rivora/`,
+  never printed, and redacted in errors. The Cloudflare connector is
+  read-only; it uses only `GET` requests and never creates, rolls back, or
+  promotes deployments. It does not read or write environment variables,
+  secrets, KV, R2, D1, or Queues.
 - Rivora does not intentionally ingest secrets. Connector evidence can include
   source-authored text such as commit messages or issue bodies, so review source
   content before ingestion and rotate any credential exposed in a source.
 
 ## Least privilege
 
-- Git, GitHub, and Vercel connectors are read-only. GitHub API ingestion uses
-  only `GET` requests. Vercel API ingestion uses only `GET` requests.
+- Git, GitHub, Vercel, and Cloudflare connectors are read-only. GitHub API
+  ingestion uses only `GET` requests. Vercel API ingestion uses only `GET`
+  requests. Cloudflare API ingestion uses only `GET` requests.
 - The Slack adapter uses minimal `app_mentions:read` and `chat:write` bot
   scopes. No channel history ingestion or workspace crawling.
 - Use `rivora slack doctor` to validate the self-hosted Slack setup without

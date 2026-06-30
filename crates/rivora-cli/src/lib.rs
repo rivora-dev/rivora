@@ -21,10 +21,12 @@ pub use slack_adapter::{
 
 use rivora_adaptive::{AdaptiveMemoryEngine, MemoryCandidateRequest, RecallQuery, RecallResult};
 use rivora_connectors::{
-    EvidenceIngestResult, EvidenceItem, EvidenceKind, GitHubAuthConfig, GitHubConnector,
-    GitHubIngestRequest, GitHubIngestResult, GitHubRepositoryRef, HttpGitHubClient,
-    HttpVercelClient, LocalGitConnector, VercelAuthConfig, VercelConnector, VercelIngestRequest,
-    VercelIngestResult, VercelProjectRef,
+    CloudflareAuthConfig, CloudflareConnector, CloudflareIngestRequest, CloudflareIngestResult,
+    CloudflarePlatform, CloudflareTarget, EvidenceIngestResult, EvidenceItem, EvidenceKind,
+    GitHubAuthConfig, GitHubConnector, GitHubIngestRequest, GitHubIngestResult,
+    GitHubRepositoryRef, HttpCloudflareClient, HttpGitHubClient, HttpVercelClient,
+    LocalGitConnector, VercelAuthConfig, VercelConnector, VercelIngestRequest, VercelIngestResult,
+    VercelProjectRef,
 };
 use rivora_errors::{Result, RivoraError};
 use rivora_memory::{
@@ -341,6 +343,7 @@ pub enum IngestOptions {
     Git(GitIngestOptions),
     GitHub(GitHubIngestOptions),
     Vercel(VercelIngestOptions),
+    Cloudflare(CloudflareIngestOptions),
     Fixture(FixtureIngestOptions),
 }
 
@@ -408,6 +411,29 @@ impl Default for VercelIngestOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudflareIngestOptions {
+    pub platform: CloudflarePlatform,
+    pub account: String,
+    pub project: Option<String>,
+    pub script: Option<String>,
+    pub limit: usize,
+    pub since: Option<String>,
+}
+
+impl Default for CloudflareIngestOptions {
+    fn default() -> Self {
+        Self {
+            platform: CloudflarePlatform::Pages,
+            account: String::new(),
+            project: None,
+            script: None,
+            limit: 20,
+            since: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureIngestOptions {
     pub path: PathBuf,
 }
@@ -465,6 +491,8 @@ pub enum AskIntent {
     WhatDeployedRecently,
     WhatFailedInVercel,
     WhatChangedInVercel,
+    WhatFailedInCloudflare,
+    WhatChangedInCloudflare,
     Help,
 }
 
@@ -544,6 +572,15 @@ pub fn parse_ask_intent(prompt: &str) -> AskIntent {
         || normalized.contains("vercel") && normalized.contains("changed")
     {
         AskIntent::WhatChangedInVercel
+    } else if normalized.contains("what failed in cloudflare")
+        || (normalized.contains("cloudflare") && normalized.contains("failed"))
+    {
+        AskIntent::WhatFailedInCloudflare
+    } else if normalized.contains("what changed in cloudflare")
+        || normalized.contains("what changed on cloudflare")
+        || (normalized.contains("cloudflare") && normalized.contains("changed"))
+    {
+        AskIntent::WhatChangedInCloudflare
     } else if normalized.contains("what changed") {
         AskIntent::WhatChanged
     } else {
@@ -708,6 +745,7 @@ pub fn ingest(store: &LocalMemoryStore, options: IngestOptions) -> Result<String
         IngestOptions::Git(options) => ingest_git(store, options),
         IngestOptions::GitHub(options) => ingest_github(store, options),
         IngestOptions::Vercel(options) => ingest_vercel(store, options),
+        IngestOptions::Cloudflare(options) => ingest_cloudflare(store, options),
         IngestOptions::Fixture(options) => ingest_fixture(store, options),
     }
 }
@@ -800,6 +838,69 @@ pub fn ingest_vercel_with_connector(
     let result = connector.ingest(request)?;
     let added = store.append_evidence(result.evidence.clone())?;
     Ok(render_vercel_ingest_result(&result, added, store))
+}
+
+pub fn ingest_cloudflare(
+    store: &LocalMemoryStore,
+    options: CloudflareIngestOptions,
+) -> Result<String> {
+    if options.account.trim().is_empty() {
+        return Err(RivoraError::invalid_value(
+            "cloudflare_account",
+            "rivora ingest cloudflare requires --account <account-id>",
+        ));
+    }
+    match options.platform {
+        CloudflarePlatform::Pages => {
+            if options.project.as_deref().unwrap_or("").trim().is_empty() {
+                return Err(RivoraError::invalid_value(
+                    "cloudflare_project",
+                    "rivora ingest cloudflare pages requires --project <project-name>",
+                ));
+            }
+        }
+        CloudflarePlatform::Workers => {
+            if options.script.as_deref().unwrap_or("").trim().is_empty() {
+                return Err(RivoraError::invalid_value(
+                    "cloudflare_script",
+                    "rivora ingest cloudflare worker requires --script <script-name>",
+                ));
+            }
+        }
+    }
+    let auth = CloudflareAuthConfig::from_env();
+    if !auth.has_token() {
+        return Err(RivoraError::invalid_value(
+            "cloudflare_token",
+            "Missing CLOUDFLARE_API_TOKEN.\n\nCreate a Cloudflare API token and run:\n\nexport CLOUDFLARE_API_TOKEN=...\n\nThen try:\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nNo infrastructure actions were taken.",
+        ));
+    }
+    let connector = CloudflareConnector::new(HttpCloudflareClient::new(auth));
+    ingest_cloudflare_with_connector(store, options, &connector)
+}
+
+/// Core Cloudflare ingest path that accepts an injected connector.
+pub fn ingest_cloudflare_with_connector(
+    store: &LocalMemoryStore,
+    options: CloudflareIngestOptions,
+    connector: &CloudflareConnector,
+) -> Result<String> {
+    store.init()?;
+    let target = match options.platform {
+        CloudflarePlatform::Pages => {
+            CloudflareTarget::pages(&options.account, options.project.as_deref().unwrap_or(""))
+        }
+        CloudflarePlatform::Workers => {
+            CloudflareTarget::worker(&options.account, options.script.as_deref().unwrap_or(""))
+        }
+    };
+    let mut request = CloudflareIngestRequest::new(target).with_limit(options.limit);
+    if let Some(since) = options.since.clone() {
+        request = request.with_since(since);
+    }
+    let result = connector.ingest(request)?;
+    let added = store.append_evidence(result.evidence.clone())?;
+    Ok(render_cloudflare_ingest_result(&result, added, store))
 }
 
 pub fn ingest_fixture(store: &LocalMemoryStore, options: FixtureIngestOptions) -> Result<String> {
@@ -918,6 +1019,8 @@ pub fn ask(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         AskIntent::WhatDeployedRecently => ask_what_deployed_recently(store),
         AskIntent::WhatFailedInVercel => ask_what_failed_in_vercel(store),
         AskIntent::WhatChangedInVercel => ask_what_changed_in_vercel(store),
+        AskIntent::WhatFailedInCloudflare => ask_what_failed_in_cloudflare(store),
+        AskIntent::WhatChangedInCloudflare => ask_what_changed_in_cloudflare(store),
         AskIntent::Help => Ok(help_text()),
     }
 }
@@ -1211,6 +1314,9 @@ fn parse_ingest_options(args: &[String]) -> Result<IngestOptions> {
         Some("vercel") => Ok(IngestOptions::Vercel(parse_vercel_ingest_options(
             &args[1..],
         )?)),
+        Some("cloudflare") | Some("cf") => Ok(IngestOptions::Cloudflare(
+            parse_cloudflare_ingest_options(&args[1..])?,
+        )),
         Some("fixture") => Ok(IngestOptions::Fixture(parse_fixture_ingest_options(
             &args[1..],
         )?)),
@@ -1220,7 +1326,7 @@ fn parse_ingest_options(args: &[String]) -> Result<IngestOptions> {
         )),
         None => Err(RivoraError::invalid_value(
             "ingest_connector",
-            "usage: rivora ingest git | rivora ingest github --repo owner/name | rivora ingest vercel --project <project> | rivora ingest fixture --path examples/demo/evidence.json",
+            "usage: rivora ingest git | rivora ingest github --repo owner/name | rivora ingest vercel --project <project> | rivora ingest cloudflare pages --account <account-id> --project <project-name> | rivora ingest fixture --path examples/demo/evidence.json",
         )),
     }
 }
@@ -1354,6 +1460,47 @@ fn parse_vercel_ingest_options(args: &[String]) -> Result<VercelIngestOptions> {
             "vercel_project",
             "rivora ingest vercel requires --project <project-id-or-name>",
         ));
+    }
+    Ok(options)
+}
+
+fn parse_cloudflare_ingest_options(args: &[String]) -> Result<CloudflareIngestOptions> {
+    let mut options = CloudflareIngestOptions::default();
+    let mut i = 0;
+
+    if let Some(subcommand) = args.first() {
+        match subcommand.as_str() {
+            "pages" => {
+                options.platform = CloudflarePlatform::Pages;
+                i = 1;
+            }
+            "worker" | "workers" => {
+                options.platform = CloudflarePlatform::Workers;
+                i = 1;
+            }
+            _ => {}
+        }
+    }
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "--account" => options.account = flag_value(args, &mut i, "--account")?,
+            "--project" => options.project = Some(flag_value(args, &mut i, "--project")?),
+            "--script" => options.script = Some(flag_value(args, &mut i, "--script")?),
+            "--since" => options.since = Some(flag_value(args, &mut i, "--since")?),
+            "--limit" => {
+                let value = flag_value(args, &mut i, "--limit")?;
+                options.limit = value.parse::<usize>().map_err(|_| {
+                    RivoraError::invalid_value("limit", "limit must be a positive integer")
+                })?;
+            }
+            other => {
+                return Err(RivoraError::invalid_value(
+                    "ingest_cloudflare_flag",
+                    format!("unsupported cloudflare ingest flag '{other}'"),
+                ));
+            }
+        }
     }
     Ok(options)
 }
@@ -1655,6 +1802,27 @@ fn render_vercel_ingest_result(
     )
 }
 
+fn render_cloudflare_ingest_result(
+    result: &CloudflareIngestResult,
+    added: usize,
+    store: &LocalMemoryStore,
+) -> String {
+    let platform_label = match result.platform {
+        CloudflarePlatform::Pages => "Cloudflare Pages",
+        CloudflarePlatform::Workers => "Cloudflare Workers",
+    };
+    format!(
+        "Rivora ingested {} evidence.\n\nRepository: {}\nEvidence items ingested: {}\nNew evidence items: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nCloudflare access is read-only. No infrastructure actions were taken.",
+        platform_label,
+        result.repository,
+        result.evidence.len(),
+        added,
+        result.deployments,
+        render_bullets(&result.topics),
+        display_path(&store.evidence_path())
+    )
+}
+
 fn render_fixture_ingest_result(
     label: &str,
     ingested: usize,
@@ -1696,14 +1864,15 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         .collect::<Vec<_>>();
     if matches.is_empty() {
         return Ok(
-            "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
+            "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
                 .to_string(),
         );
     }
     matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
     let has_github = matches.iter().any(|item| item.is_github());
     let has_vercel = matches.iter().any(|item| item.is_vercel());
-    let header = if has_github || has_vercel {
+    let has_cloudflare = matches.iter().any(|item| item.is_cloudflare());
+    let header = if has_github || has_vercel || has_cloudflare {
         "Rivora found recent evidence."
     } else {
         "Rivora found recent Git evidence."
@@ -1773,6 +1942,59 @@ fn ask_what_changed_in_vercel(store: &LocalMemoryStore) -> Result<String> {
         "Rivora found recent Vercel evidence.",
         EvidenceItem::is_vercel,
     )
+}
+
+fn ask_what_failed_in_cloudflare(store: &LocalMemoryStore) -> Result<String> {
+    ask_cloudflare_evidence(
+        store,
+        "Rivora found recent Cloudflare deployment failures.",
+        |item| item.is_cloudflare() && item.tags.iter().any(|tag| tag == "failed-deploy"),
+    )
+}
+
+fn ask_what_changed_in_cloudflare(store: &LocalMemoryStore) -> Result<String> {
+    ask_cloudflare_evidence(
+        store,
+        "Rivora found recent Cloudflare deployment evidence.",
+        EvidenceItem::is_cloudflare,
+    )
+}
+
+fn ask_cloudflare_evidence(
+    store: &LocalMemoryStore,
+    header: &str,
+    predicate: impl Fn(&EvidenceItem) -> bool,
+) -> Result<String> {
+    store.init()?;
+    let snapshot = store.load()?;
+    let mut matches: Vec<&EvidenceItem> = snapshot
+        .evidence
+        .iter()
+        .filter(|item| predicate(item))
+        .collect();
+    if matches.is_empty() {
+        return Ok(
+            "Rivora did not find Cloudflare evidence yet.\n\nTry:\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\nrivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
+                .to_string(),
+        );
+    }
+    matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
+    let mut output = format!("{header}\n");
+    for item in matches.iter().take(5) {
+        output.push_str(&format!(
+            "\n* {}\n  {}\n  Evidence: {}",
+            item.title,
+            item.summary,
+            item.id.as_str()
+        ));
+    }
+    if let Some(first) = matches.first() {
+        output.push_str(&format!(
+            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo infrastructure actions were taken.",
+            first.id.as_str()
+        ));
+    }
+    Ok(output)
 }
 
 fn ask_vercel_evidence(
@@ -1866,6 +2088,8 @@ fn render_remembered_from_evidence(memory: &MemoryRecord, evidence: &EvidenceIte
         "GitHub"
     } else if evidence.is_vercel() {
         "Vercel"
+    } else if evidence.is_cloudflare() {
+        "Cloudflare"
     } else {
         "Git"
     };
@@ -1908,7 +2132,7 @@ fn render_recall_result(result: &RecallResult) -> String {
 
 fn help_text() -> String {
     format!(
-        "Rivora local-first, evidence-backed reliability memory CLI\n\nCommands:\n* rivora demo\n* rivora demo --scenario <basic|checkout-incident|release-regression|workflow-failure>\n* rivora init\n* rivora ingest fixture --path examples/demo/evidence.json\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora ask \"what changed?\"\n* rivora ask \"what merged recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what changed in github?\"\n* rivora ask \"what changed in vercel?\"\n* rivora ask \"have we seen checkout latency before?\"\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n* rivora status\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
+        "Rivora local-first, evidence-backed reliability memory CLI\n\nCommands:\n* rivora demo\n* rivora demo --scenario <basic|checkout-incident|release-regression|workflow-failure>\n* rivora init\n* rivora ingest fixture --path examples/demo/evidence.json\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n* rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora ask \"what changed?\"\n* rivora ask \"what merged recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what changed in github?\"\n* rivora ask \"what changed in vercel?\"\n* rivora ask \"what changed on cloudflare?\"\n* rivora ask \"what failed in cloudflare?\"\n* rivora ask \"have we seen checkout latency before?\"\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n* rivora status\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
         remember_example()
     )
 }

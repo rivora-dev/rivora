@@ -51,8 +51,8 @@ quality, high evidence usefulness, low safety risk, and high demo value.
 
 | Provider / Source | User demand | Setup complexity | Read-only API quality | Evidence usefulness | Safety risk | Demo value | Priority |
 |---|---|---|---|---|---|---|---|
-| Vercel | | | | | | | |
-| Cloudflare | | | | | | | |
+| Vercel (Phase 18A) | | | | | | | Done |
+| Cloudflare (Phase 18B) | | | | | | | Done |
 | Render | | | | | | | |
 | AWS | | | | | | | |
 | GCP | | | | | | | |

@@ -9,6 +9,14 @@
 
   ### Added
 
+  - Cloudflare evidence connector: read-only ingestion of Cloudflare Pages and
+    Workers deployment evidence via the Cloudflare REST API (`rivora ingest
+    cloudflare pages`, `rivora ingest cloudflare worker`)
+  - `CLOUDFLARE_API_TOKEN` environment variable support for Cloudflare
+    connector authentication (with `CF_API_TOKEN` fallback)
+  - Cloudflare-aware ask routing (`what changed on cloudflare?`,
+    `what failed in cloudflare?`)
+  - `FixtureCloudflareClient` for deterministic testing without network access
   - Vercel evidence connector: read-only ingestion of Vercel deployment
     evidence via the Vercel REST API (`rivora ingest vercel`)
   - `VERCEL_TOKEN` environment variable support for Vercel connector
@@ -61,7 +69,7 @@
   - Crates are not yet published; install Rivora from source
   - No official Slack Marketplace application or hosted OAuth flow
   - No hosted Rivora Cloud service
-  - No AWS, GCP, Azure, Cloudflare, Render, or Kubernetes connectors
+  - No AWS, GCP, Azure, Render, or Kubernetes connectors
   - No Ability Runtime
   - No Slack correction modals
   - No autonomous remediation or infrastructure mutation

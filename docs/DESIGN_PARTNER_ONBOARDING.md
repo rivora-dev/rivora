@@ -11,6 +11,7 @@
 * Git
 * (Optional) A GitHub personal access token for public repo evidence
 * (Optional) A Vercel token for deployment evidence
+* (Optional) A Cloudflare API token for Pages/Workers deployment evidence
 * (Optional) A self-hosted Slack app for team use
 
 ---
@@ -85,6 +86,21 @@ rivora ingest vercel --project <project-id-or-name> --limit 20
 Reads deployment evidence from Vercel. `VERCEL_TOKEN` is required and never
 stored. The connector is read-only; no deployment, rollback, or promotion
 actions are taken.
+
+---
+
+## Ingest Cloudflare evidence
+
+```bash
+export CLOUDFLARE_API_TOKEN=
+rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20
+rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20
+```
+
+Reads deployment evidence from Cloudflare Pages and Workers.
+`CLOUDFLARE_API_TOKEN` is required and never stored. The connector is
+read-only; no deployment, rollback, promotion, DNS, route, Worker, Pages, KV,
+R2, D1, or Queues actions are taken.
 
 ---
 
@@ -242,7 +258,7 @@ See [SECURITY.md](../SECURITY.md) for the full policy.
 ## Known limitations
 
 * Crates are not published; install the local preview from source
-* No AWS, GCP, Azure, Cloudflare, Render, or Kubernetes connectors
+* No AWS, GCP, Azure, Render, or Kubernetes connectors
 * No official Slack Marketplace app
 * No hosted OAuth flow
 * No Rivora Cloud

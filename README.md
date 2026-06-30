@@ -143,6 +143,27 @@ rivora ask "what changed in vercel?"
 
 ---
 
+## Cloudflare evidence
+
+```bash
+# Cloudflare Pages deployment evidence (read-only)
+export CLOUDFLARE_API_TOKEN=
+rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20
+rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20
+rivora ingest cloudflare pages --account <account-id> --project <project-name> --since 7d
+```
+
+Cloudflare evidence ingestion uses only `GET` requests. `CLOUDFLARE_API_TOKEN`
+is required and never stored. No deployment, rollback, promotion, DNS, route,
+Worker, Pages, KV, R2, D1, or Queues actions are taken.
+
+```bash
+rivora ask "what changed on cloudflare?"
+rivora ask "what failed in cloudflare?"
+```
+
+---
+
 ## Self-hosted Slack
 
 ```bash
