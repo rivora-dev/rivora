@@ -32,10 +32,6 @@ validation, and token redaction in diagnostics.
 Public repository, README, changelog, security docs, contributor guide, and
 design partner onboarding.
 
----
-
-## In progress
-
 ### Phase 17 — Design Partner Feedback Loop
 
 Collect structured feedback from early design partners and the open-source
@@ -43,12 +39,37 @@ community before adding provider evidence connectors. Adds GitHub issue
 templates, a pull request template, community feedback and feedback analysis
 docs, a design partner report template, and ADR 0017.
 
-See [ADR 0017](adr/0017-design-partner-feedback-before-provider-connectors.md)
-and [FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md).
+### Phase 18A — Vercel Evidence Connector
+
+Read-only Vercel deployment evidence ingestion. First provider evidence
+connector, proving the connector model before adding Cloudflare, Render,
+and AWS.
 
 ---
 
 ## Planned
+
+### Phase 18B — Cloudflare Evidence Connector
+
+Read-only evidence connector for Cloudflare events.
+
+### Phase 18C — Render Evidence Connector
+
+Read-only evidence connector for Render deploy and service events.
+
+### Phase 18D — AWS Evidence Connector
+
+Read-only evidence connector for AWS (e.g. CloudTrail, deploy notifications).
+Scope narrowed by feedback.
+
+### Phase 19 — Kubernetes Evidence Connector
+
+Read-only evidence connector for Kubernetes events and rollouts.
+
+### Phase 20 — Ability Proposal Runtime
+
+A runtime that proposes actions for human approval. Rivora still does not
+execute infrastructure actions; proposals are explainable and receipt-backed.
 
 ---
 

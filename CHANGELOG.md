@@ -61,7 +61,7 @@
   - Crates are not yet published; install Rivora from source
   - No official Slack Marketplace application or hosted OAuth flow
   - No hosted Rivora Cloud service
-  - No AWS, GCP, Azure, Vercel, Cloudflare, Render, or Kubernetes connectors
+  - No AWS, GCP, Azure, Cloudflare, Render, or Kubernetes connectors
   - No Ability Runtime
   - No Slack correction modals
   - No autonomous remediation or infrastructure mutation
