@@ -1,0 +1,105 @@
+[
+  {
+    "id": "github:pr:demo/multi-source-release:142",
+    "kind": "git_hub_pull_request_merged",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/multi-source-release",
+      "read_only": true
+    },
+    "title": "PR #142 merged: checkout retry policy update",
+    "summary": "PR #142 merged to update the checkout retry policy; the change was part of a broader checkout release window.",
+    "body": "The PR modified the checkout retry configuration. This fixture does not establish whether the change caused downstream effects.",
+    "service": "checkout",
+    "files_changed": [
+      "services/checkout/src/retry.rs",
+      "services/checkout/config/retry.toml"
+    ],
+    "timestamp": "2026-06-27T10:00:00Z",
+    "author": "ada",
+    "tags": ["checkout", "retry-policy", "release"],
+    "refs": ["https://github.example/demo/multi-source-release/pull/142"],
+    "confidence": 0.88
+  },
+  {
+    "id": "github:workflow:demo/multi-source-release:1042",
+    "kind": "git_hub_workflow_failed",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/multi-source-release",
+      "read_only": true
+    },
+    "title": "Workflow failed: checkout smoke test",
+    "summary": "The checkout smoke test workflow failed after the retry policy change reached main.",
+    "body": "Workflow: checkout smoke test\nConclusion: failure\nBranch: main\nCommit: abc1234\nThis failed check is evidence only and does not identify a cause.",
+    "service": "checkout",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:20:00Z",
+    "author": "github-actions",
+    "tags": ["checkout", "workflow", "release", "failed"],
+    "refs": ["https://github.example/demo/multi-source-release/actions/runs/1042"],
+    "confidence": 0.84
+  },
+  {
+    "id": "vercel:deployment:demo/multi-source-release:deploy-checkout-web-001",
+    "kind": "vercel_deployment",
+    "source": {
+      "connector": "vercel",
+      "version": "0.1.0",
+      "repository": "checkout-web",
+      "read_only": true
+    },
+    "title": "Vercel production deployment for checkout-web completed",
+    "summary": "Vercel production deployment for checkout-web completed during the same release window as the checkout retry policy change.",
+    "body": "Project: checkout-web\nEnvironment: production\nStatus: completed\nThis deployment record is evidence only and does not identify a cause.",
+    "service": "checkout-web",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:30:00Z",
+    "author": "vercel-bot",
+    "tags": ["checkout", "checkout-web", "deployment", "production"],
+    "refs": ["https://vercel.example/demo/multi-source-release/deploy-checkout-web-001"],
+    "confidence": 0.9
+  },
+  {
+    "id": "cloudflare:pages-deployment:demo/multi-source-release:cf-pages-checkout-web-001",
+    "kind": "cloudflare_pages_deployment",
+    "source": {
+      "connector": "cloudflare",
+      "version": "0.1.0",
+      "repository": "checkout-web",
+      "read_only": true
+    },
+    "title": "Cloudflare Pages preview deployment for checkout-web failed",
+    "summary": "Cloudflare Pages preview deployment for checkout-web failed during the same release window as the checkout retry policy change.",
+    "body": "Project: checkout-web\nEnvironment: preview\nStatus: failed\nThis deployment record is evidence only and does not identify a cause.",
+    "service": "checkout-web",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:35:00Z",
+    "author": "cloudflare-bot",
+    "tags": ["checkout", "checkout-web", "deployment", "preview", "failed-deploy"],
+    "refs": ["https://cloudflare.example/demo/multi-source-release/cf-pages-checkout-web-001"],
+    "confidence": 0.86
+  },
+  {
+    "id": "cloudflare:worker-deployment:demo/multi-source-release:cf-worker-checkout-001",
+    "kind": "cloudflare_worker_deployment",
+    "source": {
+      "connector": "cloudflare",
+      "version": "0.1.0",
+      "repository": "checkout-worker",
+      "read_only": true
+    },
+    "title": "Cloudflare Worker deployment for checkout-worker completed",
+    "summary": "Cloudflare Worker deployment for checkout-worker completed during the same release window as the checkout retry policy change.",
+    "body": "Script: checkout-worker\nEnvironment: production\nStatus: completed\nThis deployment record is evidence only and does not identify a cause.",
+    "service": "checkout-worker",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:40:00Z",
+    "author": "cloudflare-bot",
+    "tags": ["checkout", "checkout-worker", "deployment", "production"],
+    "refs": ["https://cloudflare.example/demo/multi-source-release/cf-worker-checkout-001"],
+    "confidence": 0.88
+  }
+]

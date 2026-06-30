@@ -220,14 +220,16 @@ pub enum DemoScenario {
     CheckoutIncident,
     ReleaseRegression,
     WorkflowFailure,
+    MultiSourceRelease,
 }
 
 impl DemoScenario {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Basic,
         Self::CheckoutIncident,
         Self::ReleaseRegression,
         Self::WorkflowFailure,
+        Self::MultiSourceRelease,
     ];
 
     #[must_use]
@@ -237,6 +239,7 @@ impl DemoScenario {
             Self::CheckoutIncident => "checkout-incident",
             Self::ReleaseRegression => "release-regression",
             Self::WorkflowFailure => "workflow-failure",
+            Self::MultiSourceRelease => "multi-source-release",
         }
     }
 
@@ -246,6 +249,7 @@ impl DemoScenario {
             "checkout-incident" => Ok(Self::CheckoutIncident),
             "release-regression" => Ok(Self::ReleaseRegression),
             "workflow-failure" => Ok(Self::WorkflowFailure),
+            "multi-source-release" => Ok(Self::MultiSourceRelease),
             other => Err(RivoraError::invalid_value(
                 "demo_scenario",
                 format!(
@@ -293,6 +297,14 @@ impl DemoScenario {
                 recall_tags: &["workflow"],
                 ask_prompt: "what failed recently?",
                 slack_prompt: "have we seen billing migration failures before?",
+            },
+            Self::MultiSourceRelease => DemoScenarioConfig {
+                selected_evidence_id: "github:pr:demo/multi-source-release:142",
+                recall_service: "checkout",
+                recall_symptoms: &["release", "retry-policy"],
+                recall_tags: &["checkout"],
+                ask_prompt: "what changed?",
+                slack_prompt: "what happened during the release?",
             },
         }
     }
@@ -581,7 +593,12 @@ pub fn parse_ask_intent(prompt: &str) -> AskIntent {
         || (normalized.contains("cloudflare") && normalized.contains("changed"))
     {
         AskIntent::WhatChangedInCloudflare
-    } else if normalized.contains("what changed") {
+    } else if normalized.contains("what changed across providers")
+        || normalized.contains("what changed across")
+        || normalized.contains("what happened during")
+        || normalized.contains("what happened in")
+        || normalized.contains("what changed")
+    {
         AskIntent::WhatChanged
     } else {
         AskIntent::Help
@@ -961,10 +978,14 @@ pub fn evidence_list(store: &LocalMemoryStore) -> Result<String> {
 
     let mut output = format!("Local evidence: {}\n", snapshot.evidence.len());
     for item in snapshot.evidence.iter().take(20) {
+        let provider = provider_label_for_evidence(item);
+        let status = evidence_status_label(item);
         output.push_str(&format!(
-            "\n* {}\n  Kind: {}\n  Summary: {}",
+            "\n* {}\n  Source: {}\n  Kind: {}\n  Status: {}\n  Summary: {}",
             item.id.as_str(),
+            provider,
             item.kind.as_str(),
+            status,
             item.summary
         ));
         if let Some(service) = &item.service {
@@ -1725,10 +1746,11 @@ fn candidate_request_from_evidence(
         .clone()
         .or_else(|| evidence.tags.first().cloned())
         .unwrap_or_else(|| "local-git".to_string());
+    let provider = provider_label_for_evidence(evidence);
     let summary = if evidence.summary.trim().is_empty() {
         evidence.title.clone()
     } else {
-        evidence.summary.clone()
+        format!("{provider} evidence: {}", evidence.summary)
     };
     Ok(MemoryCandidateRequest {
         id: next_memory_id(memories, &service, &summary),
@@ -1839,12 +1861,18 @@ fn render_fixture_ingest_result(
 }
 
 fn render_evidence_item(item: &EvidenceItem) -> String {
+    let provider = provider_label_for_evidence(item);
+    let status = evidence_status_label(item);
+    let timestamp = item.timestamp.as_deref().unwrap_or("unknown");
+    let service = item.service.as_deref().unwrap_or("unknown");
     format!(
-        "Evidence: {}\nKind: {}\nSummary: {}\nTopic: {}\nConfidence: {}\nFiles:\n{}\n\nDetails:\n{}\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo infrastructure actions were taken.",
+        "Evidence: {}\nSource: {}\nKind: {}\nStatus: {}\nTopic: {}\nWhen: {}\nConfidence: {}\nFiles:\n{}\n\nDetails:\n{}\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo infrastructure actions were taken.",
         item.id.as_str(),
-        item.kind.as_str(),
-        item.summary,
-        item.service.as_deref().unwrap_or("unknown"),
+        provider,
+        item.kind.label(),
+        status,
+        service,
+        timestamp,
         confidence_label(item.confidence),
         render_bullets(&item.files_changed),
         item.body,
@@ -1856,30 +1884,37 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
     store.init()?;
     let snapshot = store.load()?;
     let topic = service_after_in(prompt).or_else(|| service_after_about(prompt));
-    let mut matches = snapshot
-        .evidence
-        .iter()
-        .filter(|item| evidence_matches_topic(item, topic.as_deref()))
-        .take(5)
-        .collect::<Vec<_>>();
-    if matches.is_empty() {
+    let summary = CrossSourceEvidenceSummary::from_evidence(&snapshot.evidence, topic.as_deref());
+    if summary.is_empty() {
         return Ok(
             "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
                 .to_string(),
         );
     }
-    matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
-    let has_github = matches.iter().any(|item| item.is_github());
-    let has_vercel = matches.iter().any(|item| item.is_vercel());
-    let has_cloudflare = matches.iter().any(|item| item.is_cloudflare());
-    let header = if has_github || has_vercel || has_cloudflare {
-        "Rivora found recent evidence."
+    if summary.provider_count() > 1 {
+        return Ok(summary.render());
+    }
+    let mut output = String::new();
+    let header = if !summary.github.is_empty() {
+        "Rivora found recent GitHub evidence."
+    } else if !summary.vercel.is_empty() {
+        "Rivora found recent Vercel deployment evidence."
+    } else if !summary.cloudflare_pages.is_empty() || !summary.cloudflare_workers.is_empty() {
+        "Rivora found recent Cloudflare deployment evidence."
     } else {
         "Rivora found recent Git evidence."
     };
-    let mut output = format!("{header}\n");
-    let first_id = matches.first().map(|item| item.id.as_str().to_string());
-    for item in matches {
+    output.push_str(header);
+    output.push('\n');
+    let mut all_items: Vec<&EvidenceItem> = snapshot
+        .evidence
+        .iter()
+        .filter(|item| evidence_matches_topic(item, topic.as_deref()))
+        .collect();
+    all_items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
+    let all_items = all_items.into_iter().take(5).collect::<Vec<_>>();
+    let first_id = all_items.first().map(|item| item.id.as_str().to_string());
+    for item in &all_items {
         output.push_str(&format!(
             "\n* {}\n  {}\n  Evidence: {}",
             item.title,
@@ -1905,11 +1940,67 @@ fn ask_what_merged_recently(store: &LocalMemoryStore) -> Result<String> {
 }
 
 fn ask_what_failed_recently(store: &LocalMemoryStore) -> Result<String> {
-    ask_github_evidence(
-        store,
-        "Rivora found recent GitHub workflow failures.",
-        |item| item.kind == EvidenceKind::GitHubWorkflowFailed,
-    )
+    store.init()?;
+    let snapshot = store.load()?;
+    let is_failure = |item: &EvidenceItem| -> bool {
+        item.kind == EvidenceKind::GitHubWorkflowFailed
+            || item
+                .tags
+                .iter()
+                .any(|tag| tag == "failed-deploy" || tag == "failed")
+            || item.summary.to_ascii_lowercase().contains("failed")
+    };
+    let matches: Vec<&EvidenceItem> = snapshot
+        .evidence
+        .iter()
+        .filter(|item| is_failure(item))
+        .collect();
+    if matches.is_empty() {
+        return Ok(
+            "Rivora did not find failure evidence yet.\n\nTry:\nrivora ingest github --repo owner/name --workflow-runs --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
+                .to_string(),
+        );
+    }
+    let failure_evidence: Vec<EvidenceItem> = matches.into_iter().cloned().collect();
+    let summary = CrossSourceEvidenceSummary::from_evidence(&failure_evidence, None);
+    if summary.provider_count() > 1 {
+        let mut output = summary.render();
+        output = output.replace(
+            "These events occurred in the same window.\nThis may be related.\n",
+            "These failures occurred in the same window.\nThis may be related.\n",
+        );
+        return Ok(output);
+    }
+    let mut sorted = failure_evidence;
+    sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
+    let header = if sorted.iter().any(|item| item.is_github())
+        && (sorted.iter().any(|item| item.is_vercel())
+            || sorted.iter().any(|item| item.is_cloudflare()))
+    {
+        "Rivora found recent failure evidence."
+    } else if sorted.iter().any(|item| item.is_github()) {
+        "Rivora found recent GitHub workflow failures."
+    } else if sorted.iter().any(|item| item.is_vercel()) {
+        "Rivora found recent Vercel deployment failures."
+    } else {
+        "Rivora found recent Cloudflare deployment failures."
+    };
+    let mut output = format!("{header}\n");
+    for item in sorted.iter().take(5) {
+        output.push_str(&format!(
+            "\n* {}\n  {}\n  Evidence: {}",
+            item.title,
+            item.summary,
+            item.id.as_str()
+        ));
+    }
+    if let Some(first) = sorted.first() {
+        output.push_str(&format!(
+            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo infrastructure actions were taken.",
+            first.id.as_str()
+        ));
+    }
+    Ok(output)
 }
 
 fn ask_what_changed_in_github(store: &LocalMemoryStore) -> Result<String> {
@@ -1921,11 +2012,60 @@ fn ask_what_changed_in_github(store: &LocalMemoryStore) -> Result<String> {
 }
 
 fn ask_what_deployed_recently(store: &LocalMemoryStore) -> Result<String> {
-    ask_vercel_evidence(
-        store,
-        "Rivora found recent Vercel deployment evidence.",
-        EvidenceItem::is_vercel,
-    )
+    store.init()?;
+    let snapshot = store.load()?;
+    let matches: Vec<&EvidenceItem> = snapshot
+        .evidence
+        .iter()
+        .filter(|item| item.is_vercel() || item.is_cloudflare())
+        .collect();
+    if matches.is_empty() {
+        return Ok(
+            "Rivora did not find deployment evidence yet.\n\nTry:\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\nrivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
+                .to_string(),
+        );
+    }
+    let summary = CrossSourceEvidenceSummary::from_evidence(&snapshot.evidence, None);
+    let deploy_summary = CrossSourceEvidenceSummary {
+        vercel: summary.vercel,
+        cloudflare_pages: summary.cloudflare_pages,
+        cloudflare_workers: summary.cloudflare_workers,
+        github: Vec::new(),
+        git: Vec::new(),
+        has_failures: summary.has_failures,
+        has_deployments: true,
+        topic: None,
+    };
+    if deploy_summary.provider_count() > 1 {
+        return Ok(deploy_summary.render());
+    }
+    let mut sorted = matches;
+    sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
+    let header = if sorted.iter().any(|item| item.is_vercel())
+        && sorted.iter().any(|item| item.is_cloudflare())
+    {
+        "Rivora found recent deployment evidence."
+    } else if sorted.iter().any(|item| item.is_vercel()) {
+        "Rivora found recent Vercel deployment evidence."
+    } else {
+        "Rivora found recent Cloudflare deployment evidence."
+    };
+    let mut output = format!("{header}\n");
+    for item in sorted.iter().take(5) {
+        output.push_str(&format!(
+            "\n* {}\n  {}\n  Evidence: {}",
+            item.title,
+            item.summary,
+            item.id.as_str()
+        ));
+    }
+    if let Some(first) = sorted.first() {
+        output.push_str(&format!(
+            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo infrastructure actions were taken.",
+            first.id.as_str()
+        ));
+    }
+    Ok(output)
 }
 
 fn ask_what_failed_in_vercel(store: &LocalMemoryStore) -> Result<String> {
@@ -2132,7 +2272,7 @@ fn render_recall_result(result: &RecallResult) -> String {
 
 fn help_text() -> String {
     format!(
-        "Rivora local-first, evidence-backed reliability memory CLI\n\nCommands:\n* rivora demo\n* rivora demo --scenario <basic|checkout-incident|release-regression|workflow-failure>\n* rivora init\n* rivora ingest fixture --path examples/demo/evidence.json\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n* rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora ask \"what changed?\"\n* rivora ask \"what merged recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what changed in github?\"\n* rivora ask \"what changed in vercel?\"\n* rivora ask \"what changed on cloudflare?\"\n* rivora ask \"what failed in cloudflare?\"\n* rivora ask \"have we seen checkout latency before?\"\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n* rivora status\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
+        "Rivora local-first, evidence-backed reliability memory CLI\n\nCommands:\n* rivora demo\n* rivora demo --scenario <basic|checkout-incident|release-regression|workflow-failure|multi-source-release>\n* rivora init\n* rivora ingest fixture --path examples/demo/evidence.json\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n* rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora ask \"what changed?\"\n* rivora ask \"what changed recently?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"what changed on checkout?\"\n* rivora ask \"what changed across providers?\"\n* rivora ask \"what happened during the release?\"\n* rivora ask \"what changed in github?\"\n* rivora ask \"what changed in vercel?\"\n* rivora ask \"what changed on cloudflare?\"\n* rivora ask \"what failed in cloudflare?\"\n* rivora ask \"have we seen checkout deploy failures before?\"\n* rivora ask \"have we seen this before?\"\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n* rivora status\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
         remember_example()
     )
 }
@@ -2355,6 +2495,197 @@ fn compact_section(output: &str) -> String {
         .join("\n")
         .trim()
         .to_string()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrossSourceEvidenceSummary {
+    pub github: Vec<String>,
+    pub vercel: Vec<String>,
+    pub cloudflare_pages: Vec<String>,
+    pub cloudflare_workers: Vec<String>,
+    pub git: Vec<String>,
+    pub has_failures: bool,
+    pub has_deployments: bool,
+    pub topic: Option<String>,
+}
+
+impl CrossSourceEvidenceSummary {
+    pub fn from_evidence(evidence: &[EvidenceItem], topic: Option<&str>) -> Self {
+        let mut summary = Self {
+            github: Vec::new(),
+            vercel: Vec::new(),
+            cloudflare_pages: Vec::new(),
+            cloudflare_workers: Vec::new(),
+            git: Vec::new(),
+            has_failures: false,
+            has_deployments: false,
+            topic: topic.map(String::from),
+        };
+        let mut filtered: Vec<&EvidenceItem> = evidence
+            .iter()
+            .filter(|item| evidence_matches_topic(item, topic))
+            .collect();
+        filtered.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
+        for item in filtered {
+            let line = format!("{} — {}", item.title, item.summary);
+            if item.is_github() {
+                summary.github.push(line);
+                if item.kind == EvidenceKind::GitHubWorkflowFailed {
+                    summary.has_failures = true;
+                }
+            } else if item.is_vercel() {
+                summary.vercel.push(line);
+                summary.has_deployments = true;
+                if item
+                    .tags
+                    .iter()
+                    .any(|tag| tag == "failed-deploy" || tag == "failed")
+                {
+                    summary.has_failures = true;
+                }
+            } else if item.is_cloudflare_pages() {
+                summary.cloudflare_pages.push(line);
+                summary.has_deployments = true;
+                if item
+                    .tags
+                    .iter()
+                    .any(|tag| tag == "failed-deploy" || tag == "failed")
+                {
+                    summary.has_failures = true;
+                }
+            } else if item.is_cloudflare_worker() {
+                summary.cloudflare_workers.push(line);
+                summary.has_deployments = true;
+            } else {
+                summary.git.push(line);
+            }
+        }
+        summary
+    }
+
+    #[must_use]
+    pub fn provider_count(&self) -> usize {
+        [
+            !self.github.is_empty(),
+            !self.vercel.is_empty(),
+            !self.cloudflare_pages.is_empty(),
+            !self.cloudflare_workers.is_empty(),
+            !self.git.is_empty(),
+        ]
+        .iter()
+        .filter(|&&has| has)
+        .count()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.github.is_empty()
+            && self.vercel.is_empty()
+            && self.cloudflare_pages.is_empty()
+            && self.cloudflare_workers.is_empty()
+            && self.git.is_empty()
+    }
+
+    #[must_use]
+    pub fn render(&self) -> String {
+        let mut output = String::from("Recent evidence\n");
+        if !self.github.is_empty() {
+            output.push_str("\nGitHub\n");
+            for line in &self.github {
+                output.push_str(&format!("- {line}\n"));
+            }
+        }
+        if !self.vercel.is_empty() {
+            output.push_str("\nVercel\n");
+            for line in &self.vercel {
+                output.push_str(&format!("- {line}\n"));
+            }
+        }
+        if !self.cloudflare_pages.is_empty() {
+            output.push_str("\nCloudflare Pages\n");
+            for line in &self.cloudflare_pages {
+                output.push_str(&format!("- {line}\n"));
+            }
+        }
+        if !self.cloudflare_workers.is_empty() {
+            output.push_str("\nCloudflare Workers\n");
+            for line in &self.cloudflare_workers {
+                output.push_str(&format!("- {line}\n"));
+            }
+        }
+        if !self.git.is_empty() {
+            output.push_str("\nGit\n");
+            for line in &self.git {
+                output.push_str(&format!("- {line}\n"));
+            }
+        }
+        if self.provider_count() > 1 {
+            output.push_str("\nThese events occurred in the same window.\nThis may be related.\n");
+        }
+        output.push_str("\nThis may be worth remembering.\nEvidence is not memory until approved.\nNo infrastructure actions were taken.");
+        output
+    }
+}
+
+fn provider_label_for_evidence(item: &EvidenceItem) -> &'static str {
+    if item.is_github() {
+        "GitHub"
+    } else if item.is_vercel() {
+        "Vercel"
+    } else if item.is_cloudflare_pages() {
+        "Cloudflare Pages"
+    } else if item.is_cloudflare_worker() {
+        "Cloudflare Workers"
+    } else if item.kind == EvidenceKind::GitCommit
+        || item.kind == EvidenceKind::GitFileChange
+        || item.kind == EvidenceKind::GitTag
+        || item.kind == EvidenceKind::GitBranch
+        || item.kind == EvidenceKind::GitDiffSummary
+    {
+        "Git"
+    } else {
+        "Unknown"
+    }
+}
+
+fn evidence_status_label(item: &EvidenceItem) -> &'static str {
+    if item
+        .tags
+        .iter()
+        .any(|tag| tag == "failed-deploy" || tag == "failed")
+        || item.kind == EvidenceKind::GitHubWorkflowFailed
+    {
+        "Failed"
+    } else if item.kind == EvidenceKind::GitHubWorkflowSucceeded
+        || item.kind == EvidenceKind::GitHubPullRequestMerged
+    {
+        "Successful"
+    } else if item.is_vercel() || item.is_cloudflare() {
+        match item.tags.iter().find(|tag| {
+            **tag == "completed"
+                || **tag == "failed"
+                || **tag == "failed-deploy"
+                || **tag == "building"
+        }) {
+            Some(tag) => match tag.as_str() {
+                "completed" => "Successful",
+                "failed" | "failed-deploy" => "Failed",
+                "building" => "In progress",
+                _ => "Unknown",
+            },
+            None => {
+                if item.summary.to_ascii_lowercase().contains("failed") {
+                    "Failed"
+                } else if item.summary.to_ascii_lowercase().contains("completed") {
+                    "Successful"
+                } else {
+                    "Unknown"
+                }
+            }
+        }
+    } else {
+        "Unknown"
+    }
 }
 
 fn init_array_file(path: &Path) -> Result<()> {
@@ -3148,7 +3479,8 @@ mod tests {
         let output = run(["ask", "what changed?"], &store.root).unwrap();
 
         assert!(output.contains("PR #128: Reduce checkout worker concurrency"));
-        assert!(output.contains("rivora remember --from-evidence github:pr:demo/checkout:128"));
+        assert!(output.contains("This may be worth remembering."));
+        assert!(output.contains("Evidence is not memory until approved."));
     }
 
     #[test]
@@ -3515,7 +3847,7 @@ mod tests {
 
         let output = run(["ask", "what changed in checkout?"], &store.root).unwrap();
 
-        assert!(output.contains("Rivora found recent evidence."));
+        assert!(output.contains("Rivora found recent GitHub evidence."));
         assert!(output.contains("Reduce checkout worker concurrency"));
     }
 
@@ -3598,5 +3930,672 @@ mod tests {
             parsed,
             Command::Slack(SlackCommand::Doctor(SlackDoctorOptions { live: true }))
         ));
+    }
+
+    fn multi_source_fixture_path() -> PathBuf {
+        demo_fixture_path(DemoScenario::MultiSourceRelease)
+    }
+
+    #[test]
+    fn multi_source_fixture_ingests_all_five_provider_types() {
+        let (_temp, store) = temp_store();
+        let output = run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+        let snapshot = store.load().unwrap();
+
+        assert_eq!(snapshot.evidence.len(), 5);
+        assert!(output.contains("Rivora ingested fixture evidence."));
+        assert!(output.contains("New evidence items: 5"));
+
+        let has_github_pr = snapshot
+            .evidence
+            .iter()
+            .any(|item| item.kind == EvidenceKind::GitHubPullRequestMerged);
+        let has_github_workflow = snapshot
+            .evidence
+            .iter()
+            .any(|item| item.kind == EvidenceKind::GitHubWorkflowFailed);
+        let has_vercel = snapshot.evidence.iter().any(|item| item.is_vercel());
+        let has_cf_pages = snapshot
+            .evidence
+            .iter()
+            .any(|item| item.is_cloudflare_pages());
+        let has_cf_worker = snapshot
+            .evidence
+            .iter()
+            .any(|item| item.is_cloudflare_worker());
+
+        assert!(has_github_pr, "missing GitHub PR evidence");
+        assert!(has_github_workflow, "missing GitHub workflow evidence");
+        assert!(has_vercel, "missing Vercel evidence");
+        assert!(has_cf_pages, "missing Cloudflare Pages evidence");
+        assert!(has_cf_worker, "missing Cloudflare Worker evidence");
+    }
+
+    #[test]
+    fn multi_source_fixture_deduplicates_across_repeated_ingests() {
+        let (_temp, store) = temp_store();
+        let path = multi_source_fixture_path();
+        let path_str = path.to_str().unwrap();
+
+        run(["ingest", "fixture", "--path", path_str], &store.root).unwrap();
+        let output = run(["ingest", "fixture", "--path", path_str], &store.root).unwrap();
+        let snapshot = store.load().unwrap();
+
+        assert_eq!(snapshot.evidence.len(), 5);
+        assert!(output.contains("New evidence items: 0"));
+    }
+
+    #[test]
+    fn ask_what_changed_returns_multiple_providers_for_multi_source() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["ask", "what changed?"], &store.root).unwrap();
+
+        assert!(
+            output.contains("GitHub"),
+            "output missing GitHub group: {output}"
+        );
+        assert!(
+            output.contains("Vercel"),
+            "output missing Vercel group: {output}"
+        );
+        assert!(
+            output.contains("Cloudflare Pages"),
+            "output missing Cloudflare Pages group: {output}"
+        );
+        assert!(
+            output.contains("Cloudflare Workers"),
+            "output missing Cloudflare Workers group: {output}"
+        );
+        assert!(
+            output.contains("These events occurred in the same window."),
+            "output missing cross-source context: {output}"
+        );
+        assert!(
+            output.contains("Evidence is not memory until approved."),
+            "output missing evidence/memory distinction: {output}"
+        );
+    }
+
+    #[test]
+    fn ask_what_deployed_recently_includes_vercel_and_cloudflare() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["ask", "what deployed recently?"], &store.root).unwrap();
+
+        assert!(output.contains("Vercel"), "output missing Vercel: {output}");
+        assert!(
+            output.contains("Cloudflare"),
+            "output missing Cloudflare: {output}"
+        );
+        assert!(!output_contains_infrastructure_action(&output));
+    }
+
+    #[test]
+    fn ask_what_failed_recently_includes_failed_workflow_and_deploy_evidence() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["ask", "what failed recently?"], &store.root).unwrap();
+
+        assert!(
+            output.contains("Workflow failed: checkout smoke test"),
+            "output missing failed workflow: {output}"
+        );
+        assert!(
+            output.contains("Cloudflare Pages preview deployment for checkout-web failed"),
+            "output missing failed Cloudflare Pages deploy: {output}"
+        );
+        assert!(
+            output.contains("No infrastructure actions were taken."),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn remember_from_evidence_works_for_each_provider_type() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let evidence_ids = [
+            "github:pr:demo/multi-source-release:142",
+            "github:workflow:demo/multi-source-release:1042",
+            "vercel:deployment:demo/multi-source-release:deploy-checkout-web-001",
+            "cloudflare:pages-deployment:demo/multi-source-release:cf-pages-checkout-web-001",
+            "cloudflare:worker-deployment:demo/multi-source-release:cf-worker-checkout-001",
+        ];
+
+        for evidence_id in &evidence_ids {
+            let output = run(["remember", "--from-evidence", evidence_id], &store.root).unwrap();
+            assert!(
+                output.contains("Memory candidate created"),
+                "remember failed for {evidence_id}: {output}"
+            );
+            assert!(output.contains("Status: Candidate"), "{output}");
+            assert!(output.contains("No action was taken."), "{output}");
+        }
+
+        let snapshot = store.load().unwrap();
+        assert_eq!(snapshot.memories.len(), 5);
+    }
+
+    #[test]
+    fn approved_memory_can_be_recalled_after_feedback() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        run(
+            [
+                "remember",
+                "--from-evidence",
+                "github:pr:demo/multi-source-release:142",
+            ],
+            &store.root,
+        )
+        .unwrap();
+        let snapshot = store.load().unwrap();
+        let memory_id = snapshot.memories[0].id.as_str().to_string();
+
+        run(["feedback", &memory_id, "approve"], &store.root).unwrap();
+
+        let output = run(
+            ["ask", "have we seen checkout release before?"],
+            &store.root,
+        )
+        .unwrap();
+        assert!(
+            output.contains("Similar memories found:"),
+            "recall failed: {output}"
+        );
+        assert!(
+            output.contains(&memory_id),
+            "recall missing memory: {output}"
+        );
+    }
+
+    #[test]
+    fn recall_remains_evidence_backed_and_source_aware() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+        run(
+            [
+                "remember",
+                "--from-evidence",
+                "github:pr:demo/multi-source-release:142",
+                "--approve",
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["recall", "checkout", "--include-candidates"], &store.root).unwrap();
+
+        assert!(
+            output.contains("Evidence:"),
+            "recall missing evidence refs: {output}"
+        );
+        assert!(
+            !output.contains("caused"),
+            "recall should not claim causation: {output}"
+        );
+        assert!(output.contains("No action was taken."), "{output}");
+    }
+
+    #[test]
+    fn slack_dev_output_includes_provider_grouping_for_multi_source() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["slack", "dev", "--text", "what changed?"], &store.root).unwrap();
+
+        assert!(output.contains("Rivora Slack dev response"), "{output}");
+        assert!(
+            output.contains("GitHub"),
+            "Slack output missing GitHub: {output}"
+        );
+        assert!(
+            output.contains("Vercel"),
+            "Slack output missing Vercel: {output}"
+        );
+        assert!(
+            output.contains("Cloudflare"),
+            "Slack output missing Cloudflare: {output}"
+        );
+        assert!(output.contains("No Slack tokens were used."), "{output}");
+        assert!(
+            !slack_output_contains_infrastructure_action(&output),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn multi_source_outputs_never_contain_forbidden_language() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let outputs = [
+            run(["ask", "what changed?"], &store.root).unwrap(),
+            run(["ask", "what deployed recently?"], &store.root).unwrap(),
+            run(["ask", "what failed recently?"], &store.root).unwrap(),
+            run(["ask", "what happened during the release?"], &store.root).unwrap(),
+            run(["evidence", "list"], &store.root).unwrap(),
+            run(
+                [
+                    "evidence",
+                    "show",
+                    "github:pr:demo/multi-source-release:142",
+                ],
+                &store.root,
+            )
+            .unwrap(),
+            run(
+                [
+                    "slack",
+                    "dev",
+                    "--text",
+                    "have we seen checkout deploy failures before?",
+                ],
+                &store.root,
+            )
+            .unwrap(),
+        ];
+
+        for output in &outputs {
+            assert!(
+                !output_contains_infrastructure_action(output),
+                "forbidden action in: {output}"
+            );
+            let lower = output.to_ascii_lowercase();
+            assert!(
+                !lower.contains("root cause"),
+                "root cause claim in: {output}"
+            );
+            assert!(!lower.contains("diagnosed"), "diagnosis claim in: {output}");
+            assert!(!lower.contains("fixed the"), "fix claim in: {output}");
+        }
+    }
+
+    #[test]
+    fn tokens_are_not_persisted_in_multi_source_store() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+        run(
+            [
+                "remember",
+                "--from-evidence",
+                "github:pr:demo/multi-source-release:142",
+                "--approve",
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        for path in [
+            store.memories_path(),
+            store.feedback_path(),
+            store.receipts_path(),
+            store.evidence_path(),
+        ] {
+            let raw = std::fs::read_to_string(&path).unwrap();
+            for prefix in [
+                "xoxb-",
+                "xapp-",
+                "ghp_",
+                "github_pat_",
+                "VERCEL_TOKEN",
+                "CLOUDFLARE_API_TOKEN",
+            ] {
+                assert!(
+                    !raw.contains(prefix),
+                    "token leaked in {}: {raw}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn multi_source_demo_runs_end_to_end() {
+        let temp = TempDir::new().unwrap();
+        let output = run(
+            [
+                "demo",
+                "--scenario",
+                "multi-source-release",
+                "--store",
+                "multi-demo",
+            ],
+            temp.path(),
+        )
+        .unwrap();
+        let demo_store = LocalMemoryStore::new(temp.path().join("multi-demo"));
+        let snapshot = demo_store.load().unwrap();
+
+        assert!(
+            output.contains("Scenario: multi-source-release"),
+            "{output}"
+        );
+        assert_eq!(snapshot.evidence.len(), 5);
+        assert_eq!(snapshot.memories.len(), 1);
+        assert_eq!(snapshot.memories[0].status, MemoryStatus::Active);
+        assert_eq!(snapshot.feedback.len(), 1);
+        assert!(snapshot.receipts.len() >= 4);
+        assert!(output.contains("Evidence -> Memory Candidate -> Human Approval -> Recall"));
+        assert!(output.contains("No infrastructure actions were taken."));
+        assert!(!output_contains_infrastructure_action(&output));
+    }
+
+    #[test]
+    fn multi_source_demo_json_reports_correct_summary() {
+        let (_temp, store) = temp_store();
+        let output = run(
+            ["demo", "--scenario", "multi-source-release", "--json"],
+            &store.root,
+        )
+        .unwrap();
+        let json: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(json["demo"], "complete");
+        assert_eq!(json["scenario"], "multi-source-release");
+        assert_eq!(json["evidence_count"], 5);
+        assert_eq!(
+            json["selected_evidence_id"],
+            "github:pr:demo/multi-source-release:142"
+        );
+        assert_eq!(json["final_memory_status"], "active");
+        assert_eq!(json["recall_match_count"], 1);
+        assert_eq!(json["slack_dev_rendered"], true);
+        assert_eq!(
+            json["safety_summary"],
+            "No infrastructure actions were taken."
+        );
+    }
+
+    #[test]
+    fn cross_source_evidence_summary_groups_correctly() {
+        let evidence = vec![
+            EvidenceItem {
+                id: EvidenceId::new("github:pr:test:1").unwrap(),
+                kind: EvidenceKind::GitHubPullRequestMerged,
+                source: EvidenceSource::github("test"),
+                title: "PR merged".to_string(),
+                summary: "PR merged".to_string(),
+                body: String::new(),
+                service: Some("checkout".to_string()),
+                files_changed: Vec::new(),
+                timestamp: Some("2026-06-27T10:00:00Z".to_string()),
+                author: None,
+                tags: Vec::new(),
+                refs: Vec::new(),
+                confidence: 0.8,
+            },
+            EvidenceItem {
+                id: EvidenceId::new("vercel:deployment:test:1").unwrap(),
+                kind: EvidenceKind::VercelDeployment,
+                source: EvidenceSource::vercel("test"),
+                title: "Vercel deploy".to_string(),
+                summary: "Vercel deploy completed".to_string(),
+                body: String::new(),
+                service: Some("checkout".to_string()),
+                files_changed: Vec::new(),
+                timestamp: Some("2026-06-27T10:10:00Z".to_string()),
+                author: None,
+                tags: Vec::new(),
+                refs: Vec::new(),
+                confidence: 0.8,
+            },
+            EvidenceItem {
+                id: EvidenceId::new("cloudflare:pages-deployment:test:1").unwrap(),
+                kind: EvidenceKind::CloudflarePagesDeployment,
+                source: EvidenceSource::cloudflare("test"),
+                title: "CF Pages deploy".to_string(),
+                summary: "CF Pages deploy failed".to_string(),
+                body: String::new(),
+                service: Some("checkout".to_string()),
+                files_changed: Vec::new(),
+                timestamp: Some("2026-06-27T10:20:00Z".to_string()),
+                author: None,
+                tags: vec!["failed-deploy".to_string()],
+                refs: Vec::new(),
+                confidence: 0.8,
+            },
+        ];
+
+        let summary = CrossSourceEvidenceSummary::from_evidence(&evidence, Some("checkout"));
+
+        assert_eq!(summary.github.len(), 1);
+        assert_eq!(summary.vercel.len(), 1);
+        assert_eq!(summary.cloudflare_pages.len(), 1);
+        assert_eq!(summary.cloudflare_workers.len(), 0);
+        assert_eq!(summary.git.len(), 0);
+        assert_eq!(summary.provider_count(), 3);
+        assert!(summary.has_failures);
+        assert!(summary.has_deployments);
+
+        let rendered = summary.render();
+        assert!(rendered.contains("GitHub"));
+        assert!(rendered.contains("Vercel"));
+        assert!(rendered.contains("Cloudflare Pages"));
+        assert!(rendered.contains("These events occurred in the same window."));
+        assert!(rendered.contains("Evidence is not memory until approved."));
+    }
+
+    #[test]
+    fn evidence_list_shows_provider_and_status_for_multi_source() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["evidence", "list"], &store.root).unwrap();
+
+        assert!(output.contains("Local evidence: 5"));
+        assert!(
+            output.contains("Source: GitHub"),
+            "missing GitHub source: {output}"
+        );
+        assert!(
+            output.contains("Source: Vercel"),
+            "missing Vercel source: {output}"
+        );
+        assert!(
+            output.contains("Source: Cloudflare"),
+            "missing Cloudflare source: {output}"
+        );
+    }
+
+    #[test]
+    fn evidence_show_shows_provider_status_and_timestamp() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(
+            [
+                "evidence",
+                "show",
+                "vercel:deployment:demo/multi-source-release:deploy-checkout-web-001",
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        assert!(output.contains("Source: Vercel"), "{output}");
+        assert!(output.contains("Kind: Vercel deployment"), "{output}");
+        assert!(output.contains("Topic: checkout-web"), "{output}");
+        assert!(output.contains("When:"), "{output}");
+        assert!(
+            output.contains("rivora remember --from-evidence"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn ask_what_changed_across_providers_routes_to_cross_source() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["ask", "what changed across providers?"], &store.root).unwrap();
+        assert!(output.contains("GitHub"), "{output}");
+        assert!(output.contains("Vercel"), "{output}");
+        assert!(output.contains("Cloudflare"), "{output}");
+    }
+
+    #[test]
+    fn ask_what_happened_during_release_routes_to_what_changed() {
+        let (_temp, store) = temp_store();
+        run(
+            [
+                "ingest",
+                "fixture",
+                "--path",
+                multi_source_fixture_path().to_str().unwrap(),
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        let output = run(["ask", "what happened during the release?"], &store.root).unwrap();
+        assert!(
+            !output.contains("Rivora local-first"),
+            "should not route to help: {output}"
+        );
+        assert!(output.contains("Evidence"), "{output}");
+    }
+
+    #[test]
+    fn parse_ask_intent_handles_new_prompts() {
+        assert_eq!(
+            parse_ask_intent("what changed across providers?"),
+            AskIntent::WhatChanged
+        );
+        assert_eq!(
+            parse_ask_intent("what happened during the release?"),
+            AskIntent::WhatChanged
+        );
+        assert_eq!(
+            parse_ask_intent("what changed recently?"),
+            AskIntent::WhatChanged
+        );
+        assert_eq!(
+            parse_ask_intent("have we seen checkout deploy failures before?"),
+            AskIntent::Recall
+        );
     }
 }

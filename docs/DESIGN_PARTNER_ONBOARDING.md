@@ -37,7 +37,12 @@ leaves your machine.
 
 ```bash
 rivora demo --scenario checkout-incident
+rivora demo --scenario multi-source-release
 ```
+
+The `multi-source-release` scenario demonstrates cross-source evidence from
+GitHub, Vercel, Cloudflare Pages, and Cloudflare Workers in a single release
+window.
 
 ---
 
@@ -123,9 +128,15 @@ rivora feedback <memory-id> approve
 
 ```bash
 rivora ask "what changed?"
+rivora ask "what deployed recently?"
+rivora ask "what failed recently?"
+rivora ask "what happened during the release?"
 rivora ask "have we seen checkout latency before?"
+rivora ask "have we seen checkout deploy failures before?"
 rivora ask "what merged recently?"
 ```
+
+When evidence comes from multiple providers, responses are grouped by source.
 
 ---
 
@@ -173,10 +184,12 @@ workflow. Rivora reads them at runtime and does not persist them.
 A short path that exercises the full core loop plus Slack:
 
 ```bash
-rivora demo --scenario checkout-incident
+rivora demo --scenario multi-source-release
 rivora init
 rivora ingest git --repo . --limit 20
 rivora ask "what changed?"
+rivora ask "what deployed recently?"
+rivora ask "what failed recently?"
 rivora evidence list
 rivora remember --from-evidence <evidence-id>
 rivora feedback <memory-id> approve

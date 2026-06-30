@@ -21,6 +21,7 @@
 - [ADAPTIVE_MEMORY_ENGINE.md](ADAPTIVE_MEMORY_ENGINE.md) — candidate proposal and feedback
 - [CLI_MEMORY_INTERFACE.md](CLI_MEMORY_INTERFACE.md) — CLI commands
 - [EVIDENCE_CONNECTORS.md](EVIDENCE_CONNECTORS.md) — Git, GitHub, Vercel, Cloudflare, and fixture connectors
+- [PRODUCT_VALIDATION.md](PRODUCT_VALIDATION.md) — end-to-end product validation
 - [PRINCIPLES.md](PRINCIPLES.md) — product principles
 
 ## Slack

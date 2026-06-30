@@ -55,27 +55,38 @@ provider evidence connector. Supports Pages deployment evidence and Workers
 deployment evidence. Does not ingest D1, KV, R2, Queues, logs, analytics,
 WAF, or security events.
 
+### Phase 18.5 — Evidence-to-Memory Product Validation
+
+Validates and hardens the complete Rivora product loop across all evidence
+sources implemented so far: Git, GitHub, Vercel, Cloudflare Pages, and
+Cloudflare Workers. Adds a multi-source demo scenario, cross-source evidence
+grouping, improved ask/evidence/recall behavior, and comprehensive end-to-end
+validation tests. This phase proves the product works end-to-end before
+adding more provider connectors.
+
+See [PRODUCT_VALIDATION.md](PRODUCT_VALIDATION.md).
+
 ---
 
 ## Planned
 
-### Phase 18C — Render Evidence Connector
+### Phase 19 — Slack + CLI Usability Hardening
 
-Read-only evidence connector for Render deploy and service events.
-
-### Phase 18D — AWS Evidence Connector
-
-Read-only evidence connector for AWS (e.g. CloudTrail, deploy notifications).
-Scope narrowed by feedback.
-
-### Phase 19 — Kubernetes Evidence Connector
-
-Read-only evidence connector for Kubernetes events and rollouts.
+Improve Slack and CLI usability based on design partner feedback from the
+product validation phase.
 
 ### Phase 20 — Ability Proposal Runtime
 
 A runtime that proposes actions for human approval. Rivora still does not
 execute infrastructure actions; proposals are explainable and receipt-backed.
+
+### Phase 21 — Next Provider Connector
+
+The next provider connector will be chosen based on design partner feedback
+and the connector prioritization table in
+[FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md). Render, AWS, GCP, Azure,
+Kubernetes, Sentry, Datadog, and PagerDuty are deferred until the current
+product loop is validated by real usage.
 
 ---
 
