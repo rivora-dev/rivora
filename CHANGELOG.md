@@ -9,6 +9,13 @@
 
   ### Added
 
+  - Vercel evidence connector: read-only ingestion of Vercel deployment
+    evidence via the Vercel REST API (`rivora ingest vercel`)
+  - `VERCEL_TOKEN` environment variable support for Vercel connector
+    authentication
+  - Vercel-aware ask routing (`what deployed recently?`,
+    `what failed in vercel?`, `what changed in vercel?`)
+  - `FixtureVercelClient` for deterministic testing without network access
   - GitHub issue templates: bug report, feedback, evidence connector request,
     Slack setup help, and design partner report
   - Pull request template with a safety boundary checklist

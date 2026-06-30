@@ -50,29 +50,6 @@ and [FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md).
 
 ## Planned
 
-### Phase 18A — Vercel + Cloudflare Evidence Connectors
-
-Read-only evidence connectors for Vercel deployments and Cloudflare events.
-Order may change based on design partner feedback.
-
-### Phase 18B — Render Evidence Connector
-
-Read-only evidence connector for Render deploy and service events.
-
-### Phase 18C — AWS Evidence Connector
-
-Read-only evidence connector for AWS (e.g. CloudTrail, deploy notifications).
-Scope narrowed by feedback.
-
-### Phase 19 — Kubernetes Evidence Connector
-
-Read-only evidence connector for Kubernetes events and rollouts.
-
-### Phase 20 — Ability Proposal Runtime
-
-A runtime that proposes actions for human approval. Rivora still does not
-execute infrastructure actions; proposals are explainable and receipt-backed.
-
 ---
 
 ## Prioritization principles

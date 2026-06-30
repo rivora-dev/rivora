@@ -122,6 +122,27 @@ optional for public repos and never stored.
 
 ---
 
+## Vercel evidence
+
+```bash
+# Vercel deployment evidence (read-only)
+export VERCEL_TOKEN=
+rivora ingest vercel --project <project-id-or-name> --limit 20
+rivora ingest vercel --project <project-id-or-name> --team <team-id-or-slug>
+rivora ingest vercel --project <project-id-or-name> --since 7d
+```
+
+Vercel evidence ingestion uses only `GET` requests. `VERCEL_TOKEN` is required
+and never stored. No deployment, rollback, or promotion actions are taken.
+
+```bash
+rivora ask "what deployed recently?"
+rivora ask "what failed in vercel?"
+rivora ask "what changed in vercel?"
+```
+
+---
+
 ## Self-hosted Slack
 
 ```bash

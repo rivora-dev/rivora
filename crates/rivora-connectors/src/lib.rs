@@ -5,13 +5,16 @@
 //!
 //! Phase 10 added a read-only local Git connector (`git`). Phase 11 adds a
 //! read-only GitHub connector (`github`) for pull requests, issues, workflow
-//! runs, releases, and deployments.
+//! runs, releases, and deployments. Phase 18A adds a read-only Vercel
+//! connector (`vercel`) for deployment evidence.
 
 pub mod git;
 pub mod github;
+pub mod vercel;
 
 pub use git::*;
 pub use github::*;
+pub use vercel::*;
 
 use rivora_errors::{Result, RivoraError};
 use serde::{Deserialize, Serialize};
@@ -50,7 +53,7 @@ impl EvidenceId {
 ///
 /// Git kinds cover local repository history. GitHub kinds cover pull requests,
 /// issues, workflow runs, releases, and deployments ingested from the GitHub
-/// REST API.
+/// REST API. Vercel kinds cover deployments ingested from the Vercel REST API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceKind {
@@ -67,6 +70,7 @@ pub enum EvidenceKind {
     GitHubWorkflowSucceeded,
     GitHubDeployment,
     GitHubRelease,
+    VercelDeployment,
 }
 
 impl EvidenceKind {
@@ -86,6 +90,7 @@ impl EvidenceKind {
             Self::GitHubWorkflowSucceeded => "github_workflow_succeeded",
             Self::GitHubDeployment => "github_deployment",
             Self::GitHubRelease => "github_release",
+            Self::VercelDeployment => "vercel_deployment",
         }
     }
 
@@ -106,6 +111,7 @@ impl EvidenceKind {
             Self::GitHubWorkflowSucceeded => "GitHub workflow succeeded",
             Self::GitHubDeployment => "GitHub deployment",
             Self::GitHubRelease => "GitHub release",
+            Self::VercelDeployment => "Vercel deployment",
         }
     }
 
@@ -122,6 +128,11 @@ impl EvidenceKind {
                 | Self::GitHubDeployment
                 | Self::GitHubRelease
         )
+    }
+
+    #[must_use]
+    pub fn is_vercel(self) -> bool {
+        matches!(self, Self::VercelDeployment)
     }
 }
 
@@ -155,6 +166,16 @@ impl EvidenceSource {
             read_only: true,
         }
     }
+
+    #[must_use]
+    pub fn vercel(repository: impl Into<String>) -> Self {
+        Self {
+            connector: vercel::VERCEL_CONNECTOR.to_string(),
+            version: CONNECTOR_VERSION.to_string(),
+            repository: Some(repository.into()),
+            read_only: true,
+        }
+    }
 }
 
 /// Normalized, serializable evidence captured by a connector.
@@ -179,6 +200,11 @@ impl EvidenceItem {
     #[must_use]
     pub fn is_github(&self) -> bool {
         self.source.connector == github::GITHUB_CONNECTOR || self.kind.is_github()
+    }
+
+    #[must_use]
+    pub fn is_vercel(&self) -> bool {
+        self.source.connector == vercel::VERCEL_CONNECTOR || self.kind.is_vercel()
     }
 }
 
@@ -262,6 +288,7 @@ mod tests {
             "github_workflow_failed"
         );
         assert_eq!(EvidenceKind::GitHubRelease.as_str(), "github_release");
+        assert_eq!(EvidenceKind::VercelDeployment.as_str(), "vercel_deployment");
     }
 
     #[test]
@@ -275,6 +302,7 @@ mod tests {
             EvidenceKind::GitHubWorkflowFailed.label(),
             "GitHub workflow failed"
         );
+        assert_eq!(EvidenceKind::VercelDeployment.label(), "Vercel deployment");
     }
 
     #[test]
@@ -283,6 +311,14 @@ mod tests {
         assert!(EvidenceKind::GitHubWorkflowFailed.is_github());
         assert!(!EvidenceKind::GitCommit.is_github());
         assert!(!EvidenceKind::GitBranch.is_github());
+        assert!(!EvidenceKind::VercelDeployment.is_github());
+    }
+
+    #[test]
+    fn evidence_kind_is_vercel_partition_is_correct() {
+        assert!(EvidenceKind::VercelDeployment.is_vercel());
+        assert!(!EvidenceKind::GitCommit.is_vercel());
+        assert!(!EvidenceKind::GitHubDeployment.is_vercel());
     }
 
     #[test]
@@ -291,6 +327,15 @@ mod tests {
         assert_eq!(source.connector, "github");
         assert!(source.read_only);
         assert_eq!(source.repository.as_deref(), Some("owner/name"));
+    }
+
+    #[test]
+    fn evidence_source_vercel_is_read_only() {
+        let source = EvidenceSource::vercel("my-app");
+        assert_eq!(source.connector, "vercel");
+        assert!(source.read_only);
+        assert_eq!(source.repository.as_deref(), Some("my-app"));
+        assert_eq!(source.version, crate::CONNECTOR_VERSION);
     }
 
     #[test]

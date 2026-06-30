@@ -34,14 +34,17 @@ and never takes infrastructure actions.
 - `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_SIGNING_SECRET` are read
   from the environment and never stored in `.rivora/`. All Slack token values
   are redacted in diagnostic output (`rivora slack doctor`).
+- `VERCEL_TOKEN` is never stored in `.rivora/`, never printed, and redacted
+  in errors. The Vercel connector is read-only; it uses only `GET` requests
+  and never creates, rolls back, or promotes deployments.
 - Rivora does not intentionally ingest secrets. Connector evidence can include
   source-authored text such as commit messages or issue bodies, so review source
   content before ingestion and rotate any credential exposed in a source.
 
 ## Least privilege
 
-- Git and GitHub connectors are read-only. GitHub API ingestion uses only `GET`
-  requests.
+- Git, GitHub, and Vercel connectors are read-only. GitHub API ingestion uses
+  only `GET` requests. Vercel API ingestion uses only `GET` requests.
 - The Slack adapter uses minimal `app_mentions:read` and `chat:write` bot
   scopes. No channel history ingestion or workspace crawling.
 - Use `rivora slack doctor` to validate the self-hosted Slack setup without

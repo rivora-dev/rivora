@@ -41,7 +41,9 @@ next.
 
 Provider integrations should be **read-only evidence connectors first**. They
 should not mutate infrastructure, trigger deployments, roll back, or run
-remediation.
+remediation. The Vercel connector (Phase 18A) is the first provider connector;
+it ingests deployment evidence that can be turned into memory candidates
+through the feedback loop.
 
 Score each candidate on a simple 1 (low) to 3 (high) scale. Higher priority
 goes to connectors with high demand, low setup complexity, good read-only API
