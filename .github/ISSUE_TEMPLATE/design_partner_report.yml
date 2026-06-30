@@ -1,0 +1,98 @@
+name: Design partner report
+description: Structured feedback from an early design partner evaluating Rivora
+title: "[design-partner] "
+labels: ["design-partner", "feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for being a design partner. This structured report helps Rivora
+        decide what to build next.
+
+        **Do not share sensitive production details.** No production hostnames,
+        no internal incident timelines with customer data, no tokens or secrets.
+  - type: input
+    id: team_size
+    attributes:
+      label: Team size
+      description: Roughly how many engineers would use Rivora.
+    validations:
+      required: true
+  - type: textarea
+    id: stack
+    attributes:
+      label: Stack overview
+      description: High-level tools and platforms your team uses. No internal hostnames.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Current incident / deploy workflow
+      description: How your team currently handles incidents and deploys at a high level.
+    validations:
+      required: false
+  - type: textarea
+    id: evidence_sources
+    attributes:
+      label: Evidence sources used
+      description: Which Rivora connectors you tried (Git, GitHub, fixture demo).
+    validations:
+      required: false
+  - type: input
+    id: demo_scenario
+    attributes:
+      label: Demo scenario tested
+      description: e.g. checkout-incident, release-regression, workflow-failure
+    validations:
+      required: false
+  - type: dropdown
+    id: cli_tested
+    attributes:
+      label: CLI tested
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: dropdown
+    id: slack_tested
+    attributes:
+      label: Slack tested
+      options:
+        - "Yes (dev mode)"
+        - "Yes (Socket Mode)"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: useful_moments
+    attributes:
+      label: Top 3 useful moments
+      description: The moments where Rivora felt most valuable.
+    validations:
+      required: true
+  - type: textarea
+    id: confusing_moments
+    attributes:
+      label: Top 3 confusing moments
+      description: The moments where Rivora felt unclear or got in the way.
+    validations:
+      required: true
+  - type: input
+    id: next_connector
+    attributes:
+      label: Next connector you want
+      description: e.g. Vercel, Cloudflare, Render, Sentry, Datadog, PagerDuty
+    validations:
+      required: false
+  - type: dropdown
+    id: follow_up_call
+    attributes:
+      label: Open to a short follow-up call?
+      options:
+        - "Yes"
+        - "Maybe"
+        - "No"
+    validations:
+      required: true

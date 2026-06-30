@@ -1,0 +1,102 @@
+name: Bug report
+description: Report something in Rivora that is not working as expected
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report.
+
+        **Do not paste Slack tokens, GitHub tokens, secrets, private keys, or
+        sensitive production data.** Redact tokens before sharing logs or output.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did this happen?
+      description: Pick the area that best matches what you were doing.
+      options:
+        - Demo scenario
+        - CLI
+        - Git evidence ingestion
+        - GitHub evidence ingestion
+        - Slack (dev or socket)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: e.g. macOS 14.4, Ubuntu 22.04, Windows 11 (WSL2)
+    validations:
+      required: true
+  - type: input
+    id: rust_version
+    attributes:
+      label: Rust version
+      description: Output of `rustc --version` (only if you built from source)
+    validations:
+      required: false
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - cargo install --path crates/rivora-cli
+        - cargo install --git
+        - Pre-built binary
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Rivora command run
+      description: The exact command you ran (redact any tokens).
+      placeholder: "rivora demo --scenario checkout-incident"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you thought would happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: |
+        Paste relevant output here. **Redact all tokens and secrets first.**
+        Rivora redacts Slack and GitHub tokens in diagnostics, but review any
+        pasted text before submitting.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: rivora_dir
+    attributes:
+      label: Does `.rivora/` exist in your working directory?
+      description: Run `ls -la .rivora/` to check.
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps so a maintainer can recreate the issue.
+    validations:
+      required: false

@@ -1,0 +1,71 @@
+name: Evidence connector request
+description: Request a new read-only evidence connector for a provider or platform
+title: "[connector] "
+labels: ["connector-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for telling us which evidence source would help your team.
+
+        Rivora connectors are **read-only**. They ingest evidence and never
+        mutate infrastructure, trigger deployments, or run remediation.
+
+        **Do not paste tokens, secrets, private keys, or sensitive production
+        data.**
+  - type: input
+    id: provider
+    attributes:
+      label: Provider or platform
+      description: |
+        e.g. Vercel, Cloudflare, Render, AWS, GCP, Azure, Kubernetes, Datadog,
+        Sentry, PagerDuty, Linear, Jira
+    validations:
+      required: true
+  - type: textarea
+    id: evidence_wanted
+    attributes:
+      label: What evidence do you want Rivora to read?
+      description: |
+        e.g. deploy events, alert history, incident timelines, merged tickets,
+        workflow runs. Be specific about which records matter.
+    validations:
+      required: true
+  - type: textarea
+    id: questions
+    attributes:
+      label: What questions do you want Rivora to answer?
+      description: |
+        e.g. "have we seen this alert before?", "what changed around this
+        deploy?", "what did we remember last time this happened?"
+    validations:
+      required: true
+  - type: textarea
+    id: safety_constraints
+    attributes:
+      label: Required safety constraints
+      description: |
+        Anything Rivora must not do with this source. Rivora connectors are
+        read-only by default; note any extra boundaries your team needs.
+    validations:
+      required: false
+  - type: dropdown
+    id: read_only_acceptable
+    attributes:
+      label: Is read-only access acceptable?
+      description: |
+        Rivora will not write, deploy, roll back, or mutate anything through a
+        connector.
+      options:
+        - "Yes, read-only is fine"
+        - "Read-only is fine but I want to explain nuance"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Stack details, team size, or anything that helps prioritize.
+    validations:
+      required: false

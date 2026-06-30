@@ -138,7 +138,40 @@ workflow. Rivora reads them at runtime and does not persist them.
 
 ---
 
-## What to share as feedback
+## Recommended evaluation path
+
+A short path that exercises the full core loop plus Slack:
+
+```bash
+rivora demo --scenario checkout-incident
+rivora init
+rivora ingest git --repo . --limit 20
+rivora ask "what changed?"
+rivora evidence list
+rivora remember --from-evidence <evidence-id>
+rivora feedback <memory-id> approve
+rivora ask "have we seen this before?"
+rivora slack doctor
+rivora slack dev --text "what changed?"
+```
+
+This stays local and deterministic. No tokens are required for the demo, Git
+ingest, or Slack dev mode.
+
+---
+
+## Feedback loop
+
+### What to try first
+
+1. Run `rivora demo --scenario checkout-incident` to see the core loop.
+2. Run `rivora init` and ingest your own Git history.
+3. Approve one memory candidate from real evidence.
+4. Ask `rivora ask "have we seen this before?"` and see what recall surfaces.
+5. Try `rivora slack doctor` and `rivora slack dev` to feel the Slack
+   interface without connecting to a workspace.
+
+### What feedback to file
 
 We'd love to hear:
 
@@ -149,6 +182,46 @@ We'd love to hear:
 * What evidence source would be most valuable next?
 * What made you hesitate to trust Rivora?
 * What would make you use this daily?
+
+### Which issue template to use
+
+| Feedback type | Template |
+|---|---|
+| Something broken | [Bug report](https://github.com/rivora-dev/rivora/issues/new?template=bug_report.yml) |
+| General impressions | [Feedback](https://github.com/rivora-dev/rivora/issues/new?template=feedback.yml) |
+| Request a connector | [Evidence connector request](https://github.com/rivora-dev/rivora/issues/new?template=evidence_connector_request.yml) |
+| Slack trouble | [Slack setup help](https://github.com/rivora-dev/rivora/issues/new?template=slack_setup_help.yml) |
+| Structured design partner report | [Design partner report](https://github.com/rivora-dev/rivora/issues/new?template=design_partner_report.yml) |
+
+See [COMMUNITY_FEEDBACK.md](COMMUNITY_FEEDBACK.md) for discussion categories and
+[FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md) for how feedback is evaluated.
+
+### How to sanitize logs
+
+Rivora redacts Slack and GitHub tokens in diagnostic output, but review any
+text before pasting it into an issue:
+
+1. Remove any `xoxb-`, `xapp-`, `ghp_`, `gho_`, `ghu_`, `ghs_`, or `ghr_`
+   prefixed values.
+2. Remove signing secrets and private keys.
+3. Remove internal hostnames, customer identifiers, and production incident
+   timelines that include sensitive data.
+4. Replace real private repository URLs with `owner/name` placeholders.
+
+### How to report security issues privately
+
+Do not open a public issue for security vulnerabilities. Use the repository's
+[private vulnerability reporting form](https://github.com/rivora-dev/rivora/security/advisories/new).
+See [SECURITY.md](../SECURITY.md) for the full policy.
+
+### What Rivora is trying to learn from design partners
+
+* Where the demo and CLI flow confuse new users.
+* Whether "evidence vs memory" feels clear in practice.
+* Whether recall surfaces useful past situations.
+* Where Slack setup is friction-heavy.
+* Which evidence connector would be most valuable next.
+* What would make a team use Rivora weekly.
 
 ---
 

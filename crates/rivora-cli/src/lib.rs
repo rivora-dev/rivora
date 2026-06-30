@@ -2551,14 +2551,12 @@ mod tests {
 
         for document in [
             "DEMO.md",
-            "LAUNCH_DEMO_SCRIPT.md",
             "DESIGN_PARTNER_ONBOARDING.md",
             "SLACK_SELF_HOSTING.md",
             "EVIDENCE_CONNECTORS.md",
             "CLI_MEMORY_INTERFACE.md",
             "MEMORY_MODEL.md",
             "PRINCIPLES.md",
-            "LAUNCH_CHECKLIST.md",
             "../SECURITY.md",
         ] {
             assert!(
