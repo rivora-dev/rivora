@@ -39,6 +39,9 @@ community before adding provider evidence connectors. Adds GitHub issue
 templates, a pull request template, community feedback and feedback analysis
 docs, a design partner report template, and ADR 0017.
 
+See [ADR 0017](adr/0017-design-partner-feedback-before-provider-connectors.md)
+and [FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md).
+
 ### Phase 18A — Vercel Evidence Connector
 
 Read-only Vercel deployment evidence ingestion. First provider evidence
