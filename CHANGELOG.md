@@ -9,6 +9,23 @@
 
   ### Added
 
+  - Phase 18.5: evidence-to-memory product validation across Git, GitHub,
+    Vercel, Cloudflare Pages, and Cloudflare Workers
+  - `multi-source-release` demo scenario with cross-source fixture evidence
+    from five provider types
+  - `CrossSourceEvidenceSummary` helper for deterministic cross-source evidence
+    grouping by provider, timestamp, and status
+  - Cross-source ask behavior: `what changed?`, `what deployed recently?`,
+    and `what failed recently?` now group by provider when evidence comes
+    from multiple sources
+  - New ask prompts: `what changed across providers?`,
+    `what happened during the release?`,
+    `have we seen checkout deploy failures before?`
+  - Improved evidence list/show with source provider and status labels
+  - Improved memory candidate summaries that identify the provider source
+  - `docs/PRODUCT_VALIDATION.md` for end-to-end validation guidance
+  - 20+ new end-to-end validation tests covering multi-source ingest,
+    cross-source ask, recall, Slack dev, and safety
   - Cloudflare evidence connector: read-only ingestion of Cloudflare Pages and
     Workers deployment evidence via the Cloudflare REST API (`rivora ingest
     cloudflare pages`, `rivora ingest cloudflare worker`)
@@ -34,6 +51,12 @@
 
   ### Changed
 
+  - Phase 18.5: `what deployed recently?` now includes Vercel and Cloudflare
+    deployments; `what failed recently?` now includes failed workflow and
+    deployment evidence from all providers
+  - Evidence list shows source provider and status for each item
+  - Evidence show displays source, kind label, status, topic, and timestamp
+  - Memory candidate summaries from evidence now include the provider label
   - Design partner onboarding updated with a recommended evaluation path and a
     feedback loop section
   - README links to feedback and connector request templates

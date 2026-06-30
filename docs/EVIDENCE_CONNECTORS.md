@@ -296,17 +296,29 @@ data and does not require network access.
 
 ## Ask Flow
 
-`rivora ask` reads from local evidence and routes GitHub-aware prompts:
+`rivora ask` reads from local evidence and routes provider-aware prompts:
 
-- `what changed?` and `what changed in checkout?` show recent matching Git or
-  GitHub evidence.
+- `what changed?` and `what changed in checkout?` show recent matching
+  evidence. When evidence comes from multiple providers, the response is
+  grouped by source (GitHub, Vercel, Cloudflare Pages, Cloudflare Workers,
+  Git).
+- `what changed across providers?` shows cross-source grouped evidence.
+- `what happened during the release?` shows cross-source grouped evidence.
 - `what changed in github?` shows recent GitHub evidence only.
 - `what merged recently?` shows GitHub PR-merge evidence.
-- `what failed recently?` shows GitHub workflow-failure evidence.
-- `what deployed recently?` shows Vercel deployment evidence.
+- `what failed recently?` shows failure evidence from all providers (GitHub
+  workflow failures, failed Vercel deployments, failed Cloudflare
+  deployments).
+- `what deployed recently?` shows deployment evidence from Vercel and
+  Cloudflare.
 - `what changed in vercel?` and `what failed in vercel?` show Vercel evidence.
 - `what changed on cloudflare?` and `what failed in cloudflare?` show
   Cloudflare evidence.
+- `have we seen checkout deploy failures before?` routes to recall.
+
+Cross-source summaries are evidence-backed, not root-cause claims. Rivora
+says "these events occurred in the same window" and "this may be related."
+It never says "X caused Y."
 
 The CLI does not claim root cause. It suggests the explicit next step:
 

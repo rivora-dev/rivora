@@ -53,6 +53,7 @@ From a source checkout:
 cargo install --path crates/rivora-cli
 rivora demo
 rivora demo --scenario checkout-incident
+rivora demo --scenario multi-source-release
 ```
 
 `rivora demo` uses deterministic fixture data embedded in the CLI binary. It
@@ -73,6 +74,7 @@ Other local and deterministic scenarios:
 ```bash
 rivora demo --scenario release-regression
 rivora demo --scenario workflow-failure
+rivora demo --scenario multi-source-release
 ```
 
 ---
@@ -85,6 +87,7 @@ rivora demo --scenario workflow-failure
 | `checkout-incident` | Checkout latency, PR merge, human approval |
 | `release-regression` | Release rollback, incident response |
 | `workflow-failure` | CI/CD workflow failure and learning |
+| `multi-source-release` | Cross-source evidence from GitHub, Vercel, Cloudflare |
 
 All scenarios use synthetic fixture data. No tokens, no network, no data
 leaves your machine.
@@ -182,6 +185,26 @@ app. Tokens are read from the environment and never stored in `.rivora/`.
 ```
 
 See [docs/SLACK_SELF_HOSTING.md](docs/SLACK_SELF_HOSTING.md).
+
+---
+
+## Cross-source evidence
+
+When evidence comes from multiple providers, Rivora groups responses by source:
+
+```bash
+rivora ask "what changed?"
+rivora ask "what deployed recently?"
+rivora ask "what failed recently?"
+rivora ask "what happened during the release?"
+```
+
+Cross-source summaries are evidence-backed, not root-cause claims. Rivora
+never says "X caused Y." It says "these events occurred in the same window"
+and "this may be related."
+
+See [docs/PRODUCT_VALIDATION.md](docs/PRODUCT_VALIDATION.md) for the full
+validation flow.
 
 ---
 
