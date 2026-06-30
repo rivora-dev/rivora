@@ -1,0 +1,90 @@
+[
+  {
+    "id": "github:pr:demo/checkout:128",
+    "kind": "git_hub_pull_request_merged",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/checkout",
+      "read_only": true
+    },
+    "title": "PR #128: Reduce checkout worker concurrency",
+    "summary": "PR #128 merged: \"Reduce checkout worker concurrency\" after checkout latency increased during inventory sync.",
+    "body": "Repository: demo/checkout\nAuthor: ada\nLabels: service:checkout-api, inventory, latency\nChanged files: services/checkout-api/config/workers.toml, services/inventory-sync/src/worker.rs\nLinked issue: #120\nOutcome note: the team reduced inventory worker concurrency and watched checkout p99 latency recover.",
+    "service": "checkout-api",
+    "files_changed": [
+      "services/checkout-api/config/workers.toml",
+      "services/inventory-sync/src/worker.rs"
+    ],
+    "timestamp": "2026-06-27T10:00:00Z",
+    "author": "ada",
+    "tags": [
+      "checkout",
+      "checkout-api",
+      "inventory",
+      "latency"
+    ],
+    "refs": [
+      "https://github.example/demo/checkout/pull/128",
+      "issue:#120"
+    ],
+    "confidence": 0.88
+  },
+  {
+    "id": "github:workflow:demo/checkout:1001",
+    "kind": "git_hub_workflow_failed",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/checkout",
+      "read_only": true
+    },
+    "title": "Workflow failed: checkout latency smoke test",
+    "summary": "Workflow checkout latency smoke test failed on main after inventory sync changes.",
+    "body": "Workflow: checkout latency smoke test\nConclusion: failure\nBranch: main\nCommit: abcdef1234567890\nEvent: push\nThis is evidence of a failed validation run, not a root-cause conclusion.",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-27T08:05:00Z",
+    "author": "ada",
+    "tags": [
+      "checkout",
+      "checkout-api",
+      "latency",
+      "workflow"
+    ],
+    "refs": [
+      "https://github.example/demo/checkout/actions/runs/1001"
+    ],
+    "confidence": 0.82
+  },
+  {
+    "id": "git:commit:demo-checkout-worker-config",
+    "kind": "git_commit",
+    "source": {
+      "connector": "local-git",
+      "version": "0.1.0",
+      "repository": "examples/demo",
+      "read_only": true
+    },
+    "title": "Git commit demo-checkout-worker-config",
+    "summary": "Local commit changed checkout worker configuration for inventory synchronization.",
+    "body": "Commit demo-checkout-worker-config touched services/checkout-api/config/workers.toml and docs/runbooks/checkout-latency.md.",
+    "service": "checkout-api",
+    "files_changed": [
+      "services/checkout-api/config/workers.toml",
+      "docs/runbooks/checkout-latency.md"
+    ],
+    "timestamp": "2026-06-27T07:45:00Z",
+    "author": "morgan",
+    "tags": [
+      "checkout",
+      "checkout-api",
+      "inventory",
+      "latency"
+    ],
+    "refs": [
+      "commit:demo-checkout-worker-config"
+    ],
+    "confidence": 0.76
+  }
+]

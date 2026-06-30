@@ -1,0 +1,23 @@
+---
+source: crates/rivora-graph/tests/golden_tests.rs
+assertion_line: 72
+expression: output
+---
+{
+  "id": "graph-fixture-empty",
+  "metadata": {
+    "tags": [],
+    "labels": {},
+    "organization_id": null
+  },
+  "nodes": [],
+  "edges": [],
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "updated_at": null
+  },
+  "version": {
+    "schema": "1.0.0",
+    "graph": 1
+  }
+}

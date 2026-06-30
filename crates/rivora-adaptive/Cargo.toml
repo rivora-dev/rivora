@@ -1,0 +1,22 @@
+[package]
+name = "rivora-adaptive"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Pure adaptive memory engine for Open Rivora"
+
+[dependencies]
+rivora-errors = { workspace = true }
+rivora-types = { workspace = true }
+rivora-memory = { workspace = true }
+rivora-receipts = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+rivora-testing = { workspace = true }

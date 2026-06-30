@@ -1,0 +1,79 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "confidence": {
+    "contributing_factors": [],
+    "level": "low",
+    "limiting_factors": [],
+    "method": "memory-candidate-extraction-v1",
+    "score": 0.3,
+    "uncertainty": "Single observation window; pattern has not yet been confirmed across multiple incidents"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.3,
+      "description": "payment-service p99 latency spiked after the last 3 deployments to production",
+      "kind": "observation",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:00:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Observed latency pattern"
+    }
+  ],
+  "id": "receipt_fixture_memory_candidate_1",
+  "kind": "memory_candidate_created",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": null,
+    "inference": null,
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.2,
+      "explanation": "Observed a recurring correlation between production deployments and payment-service latency spikes",
+      "input_evidence": [],
+      "output_conclusion": "Memory candidate created for the deploy-induced latency pattern",
+      "step": 1,
+      "title": "Extract memory candidate"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Memory candidate is read-only and requires human approval before being applied",
+    "level": "low",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": false
+  },
+  "status": "draft",
+  "subject": {
+    "display_name": "Memory candidate: payment-service deploy latency pattern",
+    "kind": "memory",
+    "reference": "mem-candidate-payment-latency-1"
+  },
+  "suggested_actions": [],
+  "summary": {
+    "description": "A new memory candidate was extracted from observed deployment and latency correlations",
+    "title": "Memory candidate created"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

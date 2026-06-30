@@ -1,0 +1,79 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "confidence": {
+    "contributing_factors": [],
+    "level": "medium",
+    "limiting_factors": [],
+    "method": "human-approval-v1",
+    "score": 0.6,
+    "uncertainty": "Approved by a single engineer; cross-team review has not yet been performed"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.5,
+      "description": "On-call engineer approved the memory candidate after reviewing corroborating incidents",
+      "kind": "annotation",
+      "metadata": null,
+      "observed_at": "2026-06-25T13:00:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Human approval of memory"
+    }
+  ],
+  "id": "receipt_fixture_memory_approved_1",
+  "kind": "memory_approved",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": null,
+    "inference": null,
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.4,
+      "explanation": "Engineer reviewed the memory candidate against three historical incidents and confirmed the pattern",
+      "input_evidence": [],
+      "output_conclusion": "Memory candidate promoted to an approved memory",
+      "step": 1,
+      "title": "Record human approval"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Approved memory is applied as read-only context for future recommendations",
+    "level": "low",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": false
+  },
+  "status": "valid",
+  "subject": {
+    "display_name": "Approved memory: payment-service deploy latency pattern",
+    "kind": "memory",
+    "reference": "mem-payment-latency-1"
+  },
+  "suggested_actions": [],
+  "summary": {
+    "description": "A memory candidate was approved by an engineer and promoted to an active memory",
+    "title": "Memory approved by human"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

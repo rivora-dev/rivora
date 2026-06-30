@@ -1,0 +1,22 @@
+[package]
+name = "rivora-slack"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Pure Slack reliability memory surface for Open Rivora"
+
+[dependencies]
+rivora-errors = { workspace = true }
+rivora-types = { workspace = true }
+rivora-memory = { workspace = true }
+rivora-receipts = { workspace = true }
+rivora-adaptive = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+rivora-testing = { workspace = true }

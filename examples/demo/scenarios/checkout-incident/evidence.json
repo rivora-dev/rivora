@@ -1,0 +1,85 @@
+[
+  {
+    "id": "github:pr:demo/checkout-incident:128",
+    "kind": "git_hub_pull_request_merged",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/checkout-incident",
+      "read_only": true
+    },
+    "title": "PR #128 merged: Reduce inventory worker concurrency",
+    "summary": "PR #128 merged to reduce inventory worker concurrency; the team later observed checkout latency return to its prior range.",
+    "body": "The PR changed checkout-api worker configuration after a latency spike was recorded. The timing may be relevant, but this fixture does not establish root cause.",
+    "service": "checkout-api",
+    "files_changed": [
+      "services/checkout-api/config/workers.toml",
+      "services/inventory-sync/src/worker.rs"
+    ],
+    "timestamp": "2026-06-27T11:20:00Z",
+    "author": "ada",
+    "tags": ["checkout", "checkout-api", "inventory", "latency"],
+    "refs": ["https://github.example/demo/checkout-incident/pull/128"],
+    "confidence": 0.88
+  },
+  {
+    "id": "github:workflow:demo/checkout-incident:1001",
+    "kind": "git_hub_workflow_failed",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/checkout-incident",
+      "read_only": true
+    },
+    "title": "Workflow failed: checkout latency regression check",
+    "summary": "The checkout latency regression check failed after inventory-related changes reached main.",
+    "body": "Workflow: checkout latency regression check\nConclusion: failure\nBranch: main\nCommit: c0ffee128\nThis failed check is evidence only and does not identify a cause.",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:35:00Z",
+    "author": "github-actions",
+    "tags": ["checkout", "checkout-api", "inventory", "latency", "workflow"],
+    "refs": ["https://github.example/demo/checkout-incident/actions/runs/1001"],
+    "confidence": 0.84
+  },
+  {
+    "id": "github:deployment:demo/checkout-incident:1800",
+    "kind": "git_hub_deployment",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/checkout-incident",
+      "read_only": true
+    },
+    "title": "Checkout API release candidate v1.8.0 observed",
+    "summary": "Deployment evidence records checkout-api v1.8.0 in the production environment before the latency report.",
+    "body": "Environment: production\nRef: v1.8.0\nStatus: observed\nThis read-only record provides chronology only.",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-27T09:45:00Z",
+    "author": "release-bot",
+    "tags": ["checkout", "checkout-api", "release", "v1.8.0"],
+    "refs": ["https://github.example/demo/checkout-incident/deployments/1800"],
+    "confidence": 0.9
+  },
+  {
+    "id": "github:issue:demo/checkout-incident:120",
+    "kind": "git_hub_issue",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/checkout-incident",
+      "read_only": true
+    },
+    "title": "Incident note #120: checkout-api p95 latency spike",
+    "summary": "An incident note records increased checkout-api p95 latency after an inventory-related release.",
+    "body": "The note links the timing of the release and latency spike for review. It does not claim that the release caused the spike.",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:10:00Z",
+    "author": "morgan",
+    "tags": ["checkout", "checkout-api", "incident-note", "inventory", "latency"],
+    "refs": ["https://github.example/demo/checkout-incident/issues/120"],
+    "confidence": 0.82
+  }
+]

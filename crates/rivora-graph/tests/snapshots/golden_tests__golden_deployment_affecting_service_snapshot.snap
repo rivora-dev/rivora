@@ -1,0 +1,134 @@
+---
+source: crates/rivora-graph/tests/golden_tests.rs
+assertion_line: 105
+expression: output
+---
+{
+  "id": "graph-fixture-deployment-service",
+  "metadata": {
+    "tags": [],
+    "labels": {},
+    "organization_id": null
+  },
+  "nodes": [
+    {
+      "id": "dep-v2.1.0",
+      "kind": "deployment",
+      "display_name": "payment-service-v2.1.0",
+      "description": null,
+      "labels": {},
+      "metadata": {
+        "labels": {}
+      },
+      "provenance": {
+        "source": "fixture-connector",
+        "source_kind": "test",
+        "source_version": "0.1.0",
+        "observed_at": "2026-06-25T12:00:00Z",
+        "receipt_id": null,
+        "raw_ref": null,
+        "connector_ref": null,
+        "inference_ref": null,
+        "ability_ref": null
+      },
+      "confidence": {
+        "score": 0.8,
+        "level": "high",
+        "explanation": "Fixture confidence",
+        "contributing_factors": [],
+        "limiting_factors": []
+      },
+      "timestamps": {
+        "created_at": "2026-06-25T12:00:00Z",
+        "updated_at": null
+      },
+      "version": {
+        "schema": "1.0.0",
+        "graph": 1
+      }
+    },
+    {
+      "id": "svc-payment",
+      "kind": "service",
+      "display_name": "payment-service",
+      "description": null,
+      "labels": {},
+      "metadata": {
+        "labels": {}
+      },
+      "provenance": {
+        "source": "fixture-connector",
+        "source_kind": "test",
+        "source_version": "0.1.0",
+        "observed_at": "2026-06-25T12:00:00Z",
+        "receipt_id": null,
+        "raw_ref": null,
+        "connector_ref": null,
+        "inference_ref": null,
+        "ability_ref": null
+      },
+      "confidence": {
+        "score": 0.8,
+        "level": "high",
+        "explanation": "Fixture confidence",
+        "contributing_factors": [],
+        "limiting_factors": []
+      },
+      "timestamps": {
+        "created_at": "2026-06-25T12:00:00Z",
+        "updated_at": null
+      },
+      "version": {
+        "schema": "1.0.0",
+        "graph": 1
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-dep-deployed-to-svc",
+      "kind": "deployed_to",
+      "from": "dep-v2.1.0",
+      "to": "svc-payment",
+      "display_name": null,
+      "labels": {},
+      "metadata": {
+        "labels": {}
+      },
+      "provenance": {
+        "source": "fixture-connector",
+        "source_kind": "test",
+        "source_version": "0.1.0",
+        "observed_at": "2026-06-25T12:00:00Z",
+        "receipt_id": null,
+        "raw_ref": null,
+        "connector_ref": null,
+        "inference_ref": null,
+        "ability_ref": null
+      },
+      "confidence": {
+        "score": 0.8,
+        "level": "high",
+        "explanation": "Fixture confidence",
+        "contributing_factors": [],
+        "limiting_factors": []
+      },
+      "timestamps": {
+        "created_at": "2026-06-25T12:00:00Z",
+        "updated_at": null
+      },
+      "version": {
+        "schema": "1.0.0",
+        "graph": 1
+      }
+    }
+  ],
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "updated_at": null
+  },
+  "version": {
+    "schema": "1.0.0",
+    "graph": 1
+  }
+}

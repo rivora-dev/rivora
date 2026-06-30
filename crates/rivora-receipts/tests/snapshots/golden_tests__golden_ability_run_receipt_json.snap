@@ -1,0 +1,136 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "ability": {
+    "id": "deployment-validation-ability",
+    "status": "approved",
+    "version": "1.2.0"
+  },
+  "confidence": {
+    "contributing_factors": [],
+    "level": "high",
+    "limiting_factors": [],
+    "method": "ability-validation-v1",
+    "score": 0.88,
+    "uncertainty": "Ability logic validated but external dependencies not verified"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.5,
+      "description": "Current replica count and resource limits recorded for api-gateway",
+      "kind": "observation",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:00:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Service configuration observed"
+    },
+    {
+      "confidence_contribution": 0.5,
+      "description": "Deployment configuration matches expected schema for ability validation",
+      "kind": "configuration",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:01:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Deployment configuration"
+    }
+  ],
+  "id": "receipt_fixture_ability_run_1",
+  "inference": {
+    "model": "claude-opus-4",
+    "model_version": "20250101",
+    "provider": "anthropic",
+    "request_id": "req_fixture_ability_run_1",
+    "temperature": 0.0
+  },
+  "kind": "ability_run",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": {
+      "id": "deployment-validation-ability",
+      "status": "approved",
+      "version": "1.2.0"
+    },
+    "inference": {
+      "model": "claude-opus-4",
+      "model_version": "20250101",
+      "provider": "anthropic",
+      "request_id": "req_fixture_ability_run_1",
+      "temperature": 0.0
+    },
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.35,
+      "explanation": "Retrieved current replica count and resource limits for api-gateway",
+      "input_evidence": [],
+      "output_conclusion": "Configuration loaded successfully",
+      "step": 1,
+      "title": "Load current configuration"
+    },
+    {
+      "confidence_impact": 0.3,
+      "explanation": "Configuration matches the expected deployment validation schema",
+      "input_evidence": [],
+      "output_conclusion": "Configuration is valid",
+      "step": 2,
+      "title": "Validate against schema"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Read-only ability run; no mutations",
+    "level": "low",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": false
+  },
+  "status": "valid",
+  "subject": {
+    "display_name": "api-gateway",
+    "kind": "service",
+    "reference": "svc-api-gateway"
+  },
+  "suggested_actions": [
+    {
+      "approval": "not_required",
+      "description": "Display the full ability run output and validation results",
+      "expected_outcome": "Engineer can review the ability execution details",
+      "human_approval": null,
+      "kind": "read",
+      "mutates_infrastructure": false,
+      "read_only": true,
+      "risk_level": "low",
+      "rollback_strategy": null,
+      "scope": [],
+      "title": "View ability run results"
+    }
+  ],
+  "summary": {
+    "description": "Deployment validation ability completed successfully for api-gateway",
+    "title": "Ability run completed"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

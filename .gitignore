@@ -1,0 +1,14 @@
+# Build artifacts
+/target/
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local

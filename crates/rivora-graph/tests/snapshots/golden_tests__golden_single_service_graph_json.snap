@@ -1,0 +1,60 @@
+---
+source: crates/rivora-graph/tests/golden_tests.rs
+assertion_line: 21
+expression: output
+---
+{
+  "id": "graph-fixture-single-service",
+  "metadata": {
+    "tags": [],
+    "labels": {},
+    "organization_id": null
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "updated_at": null
+  },
+  "version": {
+    "schema": "1.0.0",
+    "graph": 1
+  },
+  "nodes": {
+    "svc-api-gateway": {
+      "id": "svc-api-gateway",
+      "kind": "service",
+      "display_name": "api-gateway",
+      "description": null,
+      "labels": {},
+      "metadata": {
+        "labels": {}
+      },
+      "provenance": {
+        "source": "fixture-connector",
+        "source_kind": "test",
+        "source_version": "0.1.0",
+        "observed_at": "2026-06-25T12:00:00Z",
+        "receipt_id": null,
+        "raw_ref": null,
+        "connector_ref": null,
+        "inference_ref": null,
+        "ability_ref": null
+      },
+      "confidence": {
+        "score": 0.8,
+        "level": "high",
+        "explanation": "Fixture confidence",
+        "contributing_factors": [],
+        "limiting_factors": []
+      },
+      "timestamps": {
+        "created_at": "2026-06-25T12:00:00Z",
+        "updated_at": null
+      },
+      "version": {
+        "schema": "1.0.0",
+        "graph": 1
+      }
+    }
+  },
+  "edges": {}
+}

@@ -1,0 +1,59 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+assertion_line: 116
+expression: output
+---
+## deployment_review: Deployment review passed
+
+- **ID:** `receipt_fixture_deployment_1`
+- **Status:** valid
+- **Subject:** payment-service-v2.1.0 (deployment: dep-v2.1.0)
+
+Deployment v2.1.0 passed all health checks and is stable
+
+### Confidence
+
+- **Score:** 0.85 (high)
+- **Method:** deployment-health-check-v1
+- **Uncertainty:** Health checks passed but long-term stability not yet observed
+
+### Evidence
+
+1. **Deployment v2.1.0** (deployment)
+   - Observed: 2026-06-25T12:00:00Z
+   - payment-service v2.1.0 deployed to production at 12:00 UTC
+2. **Health check metrics** (metric)
+   - Observed: 2026-06-25T12:02:00Z
+   - All health checks passed within 2 minutes of deployment
+
+### Reasoning
+
+1. **Verify deployment success**
+   - Deployment v2.1.0 completed without errors at 12:00 UTC
+   - Conclusion: Deployment completed successfully
+2. **Validate health checks**
+   - All health checks passed within 2 minutes of deployment
+   - Conclusion: Deployment is healthy and stable
+
+### Risk
+
+- **Level:** low
+- **Description:** Deployment is stable; no issues detected
+
+### Suggested Actions
+
+1. **View deployment details** (read)
+   - Expected outcome: Engineer can review deployment configuration and rollout status
+   - Approval: not_required
+   - Read-only: true
+   - Mutates infrastructure: false
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+- **Ability:** deployment-validator v1.0.0 (approved)
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

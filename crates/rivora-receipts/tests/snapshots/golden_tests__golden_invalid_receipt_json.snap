@@ -1,0 +1,65 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "confidence": {
+    "contributing_factors": [],
+    "level": "medium",
+    "limiting_factors": [],
+    "method": "placeholder-v1",
+    "score": 0.5,
+    "uncertainty": "Placeholder uncertainty"
+  },
+  "evidence": [],
+  "id": "receipt_fixture_invalid_1",
+  "kind": "observation",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": null,
+    "inference": null,
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.0,
+      "explanation": "Placeholder reasoning for invalid receipt",
+      "input_evidence": [],
+      "output_conclusion": "Placeholder conclusion",
+      "step": 1,
+      "title": "Placeholder step"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Placeholder risk",
+    "level": "low",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": false
+  },
+  "status": "invalid",
+  "subject": {
+    "display_name": "invalid-service",
+    "kind": "service",
+    "reference": "svc-invalid"
+  },
+  "suggested_actions": [],
+  "summary": {
+    "description": "This receipt has empty evidence and should fail validation",
+    "title": "Invalid receipt fixture"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

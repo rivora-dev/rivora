@@ -1,0 +1,66 @@
+---
+source: crates/rivora-memory/tests/golden_tests.rs
+assertion_line: 71
+expression: output
+---
+{
+  "id": "mem-fixture-expired",
+  "kind": "operational_note",
+  "scope": "service",
+  "status": "expired",
+  "title": "Expired operational note",
+  "body": "This operational note about a temporary override has expired.",
+  "subject_refs": [
+    "svc-payment"
+  ],
+  "graph_node_ids": [],
+  "graph_edge_ids": [],
+  "receipt_ids": [],
+  "source": "system",
+  "provenance": {
+    "source": "fixture-source",
+    "source_version": "0.1.0",
+    "observed_at": "2026-06-25T12:00:00Z",
+    "learned_at": "2026-06-25T12:00:00Z",
+    "graph_id": null,
+    "graph_node_ids": [],
+    "graph_edge_ids": [],
+    "receipt_id": null,
+    "connector_ref": null,
+    "inference_ref": null,
+    "ability_ref": null,
+    "human_ref": null,
+    "raw_ref": null
+  },
+  "confidence": {
+    "score": 0.8,
+    "level": "high",
+    "explanation": "Fixture confidence",
+    "contributing_factors": [],
+    "limiting_factors": [],
+    "last_evaluated_at": "2026-06-25T12:00:00Z"
+  },
+  "retention": {
+    "policy": "time_bound",
+    "expires_at": "2026-06-20T12:00:00Z",
+    "review_after": null,
+    "max_age_days": null,
+    "decay": "linear",
+    "reason": "time-bound retention"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "updated_at": null
+  },
+  "version": {
+    "schema": "1.0.0",
+    "memory": 1
+  },
+  "labels": {},
+  "metadata": {
+    "tags": [],
+    "labels": {},
+    "organization_id": null
+  },
+  "feedback_ids": []
+}

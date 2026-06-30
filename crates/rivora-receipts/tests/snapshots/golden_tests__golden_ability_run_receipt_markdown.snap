@@ -1,0 +1,59 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+## ability_run: Ability run completed
+
+- **ID:** `receipt_fixture_ability_run_1`
+- **Status:** valid
+- **Subject:** api-gateway (service: svc-api-gateway)
+
+Deployment validation ability completed successfully for api-gateway
+
+### Confidence
+
+- **Score:** 0.88 (high)
+- **Method:** ability-validation-v1
+- **Uncertainty:** Ability logic validated but external dependencies not verified
+
+### Evidence
+
+1. **Service configuration observed** (observation)
+   - Observed: 2026-06-25T12:00:00Z
+   - Current replica count and resource limits recorded for api-gateway
+2. **Deployment configuration** (configuration)
+   - Observed: 2026-06-25T12:01:00Z
+   - Deployment configuration matches expected schema for ability validation
+
+### Reasoning
+
+1. **Load current configuration**
+   - Retrieved current replica count and resource limits for api-gateway
+   - Conclusion: Configuration loaded successfully
+2. **Validate against schema**
+   - Configuration matches the expected deployment validation schema
+   - Conclusion: Configuration is valid
+
+### Risk
+
+- **Level:** low
+- **Description:** Read-only ability run; no mutations
+
+### Suggested Actions
+
+1. **View ability run results** (read)
+   - Expected outcome: Engineer can review the ability execution details
+   - Approval: not_required
+   - Read-only: true
+   - Mutates infrastructure: false
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+- **Inference:** anthropic / claude-opus-4 (temp=0)
+- **Ability:** deployment-validation-ability v1.2.0 (approved)
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

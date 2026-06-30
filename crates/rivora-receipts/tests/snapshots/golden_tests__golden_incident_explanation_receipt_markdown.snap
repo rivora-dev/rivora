@@ -1,0 +1,61 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+assertion_line: 108
+expression: output
+---
+## incident_explanation: Payment latency incident
+
+- **ID:** `receipt_fixture_incident_1`
+- **Status:** draft
+- **Subject:** payment-service (service: svc-payment)
+
+p99 latency spike correlated with 500 errors from payment-service
+
+### Confidence
+
+- **Score:** 0.55 (medium)
+- **Method:** correlation-analysis-v1
+- **Uncertainty:** Limited historical baseline; correlation not yet confirmed as causation
+
+### Evidence
+
+1. **Latency spike** (metric)
+   - Observed: 2026-06-25T11:55:00Z
+   - p99 latency increased from 80ms to 450ms over 5 minutes
+2. **Error log entries** (log)
+   - Observed: 2026-06-25T11:57:00Z
+   - 500 errors logged from payment-service during the spike window
+
+### Reasoning
+
+1. **Identify latency anomaly**
+   - p99 latency crossed the 200ms threshold at 11:55 UTC
+   - Conclusion: Latency anomaly confirmed
+2. **Correlate error logs**
+   - 500 errors in payment-service logs coincide with the latency spike window
+   - Conclusion: Errors and latency are temporally correlated
+3. **Form root cause hypothesis**
+   - Error pattern suggests a downstream dependency failure in payment-service
+   - Conclusion: Likely caused by payment-service dependency degradation
+
+### Risk
+
+- **Level:** medium
+- **Description:** Service degradation affecting payment processing
+
+### Suggested Actions
+
+1. **View payment-service dashboard** (read)
+   - Expected outcome: Engineer can inspect current service health
+   - Approval: not_required
+   - Read-only: true
+   - Mutates infrastructure: false
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

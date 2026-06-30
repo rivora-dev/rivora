@@ -1,0 +1,5 @@
+---
+source: crates/rivora-memory/tests/golden_tests.rs
+expression: output
+---
+invalid value for record_receipt_ids: receipt_ids must not contain empty strings

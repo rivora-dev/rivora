@@ -1,0 +1,46 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+## recall_result: Recall result matched past memory
+
+- **ID:** `receipt_fixture_recall_result_1`
+- **Status:** valid
+- **Subject:** payment-service (service: svc-payment)
+
+Recall query returned a matching memory linking current latency to the deploy-induced pattern
+
+### Confidence
+
+- **Score:** 0.85 (high)
+- **Method:** recall-similarity-v1
+- **Uncertainty:** Strong similarity between the current metric and the recalled memory, but limited to a single matching memory
+
+### Evidence
+
+1. **Current latency metric** (metric)
+   - Observed: 2026-06-25T12:30:00Z
+   - payment-service p99 latency is 420ms, matching the previously memorized deployment-induced pattern
+
+### Reasoning
+
+1. **Query memory store**
+   - Recall query matched the approved memory about payment-service deploy latency patterns
+   - Conclusion: One matching memory was returned by the recall query
+2. **Score match against current observation**
+   - Current latency of 420ms aligns with the memorized post-deployment latency range of 400-500ms
+   - Conclusion: High-confidence match between the current observation and the recalled memory
+
+### Risk
+
+- **Level:** low
+- **Description:** Recall result is informational and does not propose any infrastructure mutation
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

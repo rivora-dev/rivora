@@ -1,0 +1,7 @@
+# Clippy configuration for Open Rivora.
+# Keep thresholds permissive enough for foundational crates while preventing
+# unreadable code.
+
+too-many-arguments-threshold = 8
+cognitive-complexity-threshold = 30
+enum-variant-name-threshold = 1

@@ -1,0 +1,43 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+## human_feedback_recorded: Human feedback recorded
+
+- **ID:** `receipt_fixture_human_feedback_recorded_1`
+- **Status:** valid
+- **Subject:** Memory: payment-service deploy latency pattern (memory: mem-payment-latency-1)
+
+Engineer feedback was captured and linked to the recommendation and its supporting memory
+
+### Confidence
+
+- **Score:** 0.90 (high)
+- **Method:** human-feedback-v1
+- **Uncertainty:** Direct, explicit feedback from the engineer who applied the recommendation
+
+### Evidence
+
+1. **Engineer feedback observation** (observation)
+   - Observed: 2026-06-25T14:00:00Z
+   - Engineer marked the rollback recommendation as helpful and confirmed it resolved the incident
+
+### Reasoning
+
+1. **Capture human feedback**
+   - Engineer provided explicit feedback that the recommendation was accurate and the rollback resolved the latency incident
+   - Conclusion: Positive feedback recorded against the recommendation and its associated memory
+
+### Risk
+
+- **Level:** low
+- **Description:** Feedback recording is read-only and does not mutate infrastructure
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

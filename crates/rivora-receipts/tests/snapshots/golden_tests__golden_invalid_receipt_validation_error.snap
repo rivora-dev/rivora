@@ -1,0 +1,5 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: err.to_string()
+---
+invalid receipt: evidence must not be empty — a receipt without evidence is invalid

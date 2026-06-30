@@ -1,0 +1,38 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+assertion_line: 140
+expression: output
+---
+## observation: Invalid receipt fixture
+
+- **ID:** `receipt_fixture_invalid_1`
+- **Status:** invalid
+- **Subject:** invalid-service (service: svc-invalid)
+
+This receipt has empty evidence and should fail validation
+
+### Confidence
+
+- **Score:** 0.50 (medium)
+- **Method:** placeholder-v1
+- **Uncertainty:** Placeholder uncertainty
+
+### Reasoning
+
+1. **Placeholder step**
+   - Placeholder reasoning for invalid receipt
+   - Conclusion: Placeholder conclusion
+
+### Risk
+
+- **Level:** low
+- **Description:** Placeholder risk
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

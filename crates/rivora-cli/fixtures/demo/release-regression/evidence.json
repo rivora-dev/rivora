@@ -1,0 +1,85 @@
+[
+  {
+    "id": "github:release:demo/release-regression:190",
+    "kind": "git_hub_release",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/release-regression",
+      "read_only": true
+    },
+    "title": "Release checkout-api v1.9.0 published",
+    "summary": "GitHub release evidence records checkout-api v1.9.0 before elevated error reports.",
+    "body": "Tag: checkout-api-v1.9.0\nPublished by: release-bot\nThis record establishes release timing only.",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-26T16:00:00Z",
+    "author": "release-bot",
+    "tags": ["checkout", "checkout-api", "release", "v1.9.0"],
+    "refs": ["https://github.example/demo/release-regression/releases/190"],
+    "confidence": 0.92
+  },
+  {
+    "id": "github:pr:demo/release-regression:141",
+    "kind": "git_hub_pull_request_merged",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/release-regression",
+      "read_only": true
+    },
+    "title": "PR #141 merged: Update checkout retry policy",
+    "summary": "PR #141 updated the checkout retry policy before v1.9.0; later fixture evidence records a post-release smoke-test failure.",
+    "body": "Changed retry limits and backoff configuration. The sequence may be worth remembering, but it does not establish that the policy caused the later errors.",
+    "service": "checkout-api",
+    "files_changed": [
+      "services/checkout-api/config/retries.toml",
+      "services/checkout-api/src/retry.rs"
+    ],
+    "timestamp": "2026-06-26T14:30:00Z",
+    "author": "lee",
+    "tags": ["checkout", "checkout-api", "release", "regression", "retry-policy"],
+    "refs": ["https://github.example/demo/release-regression/pull/141"],
+    "confidence": 0.86
+  },
+  {
+    "id": "github:workflow:demo/release-regression:1140",
+    "kind": "git_hub_workflow_succeeded",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/release-regression",
+      "read_only": true
+    },
+    "title": "Workflow succeeded: pre-release validation",
+    "summary": "Pre-release validation succeeded for checkout-api v1.9.0.",
+    "body": "Workflow: pre-release validation\nConclusion: success\nRef: checkout-api-v1.9.0-rc1",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-26T15:10:00Z",
+    "author": "github-actions",
+    "tags": ["checkout", "checkout-api", "release", "validation"],
+    "refs": ["https://github.example/demo/release-regression/actions/runs/1140"],
+    "confidence": 0.9
+  },
+  {
+    "id": "github:workflow:demo/release-regression:1141",
+    "kind": "git_hub_workflow_failed",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/release-regression",
+      "read_only": true
+    },
+    "title": "Workflow failed: post-release smoke test",
+    "summary": "The post-release smoke test recorded elevated checkout errors after v1.9.0 was published.",
+    "body": "Workflow: post-release smoke test\nConclusion: failure\nRef: checkout-api-v1.9.0\nThe failure does not establish root cause.",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-26T16:20:00Z",
+    "author": "github-actions",
+    "tags": ["checkout", "checkout-api", "errors", "release", "regression"],
+    "refs": ["https://github.example/demo/release-regression/actions/runs/1141"],
+    "confidence": 0.88
+  }
+]

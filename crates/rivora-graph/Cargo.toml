@@ -1,0 +1,23 @@
+[package]
+name = "rivora-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Typed Context Graph model for Open Rivora"
+
+[dependencies]
+rivora-errors = { workspace = true }
+rivora-types = { workspace = true }
+rivora-core = { workspace = true }
+rivora-receipts = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+rivora-testing = { workspace = true }
+insta = { workspace = true }

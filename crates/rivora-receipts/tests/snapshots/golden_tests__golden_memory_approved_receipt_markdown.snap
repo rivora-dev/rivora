@@ -1,0 +1,43 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+## memory_approved: Memory approved by human
+
+- **ID:** `receipt_fixture_memory_approved_1`
+- **Status:** valid
+- **Subject:** Approved memory: payment-service deploy latency pattern (memory: mem-payment-latency-1)
+
+A memory candidate was approved by an engineer and promoted to an active memory
+
+### Confidence
+
+- **Score:** 0.60 (medium)
+- **Method:** human-approval-v1
+- **Uncertainty:** Approved by a single engineer; cross-team review has not yet been performed
+
+### Evidence
+
+1. **Human approval of memory** (annotation)
+   - Observed: 2026-06-25T13:00:00Z
+   - On-call engineer approved the memory candidate after reviewing corroborating incidents
+
+### Reasoning
+
+1. **Record human approval**
+   - Engineer reviewed the memory candidate against three historical incidents and confirmed the pattern
+   - Conclusion: Memory candidate promoted to an approved memory
+
+### Risk
+
+- **Level:** low
+- **Description:** Approved memory is applied as read-only context for future recommendations
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

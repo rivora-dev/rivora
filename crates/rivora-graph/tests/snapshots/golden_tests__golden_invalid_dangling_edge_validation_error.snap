@@ -1,0 +1,6 @@
+---
+source: crates/rivora-graph/tests/golden_tests.rs
+assertion_line: 138
+expression: output
+---
+invalid value for edge_to: edge edge-dangling references non-existent node: node-does-not-exist

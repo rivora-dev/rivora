@@ -1,0 +1,122 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "confidence": {
+    "contributing_factors": [],
+    "level": "medium",
+    "limiting_factors": [],
+    "method": "correlation-analysis-v1",
+    "score": 0.55,
+    "uncertainty": "Limited historical baseline; correlation not yet confirmed as causation"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.6,
+      "description": "p99 latency increased from 80ms to 450ms over 5 minutes",
+      "kind": "metric",
+      "metadata": null,
+      "observed_at": "2026-06-25T11:55:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Latency spike"
+    },
+    {
+      "confidence_contribution": 0.4,
+      "description": "500 errors logged from payment-service during the spike window",
+      "kind": "log",
+      "metadata": null,
+      "observed_at": "2026-06-25T11:57:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Error log entries"
+    }
+  ],
+  "id": "receipt_fixture_incident_1",
+  "kind": "incident_explanation",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": null,
+    "inference": null,
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.3,
+      "explanation": "p99 latency crossed the 200ms threshold at 11:55 UTC",
+      "input_evidence": [],
+      "output_conclusion": "Latency anomaly confirmed",
+      "step": 1,
+      "title": "Identify latency anomaly"
+    },
+    {
+      "confidence_impact": 0.25,
+      "explanation": "500 errors in payment-service logs coincide with the latency spike window",
+      "input_evidence": [],
+      "output_conclusion": "Errors and latency are temporally correlated",
+      "step": 2,
+      "title": "Correlate error logs"
+    },
+    {
+      "confidence_impact": 0.15,
+      "explanation": "Error pattern suggests a downstream dependency failure in payment-service",
+      "input_evidence": [],
+      "output_conclusion": "Likely caused by payment-service dependency degradation",
+      "step": 3,
+      "title": "Form root cause hypothesis"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Service degradation affecting payment processing",
+    "level": "medium",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": true
+  },
+  "status": "draft",
+  "subject": {
+    "display_name": "payment-service",
+    "kind": "service",
+    "reference": "svc-payment"
+  },
+  "suggested_actions": [
+    {
+      "approval": "not_required",
+      "description": "Open the payment-service observability dashboard",
+      "expected_outcome": "Engineer can inspect current service health",
+      "human_approval": null,
+      "kind": "read",
+      "mutates_infrastructure": false,
+      "read_only": true,
+      "risk_level": "low",
+      "rollback_strategy": null,
+      "scope": [],
+      "title": "View payment-service dashboard"
+    }
+  ],
+  "summary": {
+    "description": "p99 latency spike correlated with 500 errors from payment-service",
+    "title": "Payment latency incident"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

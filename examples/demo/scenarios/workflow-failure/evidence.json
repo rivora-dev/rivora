@@ -1,0 +1,65 @@
+[
+  {
+    "id": "github:workflow:demo/workflow-failure:1152",
+    "kind": "git_hub_workflow_failed",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/workflow-failure",
+      "read_only": true
+    },
+    "title": "Workflow failed: deploy validation",
+    "summary": "Deploy validation failed after billing migration files changed; this recurring sequence may be worth remembering.",
+    "body": "Workflow: deploy validation\nConclusion: failure\nBranch: main\nCommit: b1111a152\nThe failed validation and migration change are correlated evidence, not a root-cause conclusion.",
+    "service": "billing-api",
+    "files_changed": [],
+    "timestamp": "2026-06-25T13:20:00Z",
+    "author": "github-actions",
+    "tags": ["billing", "billing-api", "migration", "validation", "workflow"],
+    "refs": ["https://github.example/demo/workflow-failure/actions/runs/1152"],
+    "confidence": 0.9
+  },
+  {
+    "id": "github:pr:demo/workflow-failure:152",
+    "kind": "git_hub_pull_request_merged",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/workflow-failure",
+      "read_only": true
+    },
+    "title": "PR #152 merged: Add billing migration",
+    "summary": "PR #152 added billing schema and validation configuration changes before the failed workflow.",
+    "body": "Changed billing migration SQL and deploy validation configuration. This record provides change context only.",
+    "service": "billing-api",
+    "files_changed": [
+      "services/billing-api/migrations/0152_add_invoice_state.sql",
+      ".github/workflows/deploy-validation.yml"
+    ],
+    "timestamp": "2026-06-25T12:50:00Z",
+    "author": "sam",
+    "tags": ["billing", "billing-api", "migration", "validation"],
+    "refs": ["https://github.example/demo/workflow-failure/pull/152"],
+    "confidence": 0.87
+  },
+  {
+    "id": "github:issue:demo/workflow-failure:88",
+    "kind": "git_hub_issue",
+    "source": {
+      "connector": "github",
+      "version": "0.1.0",
+      "repository": "demo/workflow-failure",
+      "read_only": true
+    },
+    "title": "Issue #88: deploy validation failed after migration change",
+    "summary": "Issue #88 documents a deploy validation failure following billing migration work.",
+    "body": "The issue records the workflow output and affected migration files for future comparison. It does not claim a diagnosis.",
+    "service": "billing-api",
+    "files_changed": [],
+    "timestamp": "2026-06-25T13:35:00Z",
+    "author": "nora",
+    "tags": ["billing", "billing-api", "issue", "migration", "validation"],
+    "refs": ["https://github.example/demo/workflow-failure/issues/88"],
+    "confidence": 0.83
+  }
+]

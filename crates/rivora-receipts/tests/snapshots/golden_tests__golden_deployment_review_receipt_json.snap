@@ -1,0 +1,123 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "ability": {
+    "id": "deployment-validator",
+    "status": "approved",
+    "version": "1.0.0"
+  },
+  "confidence": {
+    "contributing_factors": [],
+    "level": "high",
+    "limiting_factors": [],
+    "method": "deployment-health-check-v1",
+    "score": 0.85,
+    "uncertainty": "Health checks passed but long-term stability not yet observed"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.5,
+      "description": "payment-service v2.1.0 deployed to production at 12:00 UTC",
+      "kind": "deployment",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:00:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Deployment v2.1.0"
+    },
+    {
+      "confidence_contribution": 0.5,
+      "description": "All health checks passed within 2 minutes of deployment",
+      "kind": "metric",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:02:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Health check metrics"
+    }
+  ],
+  "id": "receipt_fixture_deployment_1",
+  "kind": "deployment_review",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": {
+      "id": "deployment-validator",
+      "status": "approved",
+      "version": "1.0.0"
+    },
+    "inference": null,
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.4,
+      "explanation": "Deployment v2.1.0 completed without errors at 12:00 UTC",
+      "input_evidence": [],
+      "output_conclusion": "Deployment completed successfully",
+      "step": 1,
+      "title": "Verify deployment success"
+    },
+    {
+      "confidence_impact": 0.35,
+      "explanation": "All health checks passed within 2 minutes of deployment",
+      "input_evidence": [],
+      "output_conclusion": "Deployment is healthy and stable",
+      "step": 2,
+      "title": "Validate health checks"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Deployment is stable; no issues detected",
+    "level": "low",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": false
+  },
+  "status": "valid",
+  "subject": {
+    "display_name": "payment-service-v2.1.0",
+    "kind": "deployment",
+    "reference": "dep-v2.1.0"
+  },
+  "suggested_actions": [
+    {
+      "approval": "not_required",
+      "description": "Open the deployment details for v2.1.0",
+      "expected_outcome": "Engineer can review deployment configuration and rollout status",
+      "human_approval": null,
+      "kind": "read",
+      "mutates_infrastructure": false,
+      "read_only": true,
+      "risk_level": "low",
+      "rollback_strategy": null,
+      "scope": [],
+      "title": "View deployment details"
+    }
+  ],
+  "summary": {
+    "description": "Deployment v2.1.0 passed all health checks and is stable",
+    "title": "Deployment review passed"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

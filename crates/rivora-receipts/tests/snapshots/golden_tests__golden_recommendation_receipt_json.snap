@@ -1,0 +1,150 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "confidence": {
+    "contributing_factors": [],
+    "level": "high",
+    "limiting_factors": [],
+    "method": "root-cause-analysis-v2",
+    "score": 0.92,
+    "uncertainty": "High confidence based on correlated evidence but causation not fully confirmed"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.4,
+      "description": "p99 latency remained above 400ms for 15 minutes after deployment",
+      "kind": "metric",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:05:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Sustained latency spike"
+    },
+    {
+      "confidence_contribution": 0.3,
+      "description": "500 errors correlated with new deployment version v2.1.0",
+      "kind": "log",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:07:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Recurring 500 errors"
+    },
+    {
+      "confidence_contribution": 0.3,
+      "description": "Deployment v2.1.0 occurred 5 minutes before the latency spike began",
+      "kind": "deployment",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:00:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Recent deployment v2.1.0"
+    }
+  ],
+  "id": "receipt_fixture_recommendation_1",
+  "inference": {
+    "model": "claude-opus-4",
+    "model_version": "20250101",
+    "provider": "anthropic",
+    "request_id": "req_fixture_recommendation_1",
+    "temperature": 0.0
+  },
+  "kind": "recommendation",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": null,
+    "inference": {
+      "model": "claude-opus-4",
+      "model_version": "20250101",
+      "provider": "anthropic",
+      "request_id": "req_fixture_recommendation_1",
+      "temperature": 0.0
+    },
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.35,
+      "explanation": "p99 latency increased from 80ms to 450ms after deployment v2.1.0",
+      "input_evidence": [],
+      "output_conclusion": "Latency regression confirmed and correlated with deployment",
+      "step": 1,
+      "title": "Confirm latency regression"
+    },
+    {
+      "confidence_impact": 0.3,
+      "explanation": "500 errors began within 2 minutes of v2.1.0 deployment",
+      "input_evidence": [],
+      "output_conclusion": "Errors are causally linked to the new deployment",
+      "step": 2,
+      "title": "Link errors to deployment"
+    },
+    {
+      "confidence_impact": 0.27,
+      "explanation": "Previous version v2.0.0 was stable for 7 days with no latency issues",
+      "input_evidence": [],
+      "output_conclusion": "Rollback to v2.0.0 is the recommended action",
+      "step": 3,
+      "title": "Evaluate rollback feasibility"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Rollback may briefly interrupt payment processing",
+    "level": "medium",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": true
+  },
+  "status": "valid",
+  "subject": {
+    "display_name": "payment-service",
+    "kind": "service",
+    "reference": "svc-payment"
+  },
+  "suggested_actions": [
+    {
+      "approval": "required",
+      "description": "Rollback the payment-service deployment from v2.1.0 to the previous stable version v2.0.0",
+      "expected_outcome": "Latency and error rate return to pre-deployment levels",
+      "human_approval": null,
+      "kind": "rollback",
+      "mutates_infrastructure": true,
+      "read_only": false,
+      "risk_level": "medium",
+      "rollback_strategy": "Redeploy v2.1.0 if rollback does not resolve the issue",
+      "scope": [
+        "payment-service"
+      ],
+      "title": "Rollback payment-service to v2.0.0"
+    }
+  ],
+  "summary": {
+    "description": "Rollback to v2.0.0 to resolve latency spike caused by v2.1.0 deployment",
+    "title": "Recommend rollback payment-service"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

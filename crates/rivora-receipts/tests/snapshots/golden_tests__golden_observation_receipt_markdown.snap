@@ -1,0 +1,44 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+assertion_line: 100
+expression: output
+---
+## observation: Error rate anomaly detected
+
+- **ID:** `receipt_fixture_observation_1`
+- **Status:** draft
+- **Subject:** api-gateway (service: svc-api-gateway)
+
+Error rate exceeded 2% threshold on api-gateway
+
+### Confidence
+
+- **Score:** 0.30 (low)
+- **Method:** observation-threshold-v1
+- **Uncertainty:** Single observation; no historical comparison available
+
+### Evidence
+
+1. **Error rate anomaly** (observation)
+   - Observed: 2026-06-25T12:00:00Z
+   - Error rate for api-gateway exceeded 2% for 3 consecutive minutes
+
+### Reasoning
+
+1. **Detect anomaly**
+   - Error rate crossed the 2% threshold for 3 consecutive minutes
+   - Conclusion: Anomaly confirmed; root cause unknown
+
+### Risk
+
+- **Level:** low
+- **Description:** Observation only; no action proposed
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

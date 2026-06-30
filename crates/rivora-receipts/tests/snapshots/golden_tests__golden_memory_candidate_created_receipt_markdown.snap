@@ -1,0 +1,43 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+## memory_candidate_created: Memory candidate created
+
+- **ID:** `receipt_fixture_memory_candidate_1`
+- **Status:** draft
+- **Subject:** Memory candidate: payment-service deploy latency pattern (memory: mem-candidate-payment-latency-1)
+
+A new memory candidate was extracted from observed deployment and latency correlations
+
+### Confidence
+
+- **Score:** 0.30 (low)
+- **Method:** memory-candidate-extraction-v1
+- **Uncertainty:** Single observation window; pattern has not yet been confirmed across multiple incidents
+
+### Evidence
+
+1. **Observed latency pattern** (observation)
+   - Observed: 2026-06-25T12:00:00Z
+   - payment-service p99 latency spiked after the last 3 deployments to production
+
+### Reasoning
+
+1. **Extract memory candidate**
+   - Observed a recurring correlation between production deployments and payment-service latency spikes
+   - Conclusion: Memory candidate created for the deploy-induced latency pattern
+
+### Risk
+
+- **Level:** low
+- **Description:** Memory candidate is read-only and requires human approval before being applied
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

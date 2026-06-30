@@ -1,0 +1,20 @@
+[package]
+name = "rivora-traits"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core trait interfaces for Open Rivora (Connector, InferenceProvider, StorageProvider, ReceiptRenderer, Clock, IdGenerator, Logger)"
+
+[dependencies]
+rivora-errors = { workspace = true }
+rivora-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+rivora-testing = { workspace = true }

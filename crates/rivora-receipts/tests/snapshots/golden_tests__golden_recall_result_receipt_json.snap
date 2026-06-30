@@ -1,0 +1,87 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "confidence": {
+    "contributing_factors": [],
+    "level": "high",
+    "limiting_factors": [],
+    "method": "recall-similarity-v1",
+    "score": 0.85,
+    "uncertainty": "Strong similarity between the current metric and the recalled memory, but limited to a single matching memory"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.6,
+      "description": "payment-service p99 latency is 420ms, matching the previously memorized deployment-induced pattern",
+      "kind": "metric",
+      "metadata": null,
+      "observed_at": "2026-06-25T12:30:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Current latency metric"
+    }
+  ],
+  "id": "receipt_fixture_recall_result_1",
+  "kind": "recall_result",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": null,
+    "inference": null,
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.4,
+      "explanation": "Recall query matched the approved memory about payment-service deploy latency patterns",
+      "input_evidence": [],
+      "output_conclusion": "One matching memory was returned by the recall query",
+      "step": 1,
+      "title": "Query memory store"
+    },
+    {
+      "confidence_impact": 0.35,
+      "explanation": "Current latency of 420ms aligns with the memorized post-deployment latency range of 400-500ms",
+      "input_evidence": [],
+      "output_conclusion": "High-confidence match between the current observation and the recalled memory",
+      "step": 2,
+      "title": "Score match against current observation"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Recall result is informational and does not propose any infrastructure mutation",
+    "level": "low",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": false
+  },
+  "status": "valid",
+  "subject": {
+    "display_name": "payment-service",
+    "kind": "service",
+    "reference": "svc-payment"
+  },
+  "suggested_actions": [],
+  "summary": {
+    "description": "Recall query returned a matching memory linking current latency to the deploy-induced pattern",
+    "title": "Recall result matched past memory"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}

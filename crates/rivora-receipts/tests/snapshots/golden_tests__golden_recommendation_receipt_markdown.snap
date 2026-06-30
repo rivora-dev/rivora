@@ -1,0 +1,66 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+assertion_line: 124
+expression: output
+---
+## recommendation: Recommend rollback payment-service
+
+- **ID:** `receipt_fixture_recommendation_1`
+- **Status:** valid
+- **Subject:** payment-service (service: svc-payment)
+
+Rollback to v2.0.0 to resolve latency spike caused by v2.1.0 deployment
+
+### Confidence
+
+- **Score:** 0.92 (high)
+- **Method:** root-cause-analysis-v2
+- **Uncertainty:** High confidence based on correlated evidence but causation not fully confirmed
+
+### Evidence
+
+1. **Sustained latency spike** (metric)
+   - Observed: 2026-06-25T12:05:00Z
+   - p99 latency remained above 400ms for 15 minutes after deployment
+2. **Recurring 500 errors** (log)
+   - Observed: 2026-06-25T12:07:00Z
+   - 500 errors correlated with new deployment version v2.1.0
+3. **Recent deployment v2.1.0** (deployment)
+   - Observed: 2026-06-25T12:00:00Z
+   - Deployment v2.1.0 occurred 5 minutes before the latency spike began
+
+### Reasoning
+
+1. **Confirm latency regression**
+   - p99 latency increased from 80ms to 450ms after deployment v2.1.0
+   - Conclusion: Latency regression confirmed and correlated with deployment
+2. **Link errors to deployment**
+   - 500 errors began within 2 minutes of v2.1.0 deployment
+   - Conclusion: Errors are causally linked to the new deployment
+3. **Evaluate rollback feasibility**
+   - Previous version v2.0.0 was stable for 7 days with no latency issues
+   - Conclusion: Rollback to v2.0.0 is the recommended action
+
+### Risk
+
+- **Level:** medium
+- **Description:** Rollback may briefly interrupt payment processing
+
+### Suggested Actions
+
+1. **Rollback payment-service to v2.0.0** (rollback)
+   - Expected outcome: Latency and error rate return to pre-deployment levels
+   - Approval: required
+   - Read-only: false
+   - Mutates infrastructure: true
+   - Rollback strategy: Redeploy v2.1.0 if rollback does not resolve the issue
+
+### Provenance
+
+- **Source:** adaptive-engine 0.1.0
+- **Inference:** anthropic / claude-opus-4 (temp=0)
+
+---
+
+*Created: 2026-06-25T12:00:00Z*
+*Schema version: 1.0.0*

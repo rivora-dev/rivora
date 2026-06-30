@@ -1,0 +1,79 @@
+---
+source: crates/rivora-receipts/tests/golden_tests.rs
+expression: output
+---
+{
+  "confidence": {
+    "contributing_factors": [],
+    "level": "high",
+    "limiting_factors": [],
+    "method": "human-feedback-v1",
+    "score": 0.9,
+    "uncertainty": "Direct, explicit feedback from the engineer who applied the recommendation"
+  },
+  "evidence": [
+    {
+      "confidence_contribution": 0.5,
+      "description": "Engineer marked the rollback recommendation as helpful and confirmed it resolved the incident",
+      "kind": "observation",
+      "metadata": null,
+      "observed_at": "2026-06-25T14:00:00Z",
+      "raw_ref": null,
+      "source": {
+        "provider": "aws",
+        "version": "0.1.0"
+      },
+      "title": "Engineer feedback observation"
+    }
+  ],
+  "id": "receipt_fixture_human_feedback_recorded_1",
+  "kind": "human_feedback_recorded",
+  "metadata": {
+    "labels": {},
+    "tags": []
+  },
+  "provenance": {
+    "ability": null,
+    "inference": null,
+    "source": "adaptive-engine",
+    "source_version": "0.1.0"
+  },
+  "reasoning": [
+    {
+      "confidence_impact": 0.4,
+      "explanation": "Engineer provided explicit feedback that the recommendation was accurate and the rollback resolved the latency incident",
+      "input_evidence": [],
+      "output_conclusion": "Positive feedback recorded against the recommendation and its associated memory",
+      "step": 1,
+      "title": "Capture human feedback"
+    }
+  ],
+  "risk": {
+    "affected_services": [],
+    "description": "Feedback recording is read-only and does not mutate infrastructure",
+    "level": "low",
+    "mitigations": [],
+    "possible_impacts": [],
+    "requires_approval": false
+  },
+  "status": "valid",
+  "subject": {
+    "display_name": "Memory: payment-service deploy latency pattern",
+    "kind": "memory",
+    "reference": "mem-payment-latency-1"
+  },
+  "suggested_actions": [],
+  "summary": {
+    "description": "Engineer feedback was captured and linked to the recommendation and its supporting memory",
+    "title": "Human feedback recorded"
+  },
+  "timestamps": {
+    "created_at": "2026-06-25T12:00:00Z",
+    "expires_at": null,
+    "updated_at": null
+  },
+  "version": {
+    "api": null,
+    "schema": "1.0.0"
+  }
+}
