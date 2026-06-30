@@ -23,7 +23,8 @@ use rivora_adaptive::{AdaptiveMemoryEngine, MemoryCandidateRequest, RecallQuery,
 use rivora_connectors::{
     EvidenceIngestResult, EvidenceItem, EvidenceKind, GitHubAuthConfig, GitHubConnector,
     GitHubIngestRequest, GitHubIngestResult, GitHubRepositoryRef, HttpGitHubClient,
-    LocalGitConnector,
+    HttpVercelClient, LocalGitConnector, VercelAuthConfig, VercelConnector, VercelIngestRequest,
+    VercelIngestResult, VercelProjectRef,
 };
 use rivora_errors::{Result, RivoraError};
 use rivora_memory::{
@@ -339,6 +340,7 @@ pub struct FeedbackOptions {
 pub enum IngestOptions {
     Git(GitIngestOptions),
     GitHub(GitHubIngestOptions),
+    Vercel(VercelIngestOptions),
     Fixture(FixtureIngestOptions),
 }
 
@@ -382,6 +384,25 @@ impl Default for GitHubIngestOptions {
             workflow_runs: false,
             releases: false,
             deployments: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VercelIngestOptions {
+    pub project: String,
+    pub team: Option<String>,
+    pub limit: usize,
+    pub since: Option<String>,
+}
+
+impl Default for VercelIngestOptions {
+    fn default() -> Self {
+        Self {
+            project: String::new(),
+            team: None,
+            limit: 20,
+            since: None,
         }
     }
 }
@@ -441,6 +462,9 @@ pub enum AskIntent {
     WhatMergedRecently,
     WhatFailedRecently,
     WhatChangedInGithub,
+    WhatDeployedRecently,
+    WhatFailedInVercel,
+    WhatChangedInVercel,
     Help,
 }
 
@@ -509,6 +533,17 @@ pub fn parse_ask_intent(prompt: &str) -> AskIntent {
         AskIntent::WhatFailedRecently
     } else if normalized.contains("what changed in github") {
         AskIntent::WhatChangedInGithub
+    } else if normalized.contains("what deployed recently") || normalized.contains("what deployed")
+    {
+        AskIntent::WhatDeployedRecently
+    } else if normalized.contains("what failed in vercel")
+        || normalized.contains("vercel") && normalized.contains("failed")
+    {
+        AskIntent::WhatFailedInVercel
+    } else if normalized.contains("what changed in vercel")
+        || normalized.contains("vercel") && normalized.contains("changed")
+    {
+        AskIntent::WhatChangedInVercel
     } else if normalized.contains("what changed") {
         AskIntent::WhatChanged
     } else {
@@ -672,6 +707,7 @@ pub fn ingest(store: &LocalMemoryStore, options: IngestOptions) -> Result<String
     match options {
         IngestOptions::Git(options) => ingest_git(store, options),
         IngestOptions::GitHub(options) => ingest_github(store, options),
+        IngestOptions::Vercel(options) => ingest_vercel(store, options),
         IngestOptions::Fixture(options) => ingest_fixture(store, options),
     }
 }
@@ -727,6 +763,43 @@ pub fn ingest_github_with_connector(
     let result = connector.ingest(request)?;
     let added = store.append_evidence(result.evidence.clone())?;
     Ok(render_github_ingest_result(&result, added, store))
+}
+
+pub fn ingest_vercel(store: &LocalMemoryStore, options: VercelIngestOptions) -> Result<String> {
+    if options.project.trim().is_empty() {
+        return Err(RivoraError::invalid_value(
+            "vercel_project",
+            "rivora ingest vercel requires --project <project-id-or-name>",
+        ));
+    }
+    let auth = VercelAuthConfig::from_env();
+    if !auth.has_token() {
+        return Err(RivoraError::invalid_value(
+            "vercel_token",
+            "Missing VERCEL_TOKEN.\n\nCreate a Vercel access token and run:\n\nexport VERCEL_TOKEN=...\n\nThen try:\nrivora ingest vercel --project <project> --limit 20\n\nNo infrastructure actions were taken.",
+        ));
+    }
+    let connector = VercelConnector::new(HttpVercelClient::new(auth));
+    ingest_vercel_with_connector(store, options, &connector)
+}
+
+/// Core Vercel ingest path that accepts an injected connector. Tests use this
+/// with a `FixtureVercelClient` so no live Vercel network access is required.
+pub fn ingest_vercel_with_connector(
+    store: &LocalMemoryStore,
+    options: VercelIngestOptions,
+    connector: &VercelConnector,
+) -> Result<String> {
+    store.init()?;
+    let project = VercelProjectRef::parse(&options.project)?;
+    let project = VercelProjectRef::new(project.project, options.team.or(project.team));
+    let mut request = VercelIngestRequest::new(project).with_limit(options.limit);
+    if let Some(since) = options.since.clone() {
+        request = request.with_since(since);
+    }
+    let result = connector.ingest(request)?;
+    let added = store.append_evidence(result.evidence.clone())?;
+    Ok(render_vercel_ingest_result(&result, added, store))
 }
 
 pub fn ingest_fixture(store: &LocalMemoryStore, options: FixtureIngestOptions) -> Result<String> {
@@ -842,6 +915,9 @@ pub fn ask(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         AskIntent::WhatMergedRecently => ask_what_merged_recently(store),
         AskIntent::WhatFailedRecently => ask_what_failed_recently(store),
         AskIntent::WhatChangedInGithub => ask_what_changed_in_github(store),
+        AskIntent::WhatDeployedRecently => ask_what_deployed_recently(store),
+        AskIntent::WhatFailedInVercel => ask_what_failed_in_vercel(store),
+        AskIntent::WhatChangedInVercel => ask_what_changed_in_vercel(store),
         AskIntent::Help => Ok(help_text()),
     }
 }
@@ -1132,6 +1208,9 @@ fn parse_ingest_options(args: &[String]) -> Result<IngestOptions> {
         Some("github") => Ok(IngestOptions::GitHub(parse_github_ingest_options(
             &args[1..],
         )?)),
+        Some("vercel") => Ok(IngestOptions::Vercel(parse_vercel_ingest_options(
+            &args[1..],
+        )?)),
         Some("fixture") => Ok(IngestOptions::Fixture(parse_fixture_ingest_options(
             &args[1..],
         )?)),
@@ -1141,7 +1220,7 @@ fn parse_ingest_options(args: &[String]) -> Result<IngestOptions> {
         )),
         None => Err(RivoraError::invalid_value(
             "ingest_connector",
-            "usage: rivora ingest git | rivora ingest github --repo owner/name | rivora ingest fixture --path examples/demo/evidence.json",
+            "usage: rivora ingest git | rivora ingest github --repo owner/name | rivora ingest vercel --project <project> | rivora ingest fixture --path examples/demo/evidence.json",
         )),
     }
 }
@@ -1243,6 +1322,37 @@ fn parse_github_ingest_options(args: &[String]) -> Result<GitHubIngestOptions> {
         return Err(RivoraError::invalid_value(
             "github_repo",
             "rivora ingest github requires --repo owner/name",
+        ));
+    }
+    Ok(options)
+}
+
+fn parse_vercel_ingest_options(args: &[String]) -> Result<VercelIngestOptions> {
+    let mut options = VercelIngestOptions::default();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--project" => options.project = flag_value(args, &mut i, "--project")?,
+            "--team" => options.team = Some(flag_value(args, &mut i, "--team")?),
+            "--since" => options.since = Some(flag_value(args, &mut i, "--since")?),
+            "--limit" => {
+                let value = flag_value(args, &mut i, "--limit")?;
+                options.limit = value.parse::<usize>().map_err(|_| {
+                    RivoraError::invalid_value("limit", "limit must be a positive integer")
+                })?;
+            }
+            other => {
+                return Err(RivoraError::invalid_value(
+                    "ingest_vercel_flag",
+                    format!("unsupported vercel ingest flag '{other}'"),
+                ));
+            }
+        }
+    }
+    if options.project.trim().is_empty() {
+        return Err(RivoraError::invalid_value(
+            "vercel_project",
+            "rivora ingest vercel requires --project <project-id-or-name>",
         ));
     }
     Ok(options)
@@ -1529,6 +1639,22 @@ fn render_github_ingest_result(
     )
 }
 
+fn render_vercel_ingest_result(
+    result: &VercelIngestResult,
+    added: usize,
+    store: &LocalMemoryStore,
+) -> String {
+    format!(
+        "Rivora ingested Vercel evidence.\n\nProject: {}\nEvidence items ingested: {}\nNew evidence items: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nVercel access is read-only. No infrastructure actions were taken.",
+        result.repository,
+        result.evidence.len(),
+        added,
+        result.deployments,
+        render_bullets(&result.topics),
+        display_path(&store.evidence_path())
+    )
+}
+
 fn render_fixture_ingest_result(
     label: &str,
     ingested: usize,
@@ -1570,13 +1696,14 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         .collect::<Vec<_>>();
     if matches.is_empty() {
         return Ok(
-            "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
+            "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
                 .to_string(),
         );
     }
     matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
     let has_github = matches.iter().any(|item| item.is_github());
-    let header = if has_github {
+    let has_vercel = matches.iter().any(|item| item.is_vercel());
+    let header = if has_github || has_vercel {
         "Rivora found recent evidence."
     } else {
         "Rivora found recent Git evidence."
@@ -1622,6 +1749,67 @@ fn ask_what_changed_in_github(store: &LocalMemoryStore) -> Result<String> {
         "Rivora found recent GitHub evidence.",
         EvidenceItem::is_github,
     )
+}
+
+fn ask_what_deployed_recently(store: &LocalMemoryStore) -> Result<String> {
+    ask_vercel_evidence(
+        store,
+        "Rivora found recent Vercel deployment evidence.",
+        EvidenceItem::is_vercel,
+    )
+}
+
+fn ask_what_failed_in_vercel(store: &LocalMemoryStore) -> Result<String> {
+    ask_vercel_evidence(
+        store,
+        "Rivora found recent Vercel deployment failures.",
+        |item| item.is_vercel() && item.tags.iter().any(|tag| tag == "failed-deploy"),
+    )
+}
+
+fn ask_what_changed_in_vercel(store: &LocalMemoryStore) -> Result<String> {
+    ask_vercel_evidence(
+        store,
+        "Rivora found recent Vercel evidence.",
+        EvidenceItem::is_vercel,
+    )
+}
+
+fn ask_vercel_evidence(
+    store: &LocalMemoryStore,
+    header: &str,
+    predicate: impl Fn(&EvidenceItem) -> bool,
+) -> Result<String> {
+    store.init()?;
+    let snapshot = store.load()?;
+    let mut matches: Vec<&EvidenceItem> = snapshot
+        .evidence
+        .iter()
+        .filter(|item| predicate(item))
+        .collect();
+    if matches.is_empty() {
+        return Ok(
+            "Rivora did not find Vercel evidence yet.\n\nTry:\nrivora ingest vercel --project <project> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
+                .to_string(),
+        );
+    }
+    matches.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
+    let mut output = format!("{header}\n");
+    for item in matches.iter().take(5) {
+        output.push_str(&format!(
+            "\n* {}\n  {}\n  Evidence: {}",
+            item.title,
+            item.summary,
+            item.id.as_str()
+        ));
+    }
+    if let Some(first) = matches.first() {
+        output.push_str(&format!(
+            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo infrastructure actions were taken.",
+            first.id.as_str()
+        ));
+    }
+    Ok(output)
 }
 
 fn ask_github_evidence(
@@ -1676,6 +1864,8 @@ fn render_remembered(memory: &MemoryRecord) -> String {
 fn render_remembered_from_evidence(memory: &MemoryRecord, evidence: &EvidenceItem) -> String {
     let source_label = if evidence.is_github() {
         "GitHub"
+    } else if evidence.is_vercel() {
+        "Vercel"
     } else {
         "Git"
     };
@@ -1718,7 +1908,7 @@ fn render_recall_result(result: &RecallResult) -> String {
 
 fn help_text() -> String {
     format!(
-        "Rivora local-first, evidence-backed reliability memory CLI\n\nCommands:\n* rivora demo\n* rivora demo --scenario <basic|checkout-incident|release-regression|workflow-failure>\n* rivora init\n* rivora ingest fixture --path examples/demo/evidence.json\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora ask \"what changed?\"\n* rivora ask \"what merged recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"what changed in github?\"\n* rivora ask \"have we seen checkout latency before?\"\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n* rivora status\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
+        "Rivora local-first, evidence-backed reliability memory CLI\n\nCommands:\n* rivora demo\n* rivora demo --scenario <basic|checkout-incident|release-regression|workflow-failure>\n* rivora init\n* rivora ingest fixture --path examples/demo/evidence.json\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora ask \"what changed?\"\n* rivora ask \"what merged recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what changed in github?\"\n* rivora ask \"what changed in vercel?\"\n* rivora ask \"have we seen checkout latency before?\"\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n* rivora status\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
         remember_example()
     )
 }

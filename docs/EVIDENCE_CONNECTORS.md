@@ -126,6 +126,68 @@ The connector exposes a `GitHubClient` trait with two implementations:
 All connector and CLI tests use the fixture client. No test requires live
 GitHub network access.
 
+## Vercel Connector
+
+The Vercel connector reads deployment evidence from the Vercel REST API and
+maps it into the same `EvidenceItem` model used by the Git and GitHub
+connectors. Vercel evidence kinds include:
+
+- `VercelDeployment`
+
+Example:
+
+```bash
+export VERCEL_TOKEN=
+rivora ingest vercel --project <project-id-or-name> --limit 20
+rivora ingest vercel --project <project-id-or-name> --team <team-id-or-slug>
+rivora ingest vercel --project <project-id-or-name> --since 7d
+```
+
+### Authentication
+
+Vercel access is read-only.
+
+- `VERCEL_TOKEN` is required.
+- `VERCEL_TEAM_ID` is optional and used when the token belongs to a team
+  account.
+- Tokens are never stored in `.rivora/`, never printed, never written into
+  evidence bodies, receipts, or test snapshots.
+- The token is passed to `curl` through stdin (`--config -`) so it never
+  appears in the process argument list and is not visible via `ps`.
+- Error messages from `curl` stderr are redacted before they can appear in a
+  `RivoraError`.
+
+### Stable Evidence IDs
+
+Vercel evidence deduplicates by stable ids of the form:
+
+```text
+vercel:deployment:<project-slug>:<uid>
+```
+
+Repeated ingestion of the same project does not duplicate the same deployment.
+
+### Testing Without Network Access
+
+The connector exposes a `VercelClient` trait with two implementations:
+
+- `HttpVercelClient` — the real client backed by `curl`.
+- `FixtureVercelClient` — a test double that returns preloaded fixture JSON.
+
+All connector and CLI tests use the fixture client. No test requires live
+Vercel network access.
+
+### Example Flow
+
+```bash
+rivora ingest vercel --project my-app --limit 20
+rivora evidence list
+rivora ask "what deployed recently?"
+rivora ask "what failed in vercel?"
+rivora remember --from-evidence <evidence-id>
+rivora feedback <memory-id> approve
+```
+
 ## Evidence to Memory
 
 Evidence remains evidence until a human chooses to remember it:

@@ -9,6 +9,13 @@
 
   ### Added
 
+  - Vercel evidence connector: read-only ingestion of Vercel deployment
+    evidence via the Vercel REST API (`rivora ingest vercel`)
+  - `VERCEL_TOKEN` environment variable support for Vercel connector
+    authentication
+  - Vercel-aware ask routing (`what deployed recently?`,
+    `what failed in vercel?`, `what changed in vercel?`)
+  - `FixtureVercelClient` for deterministic testing without network access
   - GitHub issue templates: bug report, feedback, evidence connector request,
     Slack setup help, and design partner report
   - Pull request template with a safety boundary checklist
@@ -54,7 +61,7 @@
   - Crates are not yet published; install Rivora from source
   - No official Slack Marketplace application or hosted OAuth flow
   - No hosted Rivora Cloud service
-  - No AWS, GCP, Azure, Vercel, Cloudflare, Render, or Kubernetes connectors
+  - No AWS, GCP, Azure, Cloudflare, Render, or Kubernetes connectors
   - No Ability Runtime
   - No Slack correction modals
   - No autonomous remediation or infrastructure mutation

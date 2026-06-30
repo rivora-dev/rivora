@@ -10,6 +10,7 @@
 * Rust toolchain (for building from source)
 * Git
 * (Optional) A GitHub personal access token for public repo evidence
+* (Optional) A Vercel token for deployment evidence
 * (Optional) A self-hosted Slack app for team use
 
 ---
@@ -71,6 +72,19 @@ Reads pull requests, issues, workflow runs, releases, and deployments from
 GitHub. `GITHUB_TOKEN` is optional for public repos and never stored. For
 authenticated access, set the empty placeholder to a real token only in your
 local shell; do not put it in a file or command history.
+
+---
+
+## Ingest Vercel evidence
+
+```bash
+export VERCEL_TOKEN=
+rivora ingest vercel --project <project-id-or-name> --limit 20
+```
+
+Reads deployment evidence from Vercel. `VERCEL_TOKEN` is required and never
+stored. The connector is read-only; no deployment, rollback, or promotion
+actions are taken.
 
 ---
 
@@ -228,7 +242,7 @@ See [SECURITY.md](../SECURITY.md) for the full policy.
 ## Known limitations
 
 * Crates are not published; install the local preview from source
-* No AWS, GCP, Azure, Vercel, Cloudflare, Render, or Kubernetes connectors
+* No AWS, GCP, Azure, Cloudflare, Render, or Kubernetes connectors
 * No official Slack Marketplace app
 * No hosted OAuth flow
 * No Rivora Cloud

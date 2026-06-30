@@ -32,10 +32,6 @@ validation, and token redaction in diagnostics.
 Public repository, README, changelog, security docs, contributor guide, and
 design partner onboarding.
 
----
-
-## In progress
-
 ### Phase 17 — Design Partner Feedback Loop
 
 Collect structured feedback from early design partners and the open-source
@@ -46,20 +42,25 @@ docs, a design partner report template, and ADR 0017.
 See [ADR 0017](adr/0017-design-partner-feedback-before-provider-connectors.md)
 and [FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md).
 
+### Phase 18A — Vercel Evidence Connector
+
+Read-only Vercel deployment evidence ingestion. First provider evidence
+connector, proving the connector model before adding Cloudflare, Render,
+and AWS.
+
 ---
 
 ## Planned
 
-### Phase 18A — Vercel + Cloudflare Evidence Connectors
+### Phase 18B — Cloudflare Evidence Connector
 
-Read-only evidence connectors for Vercel deployments and Cloudflare events.
-Order may change based on design partner feedback.
+Read-only evidence connector for Cloudflare events.
 
-### Phase 18B — Render Evidence Connector
+### Phase 18C — Render Evidence Connector
 
 Read-only evidence connector for Render deploy and service events.
 
-### Phase 18C — AWS Evidence Connector
+### Phase 18D — AWS Evidence Connector
 
 Read-only evidence connector for AWS (e.g. CloudTrail, deploy notifications).
 Scope narrowed by feedback.
