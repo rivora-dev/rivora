@@ -20,7 +20,7 @@
 - [MEMORY_MODEL.md](MEMORY_MODEL.md) — memory statuses and lifecycle
 - [ADAPTIVE_MEMORY_ENGINE.md](ADAPTIVE_MEMORY_ENGINE.md) — candidate proposal and feedback
 - [CLI_MEMORY_INTERFACE.md](CLI_MEMORY_INTERFACE.md) — CLI commands
-- [EVIDENCE_CONNECTORS.md](EVIDENCE_CONNECTORS.md) — Git, GitHub, and fixture connectors
+- [EVIDENCE_CONNECTORS.md](EVIDENCE_CONNECTORS.md) — Git, GitHub, Vercel, Cloudflare, and fixture connectors
 - [PRINCIPLES.md](PRINCIPLES.md) — product principles
 
 ## Slack

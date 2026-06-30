@@ -6,12 +6,16 @@
 //! Phase 10 added a read-only local Git connector (`git`). Phase 11 adds a
 //! read-only GitHub connector (`github`) for pull requests, issues, workflow
 //! runs, releases, and deployments. Phase 18A adds a read-only Vercel
-//! connector (`vercel`) for deployment evidence.
+//! connector (`vercel`) for deployment evidence. Phase 18B adds a read-only
+//! Cloudflare connector (`cloudflare`) for Pages and Workers deployment
+//! evidence.
 
+pub mod cloudflare;
 pub mod git;
 pub mod github;
 pub mod vercel;
 
+pub use cloudflare::*;
 pub use git::*;
 pub use github::*;
 pub use vercel::*;
@@ -71,6 +75,8 @@ pub enum EvidenceKind {
     GitHubDeployment,
     GitHubRelease,
     VercelDeployment,
+    CloudflarePagesDeployment,
+    CloudflareWorkerDeployment,
 }
 
 impl EvidenceKind {
@@ -91,6 +97,8 @@ impl EvidenceKind {
             Self::GitHubDeployment => "github_deployment",
             Self::GitHubRelease => "github_release",
             Self::VercelDeployment => "vercel_deployment",
+            Self::CloudflarePagesDeployment => "cloudflare_pages_deployment",
+            Self::CloudflareWorkerDeployment => "cloudflare_worker_deployment",
         }
     }
 
@@ -112,6 +120,8 @@ impl EvidenceKind {
             Self::GitHubDeployment => "GitHub deployment",
             Self::GitHubRelease => "GitHub release",
             Self::VercelDeployment => "Vercel deployment",
+            Self::CloudflarePagesDeployment => "Cloudflare Pages deployment",
+            Self::CloudflareWorkerDeployment => "Cloudflare Worker deployment",
         }
     }
 
@@ -133,6 +143,24 @@ impl EvidenceKind {
     #[must_use]
     pub fn is_vercel(self) -> bool {
         matches!(self, Self::VercelDeployment)
+    }
+
+    #[must_use]
+    pub fn is_cloudflare(self) -> bool {
+        matches!(
+            self,
+            Self::CloudflarePagesDeployment | Self::CloudflareWorkerDeployment
+        )
+    }
+
+    #[must_use]
+    pub fn is_cloudflare_pages(self) -> bool {
+        matches!(self, Self::CloudflarePagesDeployment)
+    }
+
+    #[must_use]
+    pub fn is_cloudflare_worker(self) -> bool {
+        matches!(self, Self::CloudflareWorkerDeployment)
     }
 }
 
@@ -176,6 +204,16 @@ impl EvidenceSource {
             read_only: true,
         }
     }
+
+    #[must_use]
+    pub fn cloudflare(repository: impl Into<String>) -> Self {
+        Self {
+            connector: cloudflare::CLOUDFLARE_CONNECTOR.to_string(),
+            version: CONNECTOR_VERSION.to_string(),
+            repository: Some(repository.into()),
+            read_only: true,
+        }
+    }
 }
 
 /// Normalized, serializable evidence captured by a connector.
@@ -205,6 +243,21 @@ impl EvidenceItem {
     #[must_use]
     pub fn is_vercel(&self) -> bool {
         self.source.connector == vercel::VERCEL_CONNECTOR || self.kind.is_vercel()
+    }
+
+    #[must_use]
+    pub fn is_cloudflare(&self) -> bool {
+        self.source.connector == cloudflare::CLOUDFLARE_CONNECTOR || self.kind.is_cloudflare()
+    }
+
+    #[must_use]
+    pub fn is_cloudflare_pages(&self) -> bool {
+        self.kind.is_cloudflare_pages()
+    }
+
+    #[must_use]
+    pub fn is_cloudflare_worker(&self) -> bool {
+        self.kind.is_cloudflare_worker()
     }
 }
 
@@ -319,6 +372,19 @@ mod tests {
         assert!(EvidenceKind::VercelDeployment.is_vercel());
         assert!(!EvidenceKind::GitCommit.is_vercel());
         assert!(!EvidenceKind::GitHubDeployment.is_vercel());
+        assert!(!EvidenceKind::CloudflarePagesDeployment.is_vercel());
+    }
+
+    #[test]
+    fn evidence_kind_is_cloudflare_partition_is_correct() {
+        assert!(EvidenceKind::CloudflarePagesDeployment.is_cloudflare());
+        assert!(EvidenceKind::CloudflareWorkerDeployment.is_cloudflare());
+        assert!(EvidenceKind::CloudflarePagesDeployment.is_cloudflare_pages());
+        assert!(EvidenceKind::CloudflareWorkerDeployment.is_cloudflare_worker());
+        assert!(!EvidenceKind::CloudflarePagesDeployment.is_cloudflare_worker());
+        assert!(!EvidenceKind::CloudflareWorkerDeployment.is_cloudflare_pages());
+        assert!(!EvidenceKind::GitCommit.is_cloudflare());
+        assert!(!EvidenceKind::VercelDeployment.is_cloudflare());
     }
 
     #[test]
@@ -333,6 +399,15 @@ mod tests {
     fn evidence_source_vercel_is_read_only() {
         let source = EvidenceSource::vercel("my-app");
         assert_eq!(source.connector, "vercel");
+        assert!(source.read_only);
+        assert_eq!(source.repository.as_deref(), Some("my-app"));
+        assert_eq!(source.version, crate::CONNECTOR_VERSION);
+    }
+
+    #[test]
+    fn evidence_source_cloudflare_is_read_only() {
+        let source = EvidenceSource::cloudflare("my-app");
+        assert_eq!(source.connector, "cloudflare");
         assert!(source.read_only);
         assert_eq!(source.repository.as_deref(), Some("my-app"));
         assert_eq!(source.version, crate::CONNECTOR_VERSION);

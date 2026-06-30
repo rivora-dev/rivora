@@ -48,13 +48,16 @@ Read-only Vercel deployment evidence ingestion. First provider evidence
 connector, proving the connector model before adding Cloudflare, Render,
 and AWS.
 
+### Phase 18B — Cloudflare Evidence Connector
+
+Read-only Cloudflare Pages and Workers deployment evidence ingestion. Second
+provider evidence connector. Supports Pages deployment evidence and Workers
+deployment evidence. Does not ingest D1, KV, R2, Queues, logs, analytics,
+WAF, or security events.
+
 ---
 
 ## Planned
-
-### Phase 18B — Cloudflare Evidence Connector
-
-Read-only evidence connector for Cloudflare events.
 
 ### Phase 18C — Render Evidence Connector
 
