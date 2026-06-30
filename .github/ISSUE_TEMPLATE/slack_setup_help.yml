@@ -1,0 +1,86 @@
+name: Slack setup help
+description: Get help with self-hosted Slack, Socket Mode, or `rivora slack doctor`
+title: "[slack] "
+labels: ["slack", "help-wanted"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying the self-hosted Slack interface.
+
+        **Do not paste Slack tokens, signing secrets, app tokens, GitHub tokens,
+        or any other secrets.** Redact token values before sharing output.
+
+        Rivora reads Slack credentials from the environment and never stores
+        them in `.rivora/`.
+  - type: dropdown
+    id: ran_doctor
+    attributes:
+      label: Did you run `rivora slack doctor`?
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor_output
+    attributes:
+      label: Doctor output (redacted)
+      description: |
+        Paste the output of `rivora slack doctor` here. Remove any token values
+        first. Rivora redacts tokens in diagnostics, but review the text before
+        submitting.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: manifest
+    attributes:
+      label: Slack app manifest used
+      description: |
+        The manifest or scope configuration you applied in the Slack app
+        settings. Omit any secret values.
+      render: json
+    validations:
+      required: false
+  - type: dropdown
+    id: socket_mode
+    attributes:
+      label: Is Socket Mode enabled?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: scopes
+    attributes:
+      label: Scopes configured
+      description: |
+        e.g. `app_mentions:read`, `chat:write`. Rivora uses minimal scopes and
+        does not ingest channel history.
+    validations:
+      required: false
+  - type: input
+    id: command
+    attributes:
+      label: Command run
+      description: The exact command (redact tokens).
+      placeholder: "rivora slack socket"
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message
+      description: The error you saw, with tokens redacted.
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Slack behavior
+      description: What you thought would happen when you mentioned Rivora.
+    validations:
+      required: false

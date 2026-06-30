@@ -7,6 +7,22 @@
 
   ## [Unreleased]
 
+  ### Added
+
+  - GitHub issue templates: bug report, feedback, evidence connector request,
+    Slack setup help, and design partner report
+  - Pull request template with a safety boundary checklist
+  - Community feedback and feedback analysis documentation
+  - GitHub labels guidance
+  - ADR 0017: design partner feedback before provider connectors
+  - Docs index (`docs/README.md`) and roadmap (`docs/18-Roadmap.md`)
+
+  ### Changed
+
+  - Design partner onboarding updated with a recommended evaluation path and a
+    feedback loop section
+  - README links to feedback and connector request templates
+
   ## [0.1.0] - 06-29-2026
 
   ### Added

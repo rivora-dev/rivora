@@ -165,6 +165,21 @@ status only; Rivora has no infrastructure-action path.
 
 ---
 
+## Help shape Rivora
+
+Rivora is in a public v0.1 preview. We are listening before building more.
+
+* [Share feedback](https://github.com/rivora-dev/rivora/issues/new?template=feedback.yml)
+* [Request an evidence connector](https://github.com/rivora-dev/rivora/issues/new?template=evidence_connector_request.yml)
+* [Design partner onboarding](docs/DESIGN_PARTNER_ONBOARDING.md)
+* [Security reporting](SECURITY.md)
+
+See [docs/COMMUNITY_FEEDBACK.md](docs/COMMUNITY_FEEDBACK.md) for discussion
+categories and [docs/FEEDBACK_ANALYSIS.md](docs/FEEDBACK_ANALYSIS.md) for how
+feedback is evaluated.
+
+---
+
 ## Contributing
 
 Rivora is built collaboratively by engineers and AI.

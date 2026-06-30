@@ -1,0 +1,71 @@
+name: Feedback
+description: Share what worked, what was confusing, and what would make Rivora useful
+title: "[feedback] "
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Rivora. Tell us what worked and what did not.
+
+        **Do not paste Slack tokens, GitHub tokens, secrets, private keys, or
+        sensitive production data.**
+  - type: textarea
+    id: tried
+    attributes:
+      label: What did you try?
+      description: The commands or scenarios you ran.
+    validations:
+      required: true
+  - type: textarea
+    id: made_sense
+    attributes:
+      label: What made sense?
+      description: Parts of the flow that felt clear or useful.
+    validations:
+      required: false
+  - type: textarea
+    id: confusing
+    attributes:
+      label: What was confusing?
+      description: Parts that were unclear, surprising, or got in your way.
+    validations:
+      required: false
+  - type: dropdown
+    id: evidence_vs_memory
+    attributes:
+      label: Was "evidence vs memory" clear?
+      description: Rivora keeps evidence separate from approved memory.
+      options:
+        - "Yes, clear"
+        - "Somewhat clear"
+        - "No, confusing"
+        - "Not sure what this means"
+    validations:
+      required: true
+  - type: dropdown
+    id: recall_useful
+    attributes:
+      label: Did recall feel useful?
+      description: Did `rivora ask` surface relevant past situations?
+      options:
+        - "Yes"
+        - "A little"
+        - "No"
+        - "I did not try recall"
+    validations:
+      required: true
+  - type: textarea
+    id: expected_help
+    attributes:
+      label: Where did you expect Rivora to help but it did not?
+      description: Moments where you hoped for a suggestion or recall and got nothing useful.
+    validations:
+      required: false
+  - type: textarea
+    id: weekly
+    attributes:
+      label: What would make you use Rivora weekly?
+      description: The single change that would turn this into a habit.
+    validations:
+      required: false
