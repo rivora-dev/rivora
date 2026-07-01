@@ -227,6 +227,37 @@ pasting it into an issue:
 
 ---
 
+## Local diagnostics
+
+Before ingesting from live providers, verify your environment:
+
+```bash
+rivora doctor
+```
+
+`rivora doctor` checks:
+
+* `.rivora/` store exists and is valid
+* `.gitignore` includes `.rivora/`
+* Provider tokens are set for configured connectors (GitHub, Vercel, Cloudflare)
+
+No infrastructure actions are taken. No data leaves your machine.
+
+Every command supports `--help` for detailed usage:
+
+```bash
+rivora doctor --help
+rivora ingest --help
+rivora ask --help
+```
+
+After common commands (`init`, `ingest`, `remember`, `feedback`), Rivora now
+prints guided next steps so you always know what to do next. Empty states
+follow a "What happened? Why? What next?" structure so you are never stuck
+without guidance.
+
+---
+
 ## Known limitations
 
 * Crates are not published; install from source

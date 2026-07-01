@@ -9,6 +9,14 @@
 
   ### Added
 
+  - Phase 19: `rivora doctor` command for local diagnostics (store,
+    `.gitignore`, provider tokens)
+  - Subcommand help (`rivora <command> --help`) for all commands
+  - Guided next steps after `init`, `ingest`, `remember`, and `feedback`
+  - Improved empty-state messages with "What happened? Why? What next?"
+    structure
+  - Malformed `--since` guidance for provider ingests
+  - Output formatting improvements (timestamps in evidence list)
   - Phase 18.5: evidence-to-memory product validation across Git, GitHub,
     Vercel, Cloudflare Pages, and Cloudflare Workers
   - `multi-source-release` demo scenario with cross-source fixture evidence

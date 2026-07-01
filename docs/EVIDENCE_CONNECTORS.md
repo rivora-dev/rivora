@@ -260,6 +260,21 @@ rivora remember --from-evidence <evidence-id>
 rivora feedback <memory-id> approve
 ```
 
+## Diagnostics
+
+Before ingesting from live providers, verify your environment:
+
+```bash
+rivora doctor
+```
+
+`rivora doctor` checks that your `.rivora/` store is valid, `.gitignore`
+includes `.rivora/`, and provider tokens are set for configured connectors.
+If a `--since` value is malformed, the CLI now prints the expected format
+(e.g. `7d`, `24h`) instead of failing silently.
+
+No infrastructure actions are taken. No data leaves your machine.
+
 ## Evidence to Memory
 
 Evidence remains evidence until a human chooses to remember it:

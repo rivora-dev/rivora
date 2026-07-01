@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::io::Write;
 use std::net::TcpStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -396,6 +396,7 @@ pub fn run_slack_dev(store: &LocalMemoryStore, options: SlackDevOptions) -> Resu
     if !store.store_dir().exists() {
         return Ok(slack_setup_guidance_no_store());
     }
+    let bot_user_id = options.bot_user_id.clone();
     let response = route_slack_mention(
         store,
         &SlackAppMentionEvent {
@@ -405,6 +406,7 @@ pub fn run_slack_dev(store: &LocalMemoryStore, options: SlackDevOptions) -> Resu
             timestamp: DEFAULT_TIMESTAMP.to_string(),
             thread_ts: None,
         },
+        bot_user_id.as_deref(),
     )?;
     Ok(format!(
         "Rivora Slack dev response\n\n{}\n\nNo Slack tokens were used. No infrastructure actions were taken.",
@@ -603,7 +605,7 @@ fn process_socket_connection(
             }
         }
         if let Some(event) = envelope.app_mention() {
-            let response = route_slack_mention(store, &event)?;
+            let response = route_slack_mention(store, &event, None)?;
             let request = build_post_message_request(config, &event, &response);
             api.post_message(&config.bot_token, &request)?;
         }
@@ -616,11 +618,15 @@ fn parse_socket_mode_envelope(raw: &str) -> Result<SocketModeEnvelope> {
     })
 }
 
-fn route_slack_mention(store: &LocalMemoryStore, event: &SlackAppMentionEvent) -> Result<String> {
+fn route_slack_mention(
+    store: &LocalMemoryStore,
+    event: &SlackAppMentionEvent,
+    bot_user_id: Option<&str>,
+) -> Result<String> {
     if !store.store_dir().exists() {
         return Ok(slack_setup_guidance_no_store());
     }
-    let normalized = normalize_app_mention_text(&event.text, None);
+    let normalized = normalize_app_mention_text(&event.text, bot_user_id);
     let snapshot = store.load()?;
     let mention = build_mention_request(&normalized, event, &snapshot);
     let _ = SlackReliabilityMemoryApp::new().handle_mention(mention)?;
@@ -772,12 +778,7 @@ fn build_mention_request(
 }
 
 fn slack_store_from_env(cwd: &Path) -> LocalMemoryStore {
-    match std::env::var("RIVORA_STORE_DIR") {
-        Ok(value) if !value.trim().is_empty() => {
-            LocalMemoryStore::with_store_dir(cwd, PathBuf::from(value))
-        }
-        _ => LocalMemoryStore::new(cwd),
-    }
+    crate::store_from_env(cwd)
 }
 
 fn redact_exact_secrets(value: &str, secrets: &[&str]) -> String {
@@ -1168,6 +1169,7 @@ mod tests {
                 timestamp: "1710000000.000100".to_string(),
                 thread_ts: None,
             },
+            None,
         )
         .unwrap();
         let failed = route_slack_mention(
@@ -1179,6 +1181,7 @@ mod tests {
                 timestamp: "1710000000.000200".to_string(),
                 thread_ts: None,
             },
+            None,
         )
         .unwrap();
 
@@ -1201,6 +1204,7 @@ mod tests {
                 timestamp: "1710000000.000100".to_string(),
                 thread_ts: None,
             },
+            None,
         )
         .unwrap();
 
@@ -1614,6 +1618,7 @@ mod tests {
                 timestamp: "1710000000.000100".to_string(),
                 thread_ts: None,
             },
+            None,
         )
         .unwrap();
 
