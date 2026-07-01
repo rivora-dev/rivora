@@ -5,6 +5,7 @@
 //! to `rivora-adaptive`.
 
 mod demo_fixtures;
+pub mod doctor;
 pub mod slack_adapter;
 
 use std::fs;
@@ -37,10 +38,10 @@ use rivora_receipts::Receipt;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 const STORE_DIR: &str = ".rivora";
-const MEMORIES_FILE: &str = "memories.json";
-const FEEDBACK_FILE: &str = "feedback.json";
-const RECEIPTS_FILE: &str = "receipts.json";
-const EVIDENCE_FILE: &str = "evidence.json";
+pub(crate) const MEMORIES_FILE: &str = "memories.json";
+pub(crate) const FEEDBACK_FILE: &str = "feedback.json";
+pub(crate) const RECEIPTS_FILE: &str = "receipts.json";
+pub(crate) const EVIDENCE_FILE: &str = "evidence.json";
 const CLI_SOURCE: &str = "rivora-cli";
 const CLI_VERSION: &str = "0.1.0";
 const DEFAULT_TIMESTAMP: &str = "2026-06-28T00:00:00Z";
@@ -189,7 +190,39 @@ pub enum Command {
     Slack(SlackCommand),
     Ask(String),
     Status,
+    Doctor(DoctorOptions),
     Help,
+    HelpFor(HelpTopic),
+}
+
+/// A focused help topic for `rivora <command> --help`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelpTopic {
+    Root,
+    Init,
+    Demo,
+    Ingest,
+    IngestGit,
+    IngestGithub,
+    IngestVercel,
+    IngestCloudflare,
+    Evidence,
+    Remember,
+    Feedback,
+    Recall,
+    Ask,
+    Slack,
+    SlackDev,
+    SlackDoctor,
+    SlackSocket,
+    Status,
+    Doctor,
+}
+
+/// Options for `rivora doctor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DoctorOptions {
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -530,35 +563,152 @@ pub fn run_command(command: Command, store: &LocalMemoryStore) -> Result<String>
         Command::Slack(command) => run_slack_command(store, command),
         Command::Ask(prompt) => ask(store, &prompt),
         Command::Status => status(store),
+        Command::Doctor(options) => doctor::run(store, options),
         Command::Help => Ok(help_text()),
+        Command::HelpFor(topic) => Ok(help_text_for(topic)),
     }
 }
 
 pub fn parse_command(args: &[String]) -> Result<Command> {
     match args.first().map(String::as_str) {
         None | Some("help") | Some("--help") | Some("-h") => Ok(Command::Help),
-        Some("init") => Ok(Command::Init),
-        Some("demo") => Ok(Command::Demo(parse_demo_options(&args[1..])?)),
-        Some("remember") => Ok(Command::Remember(parse_remember_options(&args[1..])?)),
-        Some("recall") => Ok(Command::Recall(parse_recall_options(&args[1..])?)),
-        Some("feedback") => Ok(Command::Feedback(parse_feedback_options(&args[1..])?)),
-        Some("ingest") => Ok(Command::Ingest(parse_ingest_options(&args[1..])?)),
-        Some("evidence") => Ok(Command::Evidence(parse_evidence_command(&args[1..])?)),
-        Some("slack") => Ok(Command::Slack(parse_slack_command(&args[1..])?)),
+        Some("init") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Init))
+            } else if args.len() > 1 {
+                Err(RivoraError::invalid_value(
+                    "init",
+                    "rivora init does not accept arguments. Try: rivora init --help",
+                ))
+            } else {
+                Ok(Command::Init)
+            }
+        }
+        Some("demo") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Demo))
+            } else {
+                Ok(Command::Demo(parse_demo_options(&args[1..])?))
+            }
+        }
+        Some("remember") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Remember))
+            } else {
+                Ok(Command::Remember(parse_remember_options(&args[1..])?))
+            }
+        }
+        Some("recall") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Recall))
+            } else {
+                Ok(Command::Recall(parse_recall_options(&args[1..])?))
+            }
+        }
+        Some("feedback") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Feedback))
+            } else {
+                Ok(Command::Feedback(parse_feedback_options(&args[1..])?))
+            }
+        }
+        Some("ingest") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(ingest_help_topic(&args[1..])))
+            } else {
+                Ok(Command::Ingest(parse_ingest_options(&args[1..])?))
+            }
+        }
+        Some("evidence") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Evidence))
+            } else {
+                Ok(Command::Evidence(parse_evidence_command(&args[1..])?))
+            }
+        }
+        Some("slack") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(slack_help_topic(&args[1..])))
+            } else {
+                Ok(Command::Slack(parse_slack_command(&args[1..])?))
+            }
+        }
         Some("ask") => {
             let prompt = args[1..].join(" ");
             if prompt.trim().is_empty() {
-                Ok(Command::Help)
+                Ok(Command::HelpFor(HelpTopic::Ask))
             } else {
                 Ok(Command::Ask(prompt))
             }
         }
-        Some("status") => Ok(Command::Status),
+        Some("status") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Status))
+            } else if args.len() > 1 {
+                Err(RivoraError::invalid_value(
+                    "status",
+                    "rivora status does not accept arguments. Try: rivora status --help",
+                ))
+            } else {
+                Ok(Command::Status)
+            }
+        }
+        Some("doctor") => {
+            if has_help_flag(&args[1..]) {
+                Ok(Command::HelpFor(HelpTopic::Doctor))
+            } else {
+                Ok(Command::Doctor(parse_doctor_options(&args[1..])?))
+            }
+        }
         Some(other) => Err(RivoraError::invalid_value(
             "command",
-            format!("unsupported command '{other}'"),
+            format!("unsupported command '{other}'. Try: rivora help or rivora --help"),
         )),
     }
+}
+
+fn has_help_flag(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+}
+
+fn ingest_help_topic(args: &[String]) -> HelpTopic {
+    match args.first().map(String::as_str) {
+        Some("git") => HelpTopic::IngestGit,
+        Some("github") => HelpTopic::IngestGithub,
+        Some("vercel") => HelpTopic::IngestVercel,
+        Some("cloudflare") | Some("cf") => HelpTopic::IngestCloudflare,
+        _ => HelpTopic::Ingest,
+    }
+}
+
+fn slack_help_topic(args: &[String]) -> HelpTopic {
+    match args.first().map(String::as_str) {
+        Some("dev") => HelpTopic::SlackDev,
+        Some("doctor") => HelpTopic::SlackDoctor,
+        Some("socket") => HelpTopic::SlackSocket,
+        _ => HelpTopic::Slack,
+    }
+}
+
+fn parse_doctor_options(args: &[String]) -> Result<DoctorOptions> {
+    let mut options = DoctorOptions::default();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => {
+                options.json = true;
+                i += 1;
+            }
+            other => {
+                return Err(RivoraError::invalid_value(
+                    "doctor_flag",
+                    format!("unsupported doctor flag '{other}'"),
+                ));
+            }
+        }
+    }
+    Ok(options)
 }
 
 pub fn parse_ask_intent(prompt: &str) -> AskIntent {
@@ -608,7 +758,7 @@ pub fn parse_ask_intent(prompt: &str) -> AskIntent {
 pub fn init(store: &LocalMemoryStore) -> Result<String> {
     let snapshot = store.init()?;
     Ok(format!(
-        "Rivora initialized.\n\nLocal memory store:\n{}\n\nMemories: {}\nFeedback: {}\nReceipts: {}\nEvidence: {}",
+        "Rivora initialized.\n\nLocal memory store:\n{}\n\nMemories: {}\nFeedback: {}\nReceipts: {}\nEvidence: {}\n\nNext:\nrivora demo --scenario multi-source-release\nrivora ingest git --repo . --limit 20",
         display_path(&store.memories_path()),
         snapshot.memories.len(),
         snapshot.feedback.len(),
@@ -750,11 +900,24 @@ pub fn feedback(store: &LocalMemoryStore, options: FeedbackOptions) -> Result<St
     store.append_receipts(applied.receipts)?;
 
     Ok(format!(
-        "Memory updated.\n\nMemory: {}\nStatus: {}\nFeedback: {}\n\nNo action was taken.",
+        "Memory updated.\n\nMemory: {}\nStatus: {}\nFeedback: {}\n\nNo action was taken.{}",
         updated.id.as_str(),
         status_label(updated.status),
-        options.kind.as_str()
+        options.kind.as_str(),
+        next_steps_after_feedback(options.kind, updated.status)
     ))
+}
+
+fn next_steps_after_feedback(kind: FeedbackCommandKind, status: MemoryStatus) -> &'static str {
+    match (kind, status) {
+        (FeedbackCommandKind::Approve, MemoryStatus::Active) => {
+            "\n\nNext:\nrivora ask \"have we seen this before?\""
+        }
+        (FeedbackCommandKind::Correct, _) => {
+            "\n\nNext:\nrivora recall <topic>\nrivora evidence list"
+        }
+        _ => "\n\nNext:\nrivora evidence list\nrivora recall <topic>",
+    }
 }
 
 pub fn ingest(store: &LocalMemoryStore, options: IngestOptions) -> Result<String> {
@@ -796,6 +959,9 @@ pub fn ingest_github_with_connector(
 ) -> Result<String> {
     store.init()?;
     let repo = GitHubRepositoryRef::parse(&options.repo)?;
+    if let Some(since) = &options.since {
+        validate_provider_since(since, "github")?;
+    }
     let mut request = GitHubIngestRequest::new(repo).with_limit(options.limit);
     if let Some(since) = options.since.clone() {
         request = request.with_since(since);
@@ -824,14 +990,14 @@ pub fn ingest_vercel(store: &LocalMemoryStore, options: VercelIngestOptions) -> 
     if options.project.trim().is_empty() {
         return Err(RivoraError::invalid_value(
             "vercel_project",
-            "rivora ingest vercel requires --project <project-id-or-name>",
+            "rivora ingest vercel requires --project <project-id-or-name>.\n\nVercel evidence ingestion is read-only.\n\nTry:\nrivora ingest vercel --project <project> --limit 20\n\nNo infrastructure actions were taken.",
         ));
     }
     let auth = VercelAuthConfig::from_env();
     if !auth.has_token() {
         return Err(RivoraError::invalid_value(
             "vercel_token",
-            "Missing VERCEL_TOKEN.\n\nCreate a Vercel access token and run:\n\nexport VERCEL_TOKEN=...\n\nThen try:\nrivora ingest vercel --project <project> --limit 20\n\nNo infrastructure actions were taken.",
+            "Missing VERCEL_TOKEN.\n\nVercel evidence ingestion is read-only and VERCEL_TOKEN is required. Tokens are loaded from the environment and never stored.\n\nRun:\nexport VERCEL_TOKEN=...\n\nThen try:\nrivora ingest vercel --project <project> --limit 20\n\nNo infrastructure actions were taken.",
         ));
     }
     let connector = VercelConnector::new(HttpVercelClient::new(auth));
@@ -848,6 +1014,9 @@ pub fn ingest_vercel_with_connector(
     store.init()?;
     let project = VercelProjectRef::parse(&options.project)?;
     let project = VercelProjectRef::new(project.project, options.team.or(project.team));
+    if let Some(since) = &options.since {
+        validate_provider_since(since, "vercel")?;
+    }
     let mut request = VercelIngestRequest::new(project).with_limit(options.limit);
     if let Some(since) = options.since.clone() {
         request = request.with_since(since);
@@ -864,7 +1033,7 @@ pub fn ingest_cloudflare(
     if options.account.trim().is_empty() {
         return Err(RivoraError::invalid_value(
             "cloudflare_account",
-            "rivora ingest cloudflare requires --account <account-id>",
+            "rivora ingest cloudflare requires --account <account-id>.\n\nCloudflare evidence ingestion is read-only.\n\nTry:\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\nrivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n\nNo infrastructure actions were taken.",
         ));
     }
     match options.platform {
@@ -872,7 +1041,7 @@ pub fn ingest_cloudflare(
             if options.project.as_deref().unwrap_or("").trim().is_empty() {
                 return Err(RivoraError::invalid_value(
                     "cloudflare_project",
-                    "rivora ingest cloudflare pages requires --project <project-name>",
+                    "rivora ingest cloudflare pages requires --project <project-name>.\n\nTry:\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nNo infrastructure actions were taken.",
                 ));
             }
         }
@@ -880,7 +1049,7 @@ pub fn ingest_cloudflare(
             if options.script.as_deref().unwrap_or("").trim().is_empty() {
                 return Err(RivoraError::invalid_value(
                     "cloudflare_script",
-                    "rivora ingest cloudflare worker requires --script <script-name>",
+                    "rivora ingest cloudflare worker requires --script <script-name>.\n\nTry:\nrivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n\nNo infrastructure actions were taken.",
                 ));
             }
         }
@@ -889,7 +1058,7 @@ pub fn ingest_cloudflare(
     if !auth.has_token() {
         return Err(RivoraError::invalid_value(
             "cloudflare_token",
-            "Missing CLOUDFLARE_API_TOKEN.\n\nCreate a Cloudflare API token and run:\n\nexport CLOUDFLARE_API_TOKEN=...\n\nThen try:\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nNo infrastructure actions were taken.",
+            "Missing CLOUDFLARE_API_TOKEN.\n\nCloudflare evidence ingestion is read-only and CLOUDFLARE_API_TOKEN is required (CF_API_TOKEN is accepted as a fallback). Tokens are loaded from the environment and never stored.\n\nRun:\nexport CLOUDFLARE_API_TOKEN=...\n\nThen try:\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\nrivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n\nNo infrastructure actions were taken.",
         ));
     }
     let connector = CloudflareConnector::new(HttpCloudflareClient::new(auth));
@@ -911,6 +1080,9 @@ pub fn ingest_cloudflare_with_connector(
             CloudflareTarget::worker(&options.account, options.script.as_deref().unwrap_or(""))
         }
     };
+    if let Some(since) = &options.since {
+        validate_provider_since(since, "cloudflare")?;
+    }
     let mut request = CloudflareIngestRequest::new(target).with_limit(options.limit);
     if let Some(since) = options.since.clone() {
         request = request.with_since(since);
@@ -971,7 +1143,7 @@ pub fn evidence_list(store: &LocalMemoryStore) -> Result<String> {
     let snapshot = store.load()?;
     if snapshot.evidence.is_empty() {
         return Ok(
-            "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\n\nOr run:\nrivora demo\n\nNo infrastructure actions were taken."
+            "No evidence found yet.\n\nEvidence is what Rivora reads before anything becomes memory. Without evidence, Rivora cannot suggest what to remember.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nOr run:\nrivora demo --scenario multi-source-release\n\nNo infrastructure actions were taken."
                 .to_string(),
         );
     }
@@ -980,12 +1152,14 @@ pub fn evidence_list(store: &LocalMemoryStore) -> Result<String> {
     for item in snapshot.evidence.iter().take(20) {
         let provider = provider_label_for_evidence(item);
         let status = evidence_status_label(item);
+        let timestamp = item.timestamp.as_deref().unwrap_or("unknown");
         output.push_str(&format!(
-            "\n* {}\n  Source: {}\n  Kind: {}\n  Status: {}\n  Summary: {}",
+            "\n* {}\n  Source: {}\n  Kind: {}\n  Status: {}\n  When: {}\n  Summary: {}",
             item.id.as_str(),
             provider,
             item.kind.as_str(),
             status,
+            timestamp,
             item.summary
         ));
         if let Some(service) = &item.service {
@@ -1042,7 +1216,7 @@ pub fn ask(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         AskIntent::WhatChangedInVercel => ask_what_changed_in_vercel(store),
         AskIntent::WhatFailedInCloudflare => ask_what_failed_in_cloudflare(store),
         AskIntent::WhatChangedInCloudflare => ask_what_changed_in_cloudflare(store),
-        AskIntent::Help => Ok(help_text()),
+        AskIntent::Help => Ok(help_text_for(HelpTopic::Ask)),
     }
 }
 
@@ -1448,7 +1622,7 @@ fn parse_github_ingest_options(args: &[String]) -> Result<GitHubIngestOptions> {
     if options.repo.trim().is_empty() {
         return Err(RivoraError::invalid_value(
             "github_repo",
-            "rivora ingest github requires --repo owner/name",
+            "rivora ingest github requires --repo owner/name.\n\nGitHub evidence ingestion is read-only and uses GET requests only.\n\nTry:\nrivora ingest github --repo owner/name --limit 20\nrivora ingest github --repo owner/name --pull-requests --workflow-runs\n\nNo infrastructure actions were taken.",
         ));
     }
     Ok(options)
@@ -1771,20 +1945,49 @@ fn candidate_request_from_evidence(
     })
 }
 
+fn next_steps_after_ingest() -> &'static str {
+    "\n\nNext:\nrivora ask \"what changed?\"\nrivora evidence list\nrivora remember --from-evidence <evidence-id>"
+}
+
+/// Validate a `--since` value for a provider ingest (GitHub, Vercel,
+/// Cloudflare). These connectors accept an ISO timestamp or a relative days
+/// value like `7d`. Clearly malformed values are rejected early with a
+/// helpful, next-step-bearing message. The local Git connector is not
+/// validated here because it forwards `--since` to `git log`, which accepts
+/// its own set of date formats.
+fn validate_provider_since(value: &str, connector: &str) -> Result<()> {
+    let trimmed = value.trim();
+    let is_relative_days = trimmed
+        .strip_suffix('d')
+        .map(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or(false);
+    let is_iso_like = trimmed.contains('-');
+    if is_relative_days || is_iso_like {
+        return Ok(());
+    }
+    Err(RivoraError::invalid_value(
+        "since",
+        format!(
+            "Malformed --since value '{trimmed}' for {connector}.\n\nRivora accepts an ISO timestamp (e.g. 2026-06-01 or 2026-06-01T00:00:00Z) or a relative days value like 7d.\n\nTry:\nrivora ingest {connector} ... --since 7d\nrivora ingest {connector} ... --since 2026-06-01\n\nNo infrastructure actions were taken."
+        ),
+    ))
+}
+
 fn render_ingest_result(
     result: &EvidenceIngestResult,
     added: usize,
     store: &LocalMemoryStore,
 ) -> String {
     format!(
-        "Rivora ingested Git evidence.\n\nRepository: {}\nEvidence items ingested: {}\nNew evidence items: {}\nCommits: {}\nFile changes: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nNo infrastructure actions were taken.",
+        "Rivora ingested Git evidence.\n\nRepository: {}\nEvidence items ingested: {}\nNew evidence items: {}\nCommits: {}\nFile changes: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nNo infrastructure actions were taken.{}",
         result.repository,
         result.evidence.len(),
         added,
         result.commits,
         result.file_changes,
         render_bullets(&result.topics),
-        display_path(&store.evidence_path())
+        display_path(&store.evidence_path()),
+        next_steps_after_ingest()
     )
 }
 
@@ -1794,7 +1997,7 @@ fn render_github_ingest_result(
     store: &LocalMemoryStore,
 ) -> String {
     format!(
-        "Rivora ingested GitHub evidence.\n\nRepository: {}\nEvidence items ingested: {}\nNew evidence items: {}\nPull requests: {}\nIssues: {}\nWorkflow runs: {}\nReleases: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nGitHub access is read-only. No infrastructure actions were taken.",
+        "Rivora ingested GitHub evidence.\n\nRepository: {}\nEvidence items ingested: {}\nNew evidence items: {}\nPull requests: {}\nIssues: {}\nWorkflow runs: {}\nReleases: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nGitHub access is read-only. No infrastructure actions were taken.{}",
         result.repository,
         result.evidence.len(),
         added,
@@ -1804,7 +2007,8 @@ fn render_github_ingest_result(
         result.releases,
         result.deployments,
         render_bullets(&result.topics),
-        display_path(&store.evidence_path())
+        display_path(&store.evidence_path()),
+        next_steps_after_ingest()
     )
 }
 
@@ -1814,13 +2018,14 @@ fn render_vercel_ingest_result(
     store: &LocalMemoryStore,
 ) -> String {
     format!(
-        "Rivora ingested Vercel evidence.\n\nProject: {}\nEvidence items ingested: {}\nNew evidence items: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nVercel access is read-only. No infrastructure actions were taken.",
+        "Rivora ingested Vercel evidence.\n\nProject: {}\nEvidence items ingested: {}\nNew evidence items: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nVercel access is read-only. No infrastructure actions were taken.{}",
         result.repository,
         result.evidence.len(),
         added,
         result.deployments,
         render_bullets(&result.topics),
-        display_path(&store.evidence_path())
+        display_path(&store.evidence_path()),
+        next_steps_after_ingest()
     )
 }
 
@@ -1834,14 +2039,15 @@ fn render_cloudflare_ingest_result(
         CloudflarePlatform::Workers => "Cloudflare Workers",
     };
     format!(
-        "Rivora ingested {} evidence.\n\nRepository: {}\nEvidence items ingested: {}\nNew evidence items: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nCloudflare access is read-only. No infrastructure actions were taken.",
+        "Rivora ingested {} evidence.\n\nRepository: {}\nEvidence items ingested: {}\nNew evidence items: {}\nDeployments: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nCloudflare access is read-only. No infrastructure actions were taken.{}",
         platform_label,
         result.repository,
         result.evidence.len(),
         added,
         result.deployments,
         render_bullets(&result.topics),
-        display_path(&store.evidence_path())
+        display_path(&store.evidence_path()),
+        next_steps_after_ingest()
     )
 }
 
@@ -2214,12 +2420,13 @@ fn ask_github_evidence(
 fn render_remembered(memory: &MemoryRecord) -> String {
     let evidence = memory_evidence(memory);
     format!(
-        "This may be worth remembering.\n\nMemory: {}\nStatus: {}\nSummary: {}\nConfidence: {}\nEvidence:\n{}\n\nNo action was taken.",
+        "This may be worth remembering.\n\nMemory: {}\nStatus: {}\nSummary: {}\nConfidence: {}\nEvidence:\n{}\n\nNo action was taken.\n\nNext:\nrivora feedback {} approve\nrivora recall <topic>",
         memory.id.as_str(),
         status_label(memory.status),
         memory.body.as_str(),
         confidence_label(memory.confidence.score),
-        render_bullets(&evidence)
+        render_bullets(&evidence),
+        memory.id.as_str()
     )
 }
 
@@ -2235,20 +2442,21 @@ fn render_remembered_from_evidence(memory: &MemoryRecord, evidence: &EvidenceIte
     };
     let evidence_refs = memory_evidence(memory);
     format!(
-        "Memory candidate created from {source_label} evidence.\n\nMemory: {}\nSource: {}\nSummary: {}\nStatus: {}\nConfidence: {}\nEvidence:\n{}\n\nNo action was taken.",
+        "Memory candidate created from {source_label} evidence.\n\nMemory: {}\nSource: {}\nSummary: {}\nStatus: {}\nConfidence: {}\nEvidence:\n{}\n\nNo action was taken.\n\nNext:\nrivora feedback {} approve\nrivora recall <topic>",
         memory.id.as_str(),
         evidence.kind.label(),
         memory.body.as_str(),
         status_label(memory.status),
         confidence_label(memory.confidence.score),
-        render_bullets(&evidence_refs)
+        render_bullets(&evidence_refs),
+        memory.id.as_str()
     )
 }
 
 fn render_recall_result(result: &RecallResult) -> String {
     if result.matches.is_empty() {
         return format!(
-            "No similar memories found.\n\nNo approved memories found for this query.\nEvidence is not memory until approved.\n\nTry:\n* {}\n* rivora recall <service> --include-candidates\n* rivora demo\n\nNo action was taken.",
+            "No similar memories found.\n\nWhat happened: Rivora has no approved memory that matches this query yet.\nWhy it matters: recall only surfaces memory a human has approved. Evidence is not memory until approved.\n\nTry:\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora feedback <memory-id> approve\n* rivora recall <service> --include-candidates\n* rivora demo\n\nNo action was taken.",
             remember_example()
         );
     }
@@ -2271,8 +2479,36 @@ fn render_recall_result(result: &RecallResult) -> String {
 }
 
 fn help_text() -> String {
+    help_text_for(HelpTopic::Root)
+}
+
+fn help_text_for(topic: HelpTopic) -> String {
+    match topic {
+        HelpTopic::Root => root_help(),
+        HelpTopic::Init => "rivora init\n\nInitialize the local `.rivora/` store in the current directory.\n\nCreates `memories.json`, `feedback.json`, `receipts.json`, and\n`evidence.json`. Existing data is preserved.\n\nRivora is local-first. No tokens are required. No infrastructure actions are\ntaken.\n\nNext:\nrivora demo --scenario multi-source-release\nrivora ingest git --repo . --limit 20".to_string(),
+        HelpTopic::Demo => "rivora demo\n\nRun a deterministic, local-only demo of the full memory loop:\nEvidence -> Memory Candidate -> Human Approval -> Recall.\n\nFlags:\n  --scenario <name>   basic (default), checkout-incident,\n                      release-regression, workflow-failure,\n                      multi-source-release\n  --keep              Keep the demo store on disk after running\n  --store <path>      Use an explicit demo store directory\n  --json              Emit a stable JSON summary\n\nThe demo uses packaged fixture data embedded in the binary. No tokens, no\nnetwork, and no data leaves your machine. Evidence is not memory until\napproved. No infrastructure actions are taken.".to_string(),
+        HelpTopic::Ingest => "rivora ingest <connector>\n\nIngest read-only engineering evidence into the local `.rivora/` store.\n\nConnectors:\n  git        Local Git history (`rivora ingest git --help`)\n  github     GitHub PRs, issues, workflows, releases, deployments\n  vercel     Vercel deployment evidence\n  cloudflare Cloudflare Pages and Workers deployment evidence\n  fixture    Local JSON fixture evidence for demos and tests\n\nAll connectors are read-only. No deployment, rollback, or infrastructure\nactions are taken. Provider tokens are read from environment variables and\nnever stored.\n\nNext:\nrivora evidence list\nrivora ask \"what changed?\"".to_string(),
+        HelpTopic::IngestGit => "rivora ingest git\n\nIngest read-only evidence from a local Git repository.\n\nFlags:\n  --repo <path>   Repository path (default: current directory)\n  --since <value> Optional time window (e.g. `7d`, `2026-06-01`)\n  --limit <n>     Maximum commits to read (default: 20)\n\nThe connector only reads Git history. It never runs mutating commands such\nas commit, push, pull, reset, checkout, rebase, merge, or clean. No\ninfrastructure actions are taken.\n\nNext:\nrivora evidence list\nrivora remember --from-evidence <evidence-id>".to_string(),
+        HelpTopic::IngestGithub => "rivora ingest github\n\nIngest read-only evidence from the GitHub REST API (pull requests, issues,\nworkflow runs, releases, deployments).\n\nFlags:\n  --repo owner/name    Required repository reference\n  --since <value>      Optional time window\n  --limit <n>          Maximum items per source (default: 20)\n  --pull-requests      Include merged pull requests\n  --issues             Include issues\n  --workflow-runs      Include workflow runs\n  --releases           Include releases\n  --deployments        Include deployments\n\n`GITHUB_TOKEN` is optional for public repos and never stored. The connector\nonly issues `GET` requests. No infrastructure actions are taken.".to_string(),
+        HelpTopic::IngestVercel => "rivora ingest vercel\n\nIngest read-only deployment evidence from the Vercel REST API.\n\nFlags:\n  --project <id-or-name>  Required project reference\n  --team <id-or-slug>     Optional team scope\n  --since <value>         Optional time window\n  --limit <n>             Maximum deployments (default: 20)\n\n`VERCEL_TOKEN` is required and never stored. The connector is read-only. No\ndeployment, rollback, or promotion actions are taken.".to_string(),
+        HelpTopic::IngestCloudflare => "rivora ingest cloudflare <pages|worker>\n\nIngest read-only deployment evidence from the Cloudflare REST API.\n\nSubcommands:\n  pages    Cloudflare Pages deployment evidence\n  worker   Cloudflare Workers deployment evidence\n\nFlags:\n  --account <account-id>     Required account id\n  --project <project-name>   Required for `pages`\n  --script <script-name>     Required for `worker`\n  --since <value>            Optional time window\n  --limit <n>                Maximum deployments (default: 20)\n\n`CLOUDFLARE_API_TOKEN` is required (`CF_API_TOKEN` is accepted as a\nfallback) and never stored. The connector is read-only. No deployment,\nrollback, promotion, DNS, route, Worker, Pages, KV, R2, D1, or Queues\nactions are taken.".to_string(),
+        HelpTopic::Evidence => "rivora evidence <list|show>\n\nReview local evidence stored in `.rivora/evidence.json`.\n\nCommands:\n  rivora evidence list           List recent evidence items\n  rivora evidence show <id>      Show one evidence item in full\n\nEvidence is not memory until a human chooses to remember and approve it.\nNo infrastructure actions are taken.\n\nNext:\nrivora remember --from-evidence <evidence-id>".to_string(),
+        HelpTopic::Remember => format!("rivora remember\n\nPropose a memory candidate from evidence or an explicit summary.\n\nFlags:\n  --from-evidence <id>     Build a candidate from stored evidence\n  --service <name>         Service or topic (required without --from-evidence)\n  --summary \"text\"         Memory summary (required without --from-evidence)\n  --symptom <name>         Repeatable symptom tag\n  --tag <name>             Repeatable tag\n  --evidence <id>          Repeatable evidence reference\n  --source <name>          Source label\n  --confidence <low|medium|high|number>\n  --approve                Also approve the candidate immediately\n\nA candidate is `MemoryStatus::Candidate` until approved. No action is taken\non your infrastructure.\n\nExample:\n  {}\n\nNext:\nrivora feedback <memory-id> approve\nrivora recall <topic>", remember_example()),
+        HelpTopic::Feedback => "rivora feedback <memory-id> <kind>\n\nApply human feedback to a memory. Feedback changes memory status only; no\ninfrastructure action is taken.\n\nKinds:\n  approve               Approve the candidate (status -> Active)\n  reject                Reject the candidate (status -> Rejected)\n  correct               Correct the candidate (status -> Corrected)\n  useful                Mark useful\n  not-useful            Mark not useful\n  needs-more-evidence   Request more evidence\n\nFlags:\n  --note \"text\"   Optional note (required context for `correct`)\n\nEvery feedback operation produces a receipt.\n\nNext:\nrivora ask \"have we seen this before?\"".to_string(),
+        HelpTopic::Recall => "rivora recall <service> [flags]\n\nRecall similar approved memories for a service or topic.\n\nArguments:\n  <service>   Optional service or topic to match\n\nFlags:\n  --symptom <name>            Repeatable symptom to match\n  --tag <name>                Repeatable tag to match\n  --include-candidates        Also include unapproved candidates\n\nRecall is deterministic and evidence-backed. It never claims root cause.\nNo infrastructure actions are taken.".to_string(),
+        HelpTopic::Ask => "rivora ask \"<question>\"\n\nAsk Rivora a natural-language question about local evidence and memory.\n\nSuggested prompts:\n  rivora ask \"what changed?\"\n  rivora ask \"what changed recently?\"\n  rivora ask \"what merged recently?\"\n  rivora ask \"what deployed recently?\"\n  rivora ask \"what failed recently?\"\n  rivora ask \"what changed in github?\"\n  rivora ask \"what changed in vercel?\"\n  rivora ask \"what changed on cloudflare?\"\n  rivora ask \"what failed in cloudflare?\"\n  rivora ask \"what happened during the release?\"\n  rivora ask \"have we seen this before?\"\n  rivora ask \"have we seen checkout deploy failures before?\"\n\nRivora reads local evidence only. It never claims root cause and never takes\ninfrastructure actions. If a prompt is not understood, this help is shown.".to_string(),
+        HelpTopic::Slack => "rivora slack <dev|doctor|socket>\n\nSelf-hosted Slack adapter. This is not the official Slack Marketplace app.\n\nCommands:\n  rivora slack doctor           Validate Slack setup\n  rivora slack dev --text \"...\" Simulate a Slack mention locally\n  rivora slack socket           Start live Slack Socket Mode\n\nSlack tokens are read from the environment and never stored in `.rivora/`.\nNo infrastructure actions are taken.".to_string(),
+        HelpTopic::SlackDev => "rivora slack dev --text \"<question>\"\n\nSimulate a Slack app mention locally without connecting to Slack. Useful for\ntesting prompts and output formatting.\n\nFlags:\n  --text \"...\"        Required mention text (supports `@rivora` and `<@id>`)\n  --channel <id>      Optional channel id (default: CLOCAL)\n  --user <id>         Optional user id (default: ULOCAL)\n  --bot-user-id <id>  Optional bot user id to strip from mention text\n\nDev mode uses the same routing logic as live Socket Mode. No Slack tokens\nare used. No infrastructure actions are taken.".to_string(),
+        HelpTopic::SlackDoctor => "rivora slack doctor\n\nValidate Slack environment and local store setup.\n\nFlags:\n  --live   Also call `apps.connections.open` to validate Socket Mode access\n\nChecks `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, and\nthe local store. Tokens are reported as `set`/`not set` only and never\nprinted. No infrastructure actions are taken.\n\nFor a general local diagnostic, see `rivora doctor`.".to_string(),
+        HelpTopic::SlackSocket => "rivora slack socket\n\nStart the live self-hosted Slack adapter using Socket Mode.\n\nRequires `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_SIGNING_SECRET`.\nRun `rivora slack doctor` first to validate setup.\n\nListens for `@rivora` app mentions and replies in-thread. Reconnects\nautomatically on disconnect. No infrastructure actions are taken. Press\nCtrl-C to stop.".to_string(),
+        HelpTopic::Status => "rivora status\n\nShow local store counts: memories by status, evidence, feedback, and\nreceipts. No tokens are required. No infrastructure actions are taken.".to_string(),
+        HelpTopic::Doctor => "rivora doctor\n\nRun a local diagnostic of the Rivora store and provider tokens.\n\nFlags:\n  --json   Emit a stable JSON report\n\nChecks the current directory, `.rivora/` store files, whether `.rivora/` is\ngitignored, and provider env vars (`GITHUB_TOKEN`, `VERCEL_TOKEN`,\n`CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `SLACK_BOT_TOKEN`,\n`SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`). Tokens are reported as\n`set`/`not set` only and never printed. No network access is required. No\ninfrastructure actions are taken.".to_string(),
+    }
+}
+
+fn root_help() -> String {
     format!(
-        "Rivora local-first, evidence-backed reliability memory CLI\n\nCommands:\n* rivora demo\n* rivora demo --scenario <basic|checkout-incident|release-regression|workflow-failure|multi-source-release>\n* rivora init\n* rivora ingest fixture --path examples/demo/evidence.json\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n* rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora ask \"what changed?\"\n* rivora ask \"what changed recently?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"what changed on checkout?\"\n* rivora ask \"what changed across providers?\"\n* rivora ask \"what happened during the release?\"\n* rivora ask \"what changed in github?\"\n* rivora ask \"what changed in vercel?\"\n* rivora ask \"what changed on cloudflare?\"\n* rivora ask \"what failed in cloudflare?\"\n* rivora ask \"have we seen checkout deploy failures before?\"\n* rivora ask \"have we seen this before?\"\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n* rivora status\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
+        "Rivora local-first, evidence-backed reliability memory CLI\n\nRivora is local-first. Evidence and memory are stored in `.rivora/` under\nyour current directory. Evidence is not memory until a human approves it.\nProvider connectors are read-only. No infrastructure actions are taken.\nTokens are loaded from environment variables and never stored.\n\nCommands:\n\nGet started:\n* rivora init\n* rivora demo\n* rivora doctor\n\nIngest read-only evidence:\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n* rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n* rivora ingest fixture --path examples/demo/evidence.json\n\nReview evidence and memory:\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora status\n\nAsk questions:\n* rivora ask \"what changed?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"have we seen this before?\"\n\nSlack (self-hosted):\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n\nHelp:\n* rivora help\n* rivora <command> --help\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
         remember_example()
     )
 }
@@ -2446,11 +2682,24 @@ fn slug(value: &str) -> String {
     }
 }
 
-fn display_path(path: &Path) -> String {
+pub(crate) fn display_path(path: &Path) -> String {
     if let Ok(relative) = path.strip_prefix(std::env::current_dir().unwrap_or_default()) {
         relative.display().to_string()
     } else {
         path.display().to_string()
+    }
+}
+
+/// Build a [`LocalMemoryStore`] rooted at `cwd`, honoring `RIVORA_STORE_DIR`
+/// when it is set to a non-empty value. Shared by `rivora doctor` and the
+/// Slack adapter so both report on the same store.
+#[must_use]
+pub(crate) fn store_from_env(cwd: &Path) -> LocalMemoryStore {
+    match std::env::var("RIVORA_STORE_DIR") {
+        Ok(value) if !value.trim().is_empty() => {
+            LocalMemoryStore::with_store_dir(cwd, PathBuf::from(value))
+        }
+        _ => LocalMemoryStore::new(cwd),
     }
 }
 
@@ -3079,8 +3328,10 @@ mod tests {
         let (_temp, store) = temp_store();
         let output = run(["ask", "please do something magical"], &store.root).unwrap();
 
-        assert!(output.contains("Rivora local-first, evidence-backed reliability memory CLI"));
         assert!(output.contains("rivora ask"));
+        assert!(output.contains("what changed?"));
+        assert!(output.contains("have we seen this before?"));
+        assert!(!output_contains_infrastructure_action(&output));
     }
 
     #[test]
@@ -4597,5 +4848,166 @@ mod tests {
             parse_ask_intent("have we seen checkout deploy failures before?"),
             AskIntent::Recall
         );
+    }
+
+    #[test]
+    fn top_level_help_includes_all_key_commands() {
+        let output = help_text();
+
+        for command in [
+            "rivora init",
+            "rivora demo",
+            "rivora doctor",
+            "rivora ingest git",
+            "rivora ingest github",
+            "rivora ingest vercel",
+            "rivora ingest cloudflare",
+            "rivora evidence list",
+            "rivora evidence show",
+            "rivora remember",
+            "rivora recall",
+            "rivora feedback",
+            "rivora ask",
+            "rivora slack doctor",
+            "rivora slack dev",
+            "rivora slack socket",
+            "rivora status",
+            "rivora help",
+        ] {
+            assert!(
+                output.contains(command),
+                "missing command in help: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn ingest_help_includes_all_providers() {
+        let output = help_text_for(HelpTopic::Ingest);
+
+        for provider in ["GitHub", "Vercel", "Cloudflare"] {
+            assert!(
+                output.contains(provider),
+                "missing provider in ingest help: {provider}"
+            );
+        }
+    }
+
+    #[test]
+    fn init_shows_helpful_next_steps() {
+        let (_temp, store) = temp_store();
+        let output = init(&store).unwrap();
+
+        assert!(output.contains("Next:"), "{output}");
+        assert!(output.contains("demo"), "{output}");
+        assert!(output.contains("ingest"), "{output}");
+    }
+
+    #[test]
+    fn ingest_shows_helpful_next_steps() {
+        let (_temp, store) = temp_store();
+        let repo = create_git_repo();
+
+        let output = run(
+            [
+                "ingest",
+                "git",
+                "--repo",
+                repo.path().to_str().unwrap(),
+                "--limit",
+                "5",
+            ],
+            &store.root,
+        )
+        .unwrap();
+
+        assert!(output.contains("Next:"), "{output}");
+        assert!(output.contains("ask"), "{output}");
+        assert!(output.contains("evidence list"), "{output}");
+        assert!(output.contains("remember"), "{output}");
+    }
+
+    #[test]
+    fn empty_evidence_state_is_helpful() {
+        let (_temp, store) = temp_store();
+        init(&store).unwrap();
+
+        let output = evidence_list(&store).unwrap();
+
+        assert!(output.contains("No evidence found yet."), "{output}");
+        assert!(output.contains("ingest"), "{output}");
+    }
+
+    #[test]
+    fn empty_memory_state_is_helpful() {
+        let (_temp, store) = temp_store();
+        init(&store).unwrap();
+
+        let output = run(["recall", "checkout-api"], &store.root).unwrap();
+
+        assert!(output.contains("No similar memories found."), "{output}");
+        assert!(
+            output.contains("Evidence is not memory until approved."),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn no_approved_memories_state_is_helpful() {
+        let (_temp, store) = temp_store();
+        remember_args();
+        run(remember_args(), &store.root).unwrap();
+
+        let output = run(["recall", "checkout-api"], &store.root).unwrap();
+
+        assert!(output.contains("No similar memories found."), "{output}");
+        assert!(
+            output.contains("include-candidates"),
+            "missing hint about --include-candidates: {output}"
+        );
+    }
+
+    #[test]
+    fn unsupported_ask_prompt_shows_suggestions() {
+        let (_temp, store) = temp_store();
+        let output = run(["ask", "please do something magical"], &store.root).unwrap();
+
+        assert!(output.contains("what changed?"), "{output}");
+        assert!(output.contains("have we seen this before?"), "{output}");
+        assert!(output.contains("what deployed recently?"), "{output}");
+    }
+
+    #[test]
+    fn missing_provider_token_redaction() {
+        let (_temp, store) = temp_store();
+        let client = rivora_connectors::FixtureVercelClient::builder()
+            .deployments(
+                r#"{
+                "deployments": [],
+                "pagination": { "count": 0, "next": null, "prev": null }
+            }"#,
+            )
+            .build();
+        let connector = VercelConnector::new(client);
+        let options = VercelIngestOptions {
+            project: "my-app".to_string(),
+            ..VercelIngestOptions::default()
+        };
+
+        let output = ingest_vercel_with_connector(&store, options, &connector).unwrap();
+
+        assert!(!output.contains("VERCEL_TOKEN"), "{output}");
+        assert!(!output.contains("xoxb-"), "{output}");
+    }
+
+    #[test]
+    fn malformed_since_gives_helpful_guidance() {
+        let error = validate_provider_since("recently", "github")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("Malformed --since"), "{error}");
+        assert!(error.contains("ISO"), "{error}");
+        assert!(error.contains("7d"), "{error}");
     }
 }

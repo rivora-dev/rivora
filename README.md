@@ -106,6 +106,17 @@ rivora feedback <memory-id> approve
 rivora ask "have we seen checkout latency before?"
 ```
 
+Every command supports `--help` for detailed usage:
+
+```bash
+rivora doctor --help
+rivora ingest --help
+rivora ask --help
+```
+
+`rivora doctor` runs local diagnostics to verify your store, `.gitignore`, and
+provider tokens are configured correctly. No infrastructure actions are taken.
+
 Evidence is not memory until a human chooses to remember and approve it.
 
 ---

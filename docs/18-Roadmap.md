@@ -66,24 +66,31 @@ adding more provider connectors.
 
 See [PRODUCT_VALIDATION.md](PRODUCT_VALIDATION.md).
 
+### Phase 19 — Slack + CLI Usability Hardening
+
+`rivora doctor` command for local diagnostics (store, `.gitignore`, provider
+tokens). Subcommand help (`rivora <command> --help`) for all commands. Guided
+next steps after `init`, `ingest`, `remember`, and `feedback`. Improved
+empty-state messages with a "What happened? Why? What next?" structure.
+Malformed `--since` guidance for provider ingests. Output formatting
+improvements. Slack dev/socket parity improvements.
+
 ---
 
 ## Planned
 
-### Phase 19 — Slack + CLI Usability Hardening
-
-Improve Slack and CLI usability based on design partner feedback from the
-product validation phase.
-
 ### Phase 20 — Ability Proposal Runtime
 
-A runtime that proposes actions for human approval. Rivora still does not
-execute infrastructure actions; proposals are explainable and receipt-backed.
+Deferred until Phase 19 usability improvements are validated by design partner
+feedback. A runtime that proposes actions for human approval. Rivora still does
+not execute infrastructure actions; proposals are explainable and
+receipt-backed.
 
 ### Phase 21 — Next Provider Connector
 
-The next provider connector will be chosen based on design partner feedback
-and the connector prioritization table in
+Deferred until Phase 19 usability improvements are validated by design partner
+feedback. The next provider connector will be chosen based on design partner
+feedback and the connector prioritization table in
 [FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md). Render, AWS, GCP, Azure,
 Kubernetes, Sentry, Datadog, and PagerDuty are deferred until the current
 product loop is validated by real usage.

@@ -184,6 +184,7 @@ workflow. Rivora reads them at runtime and does not persist them.
 A short path that exercises the full core loop plus Slack:
 
 ```bash
+rivora doctor
 rivora demo --scenario multi-source-release
 rivora init
 rivora ingest git --repo . --limit 20
@@ -196,6 +197,17 @@ rivora feedback <memory-id> approve
 rivora ask "have we seen this before?"
 rivora slack doctor
 rivora slack dev --text "what changed?"
+```
+
+`rivora doctor` runs local diagnostics before you begin. It checks your store,
+`.gitignore`, and provider tokens. No infrastructure actions are taken.
+
+Every command supports `--help` for detailed usage:
+
+```bash
+rivora doctor --help
+rivora ingest --help
+rivora ask --help
 ```
 
 This stays local and deterministic. No tokens are required for the demo, Git
