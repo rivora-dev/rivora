@@ -162,12 +162,15 @@ Reads PlanetScale branch and deploy-request metadata through GET-only REST API
 endpoints and stores normalized evidence locally:
 
 ```bash
+export PLANETSCALE_SERVICE_TOKEN_ID=...
 export PLANETSCALE_SERVICE_TOKEN=...
 rivora ingest planetscale --org my-org --database checkout-db --limit 20
 rivora ingest pscale --org my-org --database checkout-db --branch main --since 7d
 ```
 
-The connector never connects to the database, runs SQL, reads customer rows or
+Both values are required for service-token authentication. The optional
+`PLANETSCALE_AUTH_TOKEN` fallback is an OAuth access token. The connector never
+connects to the database, runs SQL, reads customer rows or
 branch passwords, stores connection strings/raw query results/schema dumps/
 schema diffs/raw DDL, or mutates PlanetScale. Evidence is not memory until
 approved. No database or infrastructure actions are taken.
@@ -306,8 +309,7 @@ Slack is the primary team memory interface. The CLI is the local engineer
 interface. Both surfaces use the same adaptive memory engine and receipt-backed
 memory model, but neither surface takes control away from engineers.
 
-Related: [13-CLI-UX.md](13-CLI-UX.md) ·
-[ADAPTIVE_MEMORY_ENGINE.md](ADAPTIVE_MEMORY_ENGINE.md) ·
+Related: [ADAPTIVE_MEMORY_ENGINE.md](ADAPTIVE_MEMORY_ENGINE.md) ·
 [DEMO.md](DEMO.md) ·
 [SLACK_APP.md](SLACK_APP.md) ·
 [SLACK_SELF_HOSTING.md](SLACK_SELF_HOSTING.md) ·

@@ -9,9 +9,13 @@
 
   ### Added
 
+  - Phase 20B.1 PlanetScale connector audit covering the live authentication
+    contract, curl transport hardening, poisoned allowlisted fields,
+    deterministic deduplication, recall approval gating, CLI/Slack/doctor
+    parity, and public documentation
   - Phase 20B: read-only, metadata-first PlanetScale branch and deploy-request
     evidence connector (`rivora ingest planetscale`, with `pscale` alias)
-  - PlanetScale branch, time-window, and strict 1-100 limit filters; stable
+  - PlanetScale branch, time-window, and safely capped 1-100 limit filters; stable
     branch/deploy-request evidence IDs; offline fixture client
   - PlanetScale-aware ask, memory candidate, recall, doctor, Slack, and
     cross-source release behavior
@@ -79,6 +83,19 @@
 
   ### Changed
 
+  - PlanetScale service-token authentication now requires both
+    `PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN` using the
+    documented `ID:TOKEN` header; `PLANETSCALE_AUTH_TOKEN` remains an OAuth
+    Bearer-token fallback
+  - PlanetScale curl requests disable user curl configuration, restrict HTTPS,
+    reject unsafe credential characters, and redact broader credential shapes
+  - PlanetScale allowlisted fields now use field-specific validation, safe
+    permalinks are restricted to `app.planetscale.com`, malformed responses
+    fail closed, and duplicate IDs resolve deterministically
+  - Natural-language recall no longer includes unapproved candidate memories;
+    candidates remain available only through explicit recall flags
+  - Cross-source summaries no longer claim a shared time window without
+    calculating one
   - Multi-source summaries now group PlanetScale data-layer evidence alongside
     GitHub, Vercel, Cloudflare, and Sentry using root-cause-neutral language
     and an explicit no-database-actions safety statement

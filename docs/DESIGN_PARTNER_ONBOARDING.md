@@ -135,6 +135,7 @@ fallback. The default query is `is:unresolved`, and results are capped at 100.
 Use a service token with only `read_branch` and `read_deploy_request`:
 
 ```bash
+export PLANETSCALE_SERVICE_TOKEN_ID=...
 export PLANETSCALE_SERVICE_TOKEN=...
 rivora ingest planetscale --org my-org --database checkout-db --limit 20
 rivora ask "what database changes happened recently?"
@@ -142,7 +143,10 @@ rivora ask "what schema changes happened recently?"
 rivora ask "what happened during the release?"
 ```
 
-The connector is read-only, metadata-first, API-only, and GET-only. It stores
+Service-token authentication requires both values above. The optional
+`PLANETSCALE_AUTH_TOKEN` fallback is for an OAuth access token and uses Bearer
+authentication. The connector is read-only, metadata-first, API-only, and
+GET-only. It stores
 branch and deploy-request metadata locally. It never connects to the database,
 runs SQL, reads customer rows or branch passwords, or stores connection
 strings, raw query results, full schema dumps, schema diffs, or raw DDL. It
@@ -303,7 +307,7 @@ text before pasting it into an issue:
    prefixed values.
 2. Remove signing secrets and private keys.
 3. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `SENTRY_AUTH_TOKEN`,
-   `SENTRY_TOKEN`, `PLANETSCALE_SERVICE_TOKEN`, and
+   `SENTRY_TOKEN`, `PLANETSCALE_SERVICE_TOKEN_ID`, `PLANETSCALE_SERVICE_TOKEN`, and
    `PLANETSCALE_AUTH_TOKEN` values.
 4. Remove internal hostnames, customer identifiers, and production incident
    timelines that include sensitive data.

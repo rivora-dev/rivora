@@ -214,6 +214,7 @@ rivora feedback <memory-id> approve
 ## PlanetScale data-layer evidence
 
 ```bash
+export PLANETSCALE_SERVICE_TOKEN_ID=...
 export PLANETSCALE_SERVICE_TOKEN=...
 rivora init
 rivora ingest planetscale --org my-org --database checkout-db --limit 20
@@ -227,8 +228,10 @@ rivora feedback <memory-id> approve
 
 PlanetScale ingestion is read-only, metadata-first, API-only, and GET-only.
 It stores normalized database branch and deploy-request metadata locally.
-`PLANETSCALE_SERVICE_TOKEN` is preferred; `PLANETSCALE_AUTH_TOKEN` is accepted
-as a fallback. Tokens are never stored.
+PlanetScale service-token authentication requires both
+`PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN`.
+`PLANETSCALE_AUTH_TOKEN` is accepted only as an OAuth Bearer-token fallback.
+Credentials are never stored.
 
 Rivora never connects to the customer database, runs SQL, reads customer rows
 or branch passwords, or ingests connection strings, raw query results, full
@@ -272,8 +275,8 @@ rivora ask "what happened during the release?"
 ```
 
 Cross-source summaries are evidence-backed, not root-cause claims. Rivora
-never says "X caused Y." It says "these events occurred in the same window"
-and "this may be related."
+never says "X caused Y." It says recent evidence was found across providers
+and nearby evidence may be related.
 
 See [docs/PRODUCT_VALIDATION.md](docs/PRODUCT_VALIDATION.md) for the full
 validation flow.

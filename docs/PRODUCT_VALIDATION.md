@@ -119,8 +119,8 @@ Sentry
 PlanetScale
 - PlanetScale deploy request #42 — ...
 
-These events occurred in the same window.
-This may be related.
+Recent evidence was found across providers.
+Nearby evidence may be related.
 
 This may be worth remembering.
 Evidence is not memory until approved.
@@ -225,6 +225,7 @@ rivora ingest sentry --org <org-slug> --project <project-slug> --limit 20
 rivora ask "what errors happened recently?"
 
 # PlanetScale branches and deploy requests (read_branch + read_deploy_request)
+export PLANETSCALE_SERVICE_TOKEN_ID=...
 export PLANETSCALE_SERVICE_TOKEN=...
 rivora ingest planetscale --org <org-slug> --database <database-name> --limit 20
 rivora ask "what database changes happened recently?"
@@ -253,7 +254,7 @@ pasting it into an issue:
 1. Remove any `xoxb-`, `xapp-`, `ghp_`, `gho_`, `ghu_`, `ghs_`, or `ghr_`
    prefixed values.
 2. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `SENTRY_AUTH_TOKEN`,
-   `SENTRY_TOKEN`, `PLANETSCALE_SERVICE_TOKEN`, and
+   `SENTRY_TOKEN`, `PLANETSCALE_SERVICE_TOKEN_ID`, `PLANETSCALE_SERVICE_TOKEN`, and
    `PLANETSCALE_AUTH_TOKEN` values.
 3. Remove signing secrets and private keys.
 4. Remove internal hostnames, customer identifiers, and production incident
@@ -274,7 +275,13 @@ rivora doctor
 
 * `.rivora/` store exists and is valid
 * `.gitignore` includes `.rivora/`
-* Provider tokens are set for configured connectors (GitHub, Vercel, Cloudflare, Sentry)
+* Provider tokens are set for configured connectors (GitHub, Vercel,
+  Cloudflare, Sentry, PlanetScale)
+
+PlanetScale service-token diagnostics report both
+`PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN` as `set` or
+`not set`; OAuth fallback diagnostics report `PLANETSCALE_AUTH_TOKEN`. Values
+are never printed.
 
 No infrastructure actions are taken. No data leaves your machine.
 

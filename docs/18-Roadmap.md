@@ -100,6 +100,14 @@ summaries. It never connects to a database, runs SQL, reads customer rows or
 branch passwords, ingests connection strings/raw query results/schema dumps/
 schema diffs/raw DDL, or mutates PlanetScale.
 
+### Phase 20B.1 — PlanetScale Connector Audit + Hardening
+
+Audits and hardens PlanetScale service-token/OAuth authentication, GET-only
+transport, credential redaction, poisoned allowlisted fields, safe permalinks,
+deterministic deduplication and limits, approval-gated recall, CLI/Slack/doctor
+parity, fixtures, and public documentation. Deploy operations remain deferred
+because their payloads can contain raw DDL and table-level details.
+
 ---
 
 ## Planned

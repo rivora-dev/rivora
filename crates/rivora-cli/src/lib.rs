@@ -1263,10 +1263,18 @@ fn ingest_planetscale_with_auth(
     options: PlanetScaleIngestOptions,
     auth: PlanetScaleAuthConfig,
 ) -> Result<String> {
+    if let Some(error) = auth.configuration_error() {
+        return Err(RivoraError::invalid_value(
+            "planetscale_token",
+            format!(
+                "{error}.\n\nPlanetScale service-token authentication requires both values:\nexport PLANETSCALE_SERVICE_TOKEN_ID=...\nexport PLANETSCALE_SERVICE_TOKEN=...\n\nAlternatively, set PLANETSCALE_AUTH_TOKEN to a read-only OAuth access token.\n\nNo database actions were taken.\nNo infrastructure actions were taken."
+            ),
+        ));
+    }
     if !auth.has_token() {
         return Err(RivoraError::invalid_value(
             "planetscale_token",
-            "Missing PLANETSCALE_SERVICE_TOKEN.\n\nCreate a read-only PlanetScale service token and run:\n\nexport PLANETSCALE_SERVICE_TOKEN=...\n\nThen try:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
+            "Missing PlanetScale credentials.\n\nCreate a read-only PlanetScale service token and run:\n\nexport PLANETSCALE_SERVICE_TOKEN_ID=...\nexport PLANETSCALE_SERVICE_TOKEN=...\n\nThen try:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nAlternatively, set PLANETSCALE_AUTH_TOKEN to a read-only OAuth access token.\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
         ));
     }
     let connector = PlanetScaleConnector::new(HttpPlanetScaleClient::new(auth));
@@ -1310,10 +1318,10 @@ fn validate_planetscale_options(options: &PlanetScaleIngestOptions) -> Result<()
             "rivora ingest planetscale requires --database <database-name>.\n\nTry:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
         ));
     }
-    if !(1..=100).contains(&options.limit) {
+    if options.limit == 0 {
         return Err(RivoraError::invalid_value(
             "planetscale_limit",
-            "rivora ingest planetscale requires --limit between 1 and 100.\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
+            "rivora ingest planetscale requires --limit to be at least 1. Values above 100 are safely capped at 100.\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
         ));
     }
     Ok(())
@@ -1392,6 +1400,20 @@ pub fn evidence_list(store: &LocalMemoryStore) -> Result<String> {
         if let Some(service) = &item.service {
             output.push_str(&format!("\n  Topic: {service}"));
         }
+        if item.is_planetscale() {
+            for prefix in [
+                "Database:",
+                "Branch:",
+                "Base branch:",
+                "State:",
+                "Status:",
+                "Deploy request:",
+            ] {
+                if let Some(line) = item.body.lines().find(|line| line.starts_with(prefix)) {
+                    output.push_str(&format!("\n  {line}"));
+                }
+            }
+        }
     }
     if snapshot.evidence.iter().any(EvidenceItem::is_planetscale) {
         output.push_str("\n\nNo database actions were taken.");
@@ -1420,7 +1442,7 @@ pub fn ask(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
                     service: recall_target,
                     symptoms: symptoms_from_prompt(prompt),
                     tags: Vec::new(),
-                    include_candidates: true,
+                    include_candidates: false,
                 },
             )
         }
@@ -2019,9 +2041,10 @@ fn parse_planetscale_ingest_options(args: &[String]) -> Result<PlanetScaleIngest
             "--since" => options.since = Some(flag_value(args, &mut index, "--since")?),
             "--limit" => {
                 let value = flag_value(args, &mut index, "--limit")?;
-                options.limit = value.parse::<usize>().map_err(|_| {
+                let parsed = value.parse::<usize>().map_err(|_| {
                     RivoraError::invalid_value("limit", "limit must be a positive integer")
                 })?;
+                options.limit = parsed.min(100);
             }
             other => {
                 return Err(RivoraError::invalid_value(
@@ -2507,11 +2530,14 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
     }
     if let Some(first_id) = first_id {
         output.push_str(&format!(
-            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.",
+            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}",
             first_id
         ));
         if includes_planetscale {
+            output.push_str("\n\nNo causal conclusion was inferred.");
             output.push_str("\nNo database actions were taken.");
+        } else {
+            output.push_str("\n\nNo root cause was inferred.");
         }
         output.push_str("\nNo infrastructure actions were taken.");
     }
@@ -2551,12 +2577,7 @@ fn ask_what_failed_recently(store: &LocalMemoryStore) -> Result<String> {
     let failure_evidence: Vec<EvidenceItem> = matches.into_iter().cloned().collect();
     let summary = CrossSourceEvidenceSummary::from_evidence(&failure_evidence, None);
     if summary.provider_count() > 1 {
-        let mut output = summary.render();
-        output = output.replace(
-            "These events occurred in the same window.\nNearby evidence may be related and may be worth investigating.\n",
-            "These failures occurred in the same window.\nNearby evidence may be related and may be worth investigating.\n",
-        );
-        return Ok(output);
+        return Ok(summary.render());
     }
     let mut sorted = failure_evidence;
     sorted.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
@@ -2734,7 +2755,7 @@ fn ask_planetscale_evidence(
         .filter(|item| item.is_planetscale() && predicate(item))
         .collect::<Vec<_>>();
     if matches.is_empty() {
-        return Ok("Rivora did not find PlanetScale data-layer evidence yet.\n\nTry:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo root cause was inferred.\nNo database actions were taken.\nNo infrastructure actions were taken.".to_string());
+        return Ok("Rivora did not find PlanetScale data-layer evidence yet.\n\nTry:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo causal conclusion was inferred.\nNo database actions were taken.\nNo infrastructure actions were taken.".to_string());
     }
     matches.sort_by(|left, right| {
         right
@@ -2753,7 +2774,7 @@ fn ask_planetscale_evidence(
     }
     if let Some(first) = matches.first() {
         output.push_str(&format!(
-            "\n\nThis data-layer evidence may be near recent deployment or error evidence.\nThis may be worth investigating.\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo database actions were taken.\nNo infrastructure actions were taken.",
+            "\n\nThis data-layer evidence may be near recent deployment or error evidence.\nThis may be worth investigating.\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo causal conclusion was inferred.\nNo database actions were taken.\nNo infrastructure actions were taken.",
             first.id.as_str()
         ));
     }
@@ -2887,16 +2908,23 @@ fn render_remembered(memory: &MemoryRecord) -> String {
 fn render_remembered_from_evidence(memory: &MemoryRecord, evidence: &EvidenceItem) -> String {
     let source_label = provider_label_for_evidence(evidence);
     let evidence_refs = memory_evidence(memory);
-    format!(
-        "Memory candidate created from {source_label} evidence.\n\nMemory: {}\nSource: {}\nSummary: {}\nStatus: {}\nConfidence: {}\nEvidence:\n{}\n\nNo action was taken.\n\nNext:\nrivora feedback {} approve\nrivora recall <topic>",
+    let mut output = format!(
+        "Memory candidate created from {source_label} evidence.\n\nMemory: {}\nSource: {}\nSummary: {}\nStatus: {}\nConfidence: {}\nEvidence:\n{}\n\nNo action was taken.",
         memory.id.as_str(),
         evidence.kind.label(),
         memory.body.as_str(),
         status_label(memory.status),
         confidence_label(memory.confidence.score),
         render_bullets(&evidence_refs),
+    );
+    if evidence.is_planetscale() {
+        output.push_str("\nNo database actions were taken.\nNo infrastructure actions were taken.");
+    }
+    output.push_str(&format!(
+        "\n\nNext:\nrivora feedback {} approve\nrivora recall <topic>",
         memory.id.as_str()
-    )
+    ));
+    output
 }
 
 fn render_recall_result(result: &RecallResult) -> String {
@@ -2922,6 +2950,14 @@ fn render_recall_result(result: &RecallResult) -> String {
         ));
     }
     output.push_str("\nNo action was taken.");
+    if result.matches.iter().any(|matched| {
+        matched
+            .evidence_refs
+            .iter()
+            .any(|reference| reference.starts_with("planetscale:"))
+    }) {
+        output.push_str("\nNo database actions were taken.\nNo infrastructure actions were taken.");
+    }
     output
 }
 
@@ -2940,7 +2976,7 @@ fn help_text_for(topic: HelpTopic) -> String {
         HelpTopic::IngestVercel => "rivora ingest vercel\n\nIngest read-only deployment evidence from the Vercel REST API.\n\nFlags:\n  --project <id-or-name>  Required project reference\n  --team <id-or-slug>     Optional team scope\n  --since <value>         Optional time window\n  --limit <n>             Maximum deployments (default: 20)\n\n`VERCEL_TOKEN` is required and never stored. The connector is read-only. No\ndeployment, rollback, or promotion actions are taken.".to_string(),
         HelpTopic::IngestCloudflare => "rivora ingest cloudflare <pages|worker>\n\nIngest read-only deployment evidence from the Cloudflare REST API.\n\nSubcommands:\n  pages    Cloudflare Pages deployment evidence\n  worker   Cloudflare Workers deployment evidence\n\nFlags:\n  --account <account-id>     Required account id\n  --project <project-name>   Required for `pages`\n  --script <script-name>     Required for `worker`\n  --since <value>            Optional time window\n  --limit <n>                Maximum deployments (default: 20)\n\n`CLOUDFLARE_API_TOKEN` is required (`CF_API_TOKEN` is accepted as a\nfallback) and never stored. The connector is read-only. No deployment,\nrollback, promotion, DNS, route, Worker, Pages, KV, R2, D1, or Queues\nactions are taken.".to_string(),
         HelpTopic::IngestSentry => "rivora ingest sentry\n\nIngest metadata-first issue evidence from the Sentry REST API.\n\nFlags:\n  --org <org-slug>             Required organization slug\n  --project <project-slug>     Required project slug\n  --environment <environment>  Optional environment filter\n  --since <value>              Optional timestamp or duration (for example 24h or 7d)\n  --query <query>              Optional Sentry issue query (default: is:unresolved)\n  --limit <n>                  Maximum issues (default: 20; maximum: 100)\n\n`SENTRY_AUTH_TOKEN` is required (`SENTRY_TOKEN` is accepted as a fallback)\nand never stored. Only GET requests are used. Rivora does not ingest raw\nstack traces, event payloads, request data, user emails, IPs, replays, or\nbreadcrumbs. No Sentry or infrastructure actions are taken.".to_string(),
-        HelpTopic::IngestPlanetScale => "rivora ingest planetscale\n\nIngest metadata-first database branch and deploy-request evidence from the\nPlanetScale REST API. `pscale` is accepted as an alias.\n\nFlags:\n  --org <org-slug>           Required organization slug\n  --database <database-name> Required database name\n  --branch <branch-name>     Optional branch filter\n  --since <value>            Optional timestamp or duration (for example 24h or 7d)\n  --limit <n>                Maximum combined records (default: 20; range: 1-100)\n\n`PLANETSCALE_SERVICE_TOKEN` is required (`PLANETSCALE_AUTH_TOKEN` is a\nfallback) and never stored. Only GET requests are used. Rivora never connects\nto the database, runs SQL, reads customer rows or branch passwords, or stores\nconnection strings, raw schema dumps, schema diffs, or raw DDL. It does not\ncreate, approve, or deploy deploy requests or create, delete, or promote\nbranches. No database or infrastructure actions are taken.".to_string(),
+        HelpTopic::IngestPlanetScale => "rivora ingest planetscale\n\nIngest metadata-first database branch and deploy-request evidence from the\nPlanetScale REST API. `pscale` is accepted as an alias.\n\nFlags:\n  --org <org-slug>           Required organization slug\n  --database <database-name> Required database name\n  --branch <branch-name>     Optional branch filter\n  --since <value>            Optional timestamp or duration (for example 24h or 7d)\n  --limit <n>                Maximum combined records (default: 20; values above 100 are capped)\n\nService-token authentication requires both `PLANETSCALE_SERVICE_TOKEN_ID` and\n`PLANETSCALE_SERVICE_TOKEN`. `PLANETSCALE_AUTH_TOKEN` is accepted as an OAuth\nBearer-token fallback. Credentials are never stored. Only GET requests are\nused. Rivora never connects to the database, runs SQL, reads customer rows or\nbranch passwords, or stores connection strings, raw schema dumps, schema\ndiffs, or raw DDL. It does not create, approve, or deploy deploy requests or\ncreate, delete, or promote branches. No database or infrastructure actions are\ntaken.".to_string(),
         HelpTopic::Evidence => "rivora evidence <list|show>\n\nReview local evidence stored in `.rivora/evidence.json`.\n\nCommands:\n  rivora evidence list           List recent evidence items\n  rivora evidence show <id>      Show one evidence item in full\n\nEvidence is not memory until a human chooses to remember and approve it.\nNo infrastructure actions are taken.\n\nNext:\nrivora remember --from-evidence <evidence-id>".to_string(),
         HelpTopic::Remember => format!("rivora remember\n\nPropose a memory candidate from evidence or an explicit summary.\n\nFlags:\n  --from-evidence <id>     Build a candidate from stored evidence\n  --service <name>         Service or topic (required without --from-evidence)\n  --summary \"text\"         Memory summary (required without --from-evidence)\n  --symptom <name>         Repeatable symptom tag\n  --tag <name>             Repeatable tag\n  --evidence <id>          Repeatable evidence reference\n  --source <name>          Source label\n  --confidence <low|medium|high|number>\n  --approve                Also approve the candidate immediately\n\nA candidate is `MemoryStatus::Candidate` until approved. No action is taken\non your infrastructure.\n\nExample:\n  {}\n\nNext:\nrivora feedback <memory-id> approve\nrivora recall <topic>", remember_example()),
         HelpTopic::Feedback => "rivora feedback <memory-id> <kind>\n\nApply human feedback to a memory. Feedback changes memory status only; no\ninfrastructure action is taken.\n\nKinds:\n  approve               Approve the candidate (status -> Active)\n  reject                Reject the candidate (status -> Rejected)\n  correct               Correct the candidate (status -> Corrected)\n  useful                Mark useful\n  not-useful            Mark not useful\n  needs-more-evidence   Request more evidence\n\nFlags:\n  --note \"text\"   Optional note (required context for `correct`)\n\nEvery feedback operation produces a receipt.\n\nNext:\nrivora ask \"have we seen this before?\"".to_string(),
@@ -2951,7 +2987,7 @@ fn help_text_for(topic: HelpTopic) -> String {
         HelpTopic::SlackDoctor => "rivora slack doctor\n\nValidate Slack environment and local store setup.\n\nFlags:\n  --live   Also call `apps.connections.open` to validate Socket Mode access\n\nChecks `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, and\nthe local store. Tokens are reported as `set`/`not set` only and never\nprinted. No infrastructure actions are taken.\n\nFor a general local diagnostic, see `rivora doctor`.".to_string(),
         HelpTopic::SlackSocket => "rivora slack socket\n\nStart the live self-hosted Slack adapter using Socket Mode.\n\nRequires `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_SIGNING_SECRET`.\nRun `rivora slack doctor` first to validate setup.\n\nListens for `@rivora` app mentions and replies in-thread. Reconnects\nautomatically on disconnect. No infrastructure actions are taken. Press\nCtrl-C to stop.".to_string(),
         HelpTopic::Status => "rivora status\n\nShow local store counts: memories by status, evidence, feedback, and\nreceipts. No tokens are required. No infrastructure actions are taken.".to_string(),
-        HelpTopic::Doctor => "rivora doctor\n\nRun a local diagnostic of the Rivora store and provider tokens.\n\nFlags:\n  --json   Emit a stable JSON report\n\nChecks the current directory, `.rivora/` store files, whether `.rivora/` is\ngitignored, and provider env vars (`GITHUB_TOKEN`, `VERCEL_TOKEN`,\n`CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `SENTRY_AUTH_TOKEN`, `SENTRY_TOKEN`,\n`PLANETSCALE_SERVICE_TOKEN`, `PLANETSCALE_AUTH_TOKEN`, `SLACK_BOT_TOKEN`,\n`SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`). Tokens are reported as `set`/`not\nset` only and never printed. No network access is required. No infrastructure\nactions are taken.".to_string(),
+        HelpTopic::Doctor => "rivora doctor\n\nRun a local diagnostic of the Rivora store and provider tokens.\n\nFlags:\n  --json   Emit a stable JSON report\n\nChecks the current directory, `.rivora/` store files, whether `.rivora/` is\ngitignored, and provider env vars (`GITHUB_TOKEN`, `VERCEL_TOKEN`,\n`CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `SENTRY_AUTH_TOKEN`, `SENTRY_TOKEN`,\n`PLANETSCALE_SERVICE_TOKEN_ID`, `PLANETSCALE_SERVICE_TOKEN`,\n`PLANETSCALE_AUTH_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`,\n`SLACK_SIGNING_SECRET`). Tokens are reported as `set`/`not set` only and never\nprinted. No network access is required. No database or infrastructure actions\nare taken.".to_string(),
     }
 }
 
@@ -3313,50 +3349,15 @@ impl CrossSourceEvidenceSummary {
     #[must_use]
     pub fn render(&self) -> String {
         let mut output = String::from("Recent evidence\n");
-        if !self.github.is_empty() {
-            output.push_str("\nGitHub\n");
-            for line in &self.github {
-                output.push_str(&format!("- {line}\n"));
-            }
-        }
-        if !self.vercel.is_empty() {
-            output.push_str("\nVercel\n");
-            for line in &self.vercel {
-                output.push_str(&format!("- {line}\n"));
-            }
-        }
-        if !self.cloudflare_pages.is_empty() {
-            output.push_str("\nCloudflare Pages\n");
-            for line in &self.cloudflare_pages {
-                output.push_str(&format!("- {line}\n"));
-            }
-        }
-        if !self.cloudflare_workers.is_empty() {
-            output.push_str("\nCloudflare Workers\n");
-            for line in &self.cloudflare_workers {
-                output.push_str(&format!("- {line}\n"));
-            }
-        }
-        if !self.sentry.is_empty() {
-            output.push_str("\nSentry\n");
-            for line in &self.sentry {
-                output.push_str(&format!("- {line}\n"));
-            }
-        }
-        if !self.planetscale.is_empty() {
-            output.push_str("\nPlanetScale\n");
-            for line in &self.planetscale {
-                output.push_str(&format!("- {line}\n"));
-            }
-        }
-        if !self.git.is_empty() {
-            output.push_str("\nGit\n");
-            for line in &self.git {
-                output.push_str(&format!("- {line}\n"));
-            }
-        }
+        render_provider_evidence(&mut output, "GitHub", &self.github);
+        render_provider_evidence(&mut output, "Vercel", &self.vercel);
+        render_provider_evidence(&mut output, "Cloudflare Pages", &self.cloudflare_pages);
+        render_provider_evidence(&mut output, "Cloudflare Workers", &self.cloudflare_workers);
+        render_provider_evidence(&mut output, "Sentry", &self.sentry);
+        render_provider_evidence(&mut output, "PlanetScale", &self.planetscale);
+        render_provider_evidence(&mut output, "Git", &self.git);
         if self.provider_count() > 1 {
-            output.push_str("\nThese events occurred in the same window.\nNearby evidence may be related and may be worth investigating.\n");
+            output.push_str("\nRecent evidence was found across providers.\nNearby evidence may be related and may be worth investigating.\n");
         }
         output.push_str("\nThis may be worth remembering.\nEvidence is not memory until approved.");
         if !self.planetscale.is_empty() {
@@ -3364,6 +3365,19 @@ impl CrossSourceEvidenceSummary {
         }
         output.push_str("\nNo infrastructure actions were taken.");
         output
+    }
+}
+
+fn render_provider_evidence(output: &mut String, label: &str, lines: &[String]) {
+    if lines.is_empty() {
+        return;
+    }
+    output.push_str(&format!("\n{label}\n"));
+    for line in lines.iter().take(5) {
+        output.push_str(&format!("- {line}\n"));
+    }
+    if lines.len() > 5 {
+        output.push_str(&format!("- ... {} more\n", lines.len() - 5));
     }
 }
 
@@ -4802,7 +4816,7 @@ mod tests {
             "output missing Cloudflare Workers group: {output}"
         );
         assert!(
-            output.contains("These events occurred in the same window."),
+            output.contains("Recent evidence was found across providers."),
             "output missing cross-source context: {output}"
         );
         assert!(
@@ -5245,7 +5259,8 @@ mod tests {
         assert!(rendered.contains("GitHub"));
         assert!(rendered.contains("Vercel"));
         assert!(rendered.contains("Cloudflare Pages"));
-        assert!(rendered.contains("These events occurred in the same window."));
+        assert!(rendered.contains("Recent evidence was found across providers."));
+        assert!(!rendered.contains("same window"));
         assert!(rendered.contains("Evidence is not memory until approved."));
     }
 
@@ -5986,7 +6001,7 @@ mod tests {
             "--since".into(),
             "7d".into(),
             "--limit".into(),
-            "100".into(),
+            "250".into(),
         ])
         .unwrap();
         match parsed {
@@ -5997,7 +6012,46 @@ mod tests {
             }
             other => panic!("expected PlanetScale ingest, got {other:?}"),
         }
-        assert!(parse_command(&["ingest".into(), "planetscale".into()]).is_err());
+        let missing_org = parse_command(&[
+            "ingest".into(),
+            "planetscale".into(),
+            "--database".into(),
+            "checkout-db".into(),
+        ])
+        .unwrap_err()
+        .to_string();
+        let missing_database = parse_command(&[
+            "ingest".into(),
+            "planetscale".into(),
+            "--org".into(),
+            "demo-org".into(),
+        ])
+        .unwrap_err()
+        .to_string();
+        let missing_since = parse_command(&[
+            "ingest".into(),
+            "planetscale".into(),
+            "--org".into(),
+            "demo-org".into(),
+            "--database".into(),
+            "checkout-db".into(),
+            "--since".into(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(missing_org.contains("requires --org"), "{missing_org}");
+        assert!(
+            missing_database.contains("requires --database"),
+            "{missing_database}"
+        );
+        assert!(
+            missing_since.contains("flag requires a value"),
+            "{missing_since}"
+        );
+        assert_eq!(
+            help_text_for(ingest_help_topic(&["pscale".to_string()])),
+            help_text_for(HelpTopic::IngestPlanetScale)
+        );
     }
 
     #[test]
@@ -6018,16 +6072,32 @@ mod tests {
             "what database changes happened recently?",
             "what schema changes happened recently?",
             "what deploy requests happened recently?",
+            "what changed in planetscale?",
             "what happened in planetscale?",
+            "what changed around this error?",
+            "what changed around these errors?",
             "what happened during the release?",
         ] {
             let output = ask(&store, prompt).unwrap();
             assert!(output.contains("PlanetScale"), "{prompt}: {output}");
-            assert!(!output.contains("caused"), "{prompt}: {output}");
             assert!(
                 output.contains("No database actions were taken."),
                 "{output}"
             );
+            for forbidden in [
+                "caused by",
+                "root cause",
+                "confirmed regression",
+                "fixed",
+                "resolved",
+                "deployed by Rivora",
+                "approved by Rivora",
+                "SQL executed",
+                "database was read",
+                "production data was read",
+            ] {
+                assert!(!output.contains(forbidden), "{prompt}: {output}");
+            }
         }
         let remember_output = remember(
             &store,
@@ -6047,6 +6117,12 @@ mod tests {
             store.load().unwrap().memories[0].status,
             MemoryStatus::Candidate
         );
+        assert!(remember_output.contains("No database actions were taken."));
+        let unapproved = ask(&store, "have we seen this schema change pattern before?").unwrap();
+        assert!(
+            unapproved.contains("No similar memories found"),
+            "{unapproved}"
+        );
         let memory_id = store.load().unwrap().memories[0].id.as_str().to_string();
         feedback(
             &store,
@@ -6062,6 +6138,36 @@ mod tests {
             recall_output.contains("PlanetScale evidence"),
             "{recall_output}"
         );
+        let schema_recall = ask(&store, "have we seen this schema change pattern before?").unwrap();
+        assert!(
+            schema_recall.contains("PlanetScale evidence"),
+            "{schema_recall}"
+        );
+        assert!(recall_output.contains("No database actions were taken."));
+
+        let list = evidence_list(&store).unwrap();
+        let show =
+            evidence_show(&store, "planetscale:deploy-request:demo-org:checkout-db:42").unwrap();
+        for expected in [
+            "Source: PlanetScale",
+            "Database: checkout-db",
+            "Branch: checkout-schema-change",
+            "Status: complete",
+            "Deploy request: 42",
+        ] {
+            assert!(list.contains(expected), "missing {expected}: {list}");
+        }
+        for expected in [
+            "Kind: PlanetScale database deploy request",
+            "Org: demo-org",
+            "Database: checkout-db",
+            "Branch: checkout-schema-change",
+            "Base branch: main",
+            "Review state: approved",
+            "PlanetScale evidence is metadata-only",
+        ] {
+            assert!(show.contains(expected), "missing {expected}: {show}");
+        }
         let persisted = serde_json::to_string(&store.load().unwrap()).unwrap();
         for forbidden in [
             "secret-password",
@@ -6083,19 +6189,21 @@ mod tests {
         let missing = ingest_planetscale_with_auth(
             &store,
             planetscale_options(),
-            PlanetScaleAuthConfig::with_token(""),
+            PlanetScaleAuthConfig::with_service_token("", ""),
         )
         .unwrap_err()
         .to_string();
         assert!(
-            missing.contains("Missing PLANETSCALE_SERVICE_TOKEN."),
+            missing.contains("Missing PlanetScale credentials."),
             "{missing}"
         );
         assert!(!store.store_dir().exists());
 
         let mut invalid = planetscale_options();
-        invalid.limit = 101;
+        invalid.limit = 0;
         assert!(validate_planetscale_options(&invalid).is_err());
+        invalid.limit = 250;
+        assert!(validate_planetscale_options(&invalid).is_ok());
         invalid.limit = 20;
         invalid.since = Some("recently".to_string());
         assert!(ingest_planetscale_with_connector(
@@ -6105,5 +6213,49 @@ mod tests {
         )
         .is_err());
         assert!(!store.store_dir().exists());
+    }
+
+    #[test]
+    fn empty_planetscale_ingest_and_slack_prompts_are_safe_and_helpful() {
+        let (_temp, store) = temp_store();
+        let empty = PlanetScaleConnector::new(
+            FixturePlanetScaleClient::builder()
+                .branches(r#"{"data":[]}"#)
+                .deploy_requests(r#"{"data":[]}"#)
+                .build(),
+        );
+        let empty_output =
+            ingest_planetscale_with_connector(&store, planetscale_options(), &empty).unwrap();
+        assert!(empty_output.contains("No PlanetScale branch or deploy-request evidence found"));
+        assert!(empty_output.contains("Evidence is not memory until approved."));
+        assert!(empty_output.contains("No database actions were taken."));
+
+        ingest_planetscale_with_connector(
+            &store,
+            planetscale_options(),
+            &planetscale_fixture_connector(),
+        )
+        .unwrap();
+        for prompt in [
+            "what database changes happened recently?",
+            "what changed around this error?",
+            "what happened during the release?",
+        ] {
+            let output = run_slack_dev(
+                &store,
+                SlackDevOptions {
+                    text: prompt.to_string(),
+                    channel: "C-PLANETSCALE-AUDIT".to_string(),
+                    user: "U-PLANETSCALE-AUDIT".to_string(),
+                    bot_user_id: None,
+                },
+            )
+            .unwrap();
+            assert!(output.contains("PlanetScale"), "{prompt}: {output}");
+            assert!(output.contains("No database actions were taken."));
+            for forbidden in ["mysql://", "ALTER TABLE", "root cause", "SQL executed"] {
+                assert!(!output.contains(forbidden), "{prompt}: {output}");
+            }
+        }
     }
 }

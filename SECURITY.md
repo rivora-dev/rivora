@@ -54,15 +54,17 @@ and never takes infrastructure actions.
   email, IP, and private absolute-path shapes are redacted from allowlisted
   user-controlled fields. Malformed responses fail closed instead of being
   persisted as evidence.
-- `PLANETSCALE_SERVICE_TOKEN` (or `PLANETSCALE_AUTH_TOKEN`) is never stored in
-  `.rivora/`, printed, or written to evidence, memory, feedback, or receipts.
-  The preferred service token needs only `read_branch` and
-  `read_deploy_request`; the connector uses only `GET` requests.
+- `PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN` (or the OAuth
+  fallback `PLANETSCALE_AUTH_TOKEN`) are never stored in `.rivora/`, printed,
+  or written to evidence, memory, feedback, or receipts. The preferred service
+  token needs only `read_branch` and `read_deploy_request`; the connector uses
+  only `GET` requests.
 - PlanetScale evidence is explicitly allowlisted, metadata-first, and API-only.
   Rivora never connects to the customer database, runs SQL, reads customer
   rows or branch passwords, or stores connection strings, raw query results,
-  full schema dumps, full schema diffs, raw DDL, hostnames, IP addresses,
-  emails, credentials, or arbitrary response metadata. It never creates,
+  full schema dumps, full schema diffs, raw DDL, private/internal hostnames, IP
+  addresses, emails, credentials, or arbitrary response metadata. Safe
+  `app.planetscale.com` permalinks may be stored. It never creates,
   approves, comments on, or deploys deploy requests and never creates,
   deletes, or promotes branches.
 - Rivora does not intentionally ingest secrets. Connector evidence can include

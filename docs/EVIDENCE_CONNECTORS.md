@@ -318,6 +318,7 @@ infrastructure actions are taken.
 Phase 20B adds read-only, metadata-first PlanetScale data-layer evidence:
 
 ```bash
+export PLANETSCALE_SERVICE_TOKEN_ID=...
 export PLANETSCALE_SERVICE_TOKEN=...
 rivora ingest planetscale --org my-org --database checkout-db --limit 20
 rivora ingest pscale --org my-org --database checkout-db --branch main --since 7d
@@ -327,8 +328,11 @@ The connector calls PlanetScale's REST API directly and uses only `GET` on the
 documented branch-list and deploy-request-list endpoints. Use the narrowest
 practical service token with `read_branch` and `read_deploy_request`. For OAuth
 integrations, the equivalent scopes are `read_branches` and
-`read_deploy_requests`. `PLANETSCALE_SERVICE_TOKEN` takes precedence over the
-optional `PLANETSCALE_AUTH_TOKEN` fallback; neither value is printed or
+`read_deploy_requests`. Service-token authentication requires both
+`PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN`, sent in
+PlanetScale's documented `ID:TOKEN` authorization format.
+`PLANETSCALE_AUTH_TOKEN` is an optional OAuth Bearer-token fallback. Complete
+service-token credentials take precedence. No credential value is printed or
 persisted.
 
 Official references: [list branches](https://planetscale.com/docs/api/reference/list_branches),
@@ -354,9 +358,10 @@ Rivora does not connect to the customer database, run SQL, read customer rows,
 read branch passwords, ingest connection strings, read raw query results, or
 store full schema dumps, full schema diffs, or raw DDL. It does not create,
 approve, comment on, or deploy deploy requests; create, delete, or promote
-branches; restore backups; or mutate PlanetScale. Deploy-operation ingestion is
-intentionally deferred because the response contains raw DDL and table-level
-details that Phase 20B does not need.
+branches; restore backups; or mutate PlanetScale. The list-deploy-requests
+response may contain nested deploy-operation objects with raw DDL and table
+names; Rivora ignores those nested fields and never calls the dedicated deploy
+operations endpoint. Deploy-operation ingestion remains deferred.
 
 Automated tests use `FixturePlanetScaleClient` and require no live PlanetScale
 network access. Sensitive fixtures verify that credentials, hostnames, emails,
@@ -420,7 +425,7 @@ data and does not require network access.
 - `what changed?` and `what changed in checkout?` show recent matching
   evidence. When evidence comes from multiple providers, the response is
   grouped by source (GitHub, Vercel, Cloudflare Pages, Cloudflare Workers,
-  Sentry, Git).
+  Sentry, PlanetScale, Git).
 - `what changed across providers?` shows cross-source grouped evidence.
 - `what happened during the release?` shows cross-source grouped evidence.
 - `what changed in github?` shows recent GitHub evidence only.
@@ -440,8 +445,8 @@ data and does not require network access.
   planetscale?` show PlanetScale evidence.
 - `have we seen checkout deploy failures before?` routes to recall.
 
-Cross-source summaries are evidence-backed, not root-cause claims. Rivora
-says "these events occurred in the same window" and "this may be related."
+Cross-source summaries are evidence-backed, not root-cause claims. Rivora says
+recent evidence was found across providers and nearby evidence may be related.
 It never says "X caused Y."
 
 The CLI does not claim root cause. It suggests the explicit next step:

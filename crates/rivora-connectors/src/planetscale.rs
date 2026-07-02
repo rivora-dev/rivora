@@ -41,14 +41,27 @@ pub fn ensure_planetscale_read_only_method(method: &str) -> Result<()> {
 
 #[derive(Clone)]
 pub struct PlanetScaleAuthConfig {
-    token: Option<String>,
+    service_token_id: Option<String>,
+    service_token: Option<String>,
+    oauth_token: Option<String>,
 }
 
 impl std::fmt::Debug for PlanetScaleAuthConfig {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("PlanetScaleAuthConfig")
-            .field("token", &self.token.as_ref().map(|_| "[redacted]"))
+            .field(
+                "service_token_id",
+                &self.service_token_id.as_ref().map(|_| "[redacted]"),
+            )
+            .field(
+                "service_token",
+                &self.service_token.as_ref().map(|_| "[redacted]"),
+            )
+            .field(
+                "oauth_token",
+                &self.oauth_token.as_ref().map(|_| "[redacted]"),
+            )
             .finish()
     }
 }
@@ -56,38 +69,108 @@ impl std::fmt::Debug for PlanetScaleAuthConfig {
 impl PlanetScaleAuthConfig {
     #[must_use]
     pub fn from_env() -> Self {
-        let token = std::env::var("PLANETSCALE_SERVICE_TOKEN")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                std::env::var("PLANETSCALE_AUTH_TOKEN")
-                    .ok()
-                    .filter(|value| !value.trim().is_empty())
-            });
-        Self { token }
+        Self {
+            service_token_id: nonempty_env("PLANETSCALE_SERVICE_TOKEN_ID"),
+            service_token: nonempty_env("PLANETSCALE_SERVICE_TOKEN"),
+            oauth_token: nonempty_env("PLANETSCALE_AUTH_TOKEN"),
+        }
     }
 
     #[must_use]
-    pub fn with_token(token: impl Into<String>) -> Self {
-        let token = token.into();
+    pub fn with_service_token(
+        service_token_id: impl Into<String>,
+        service_token: impl Into<String>,
+    ) -> Self {
         Self {
-            token: (!token.trim().is_empty()).then_some(token),
+            service_token_id: optional_nonempty(service_token_id.into()),
+            service_token: optional_nonempty(service_token.into()),
+            oauth_token: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_oauth_token(token: impl Into<String>) -> Self {
+        Self {
+            service_token_id: None,
+            service_token: None,
+            oauth_token: optional_nonempty(token.into()),
         }
     }
 
     #[must_use]
     pub fn has_token(&self) -> bool {
-        self.token.is_some()
+        self.configuration_error().is_none()
+            && ((self.service_token_id.is_some() && self.service_token.is_some())
+                || self.oauth_token.is_some())
+    }
+
+    #[must_use]
+    pub fn configuration_error(&self) -> Option<&'static str> {
+        match (&self.service_token_id, &self.service_token) {
+            (Some(id), Some(token)) => {
+                if credential_is_safe(id) && credential_is_safe(token) {
+                    None
+                } else {
+                    Some("PlanetScale service-token credentials contain unsupported characters")
+                }
+            }
+            (Some(_), None) => Some("Missing PLANETSCALE_SERVICE_TOKEN"),
+            (None, Some(_)) => Some("Missing PLANETSCALE_SERVICE_TOKEN_ID"),
+            (None, None) => self.oauth_token.as_ref().and_then(|token| {
+                (!credential_is_safe(token))
+                    .then_some("PLANETSCALE_AUTH_TOKEN contains unsupported characters")
+            }),
+        }
+    }
+
+    fn authorization_header_value(&self) -> Result<String> {
+        if let Some(error) = self.configuration_error() {
+            return Err(RivoraError::invalid_value("planetscale_auth", error));
+        }
+        if let (Some(id), Some(token)) = (&self.service_token_id, &self.service_token) {
+            return Ok(format!("{id}:{token}"));
+        }
+        self.oauth_token
+            .as_ref()
+            .map(|token| format!("Bearer {token}"))
+            .ok_or_else(|| {
+                RivoraError::invalid_value(
+                    "planetscale_auth",
+                    "PlanetScale credentials are not configured",
+                )
+            })
     }
 
     #[must_use]
     pub fn redact(&self, value: &str) -> String {
-        let value = match &self.token {
-            Some(token) => value.replace(token, "[redacted]"),
-            None => value.to_string(),
-        };
+        let mut value = value.to_string();
+        for credential in [
+            self.service_token_id.as_deref(),
+            self.service_token.as_deref(),
+            self.oauth_token.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            value = value.replace(credential, "[redacted]");
+        }
         redact_token_like_values(&value)
     }
+}
+
+fn nonempty_env(name: &str) -> Option<String> {
+    std::env::var(name).ok().and_then(optional_nonempty)
+}
+
+fn optional_nonempty(value: String) -> Option<String> {
+    (!value.trim().is_empty()).then_some(value)
+}
+
+fn credential_is_safe(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.')
+        })
 }
 
 fn redact_token_like_values(value: &str) -> String {
@@ -115,8 +198,19 @@ fn redact_token_like_values(value: &str) -> String {
 fn is_token_like(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     lower.starts_with("planetscale_service_token=")
+        || lower.starts_with("planetscale_service_token_id=")
         || lower.starts_with("planetscale_auth_token=")
         || lower.starts_with("pscale_tkn_")
+        || lower.starts_with("pscale_oauth_")
+        || lower.starts_with("access_token=")
+        || lower.starts_with("service_token=")
+        || lower.starts_with("api_key=")
+        || lower.starts_with("password=")
+        || lower.starts_with("branch_password=")
+        || lower.starts_with("connection_string=")
+        || lower.starts_with("dsn=")
+        || lower.starts_with("mysql://")
+        || lower.starts_with("mysqls://")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,15 +258,14 @@ impl HttpPlanetScaleClient {
         }
     }
 
-    pub(crate) fn request_config(&self, path: &str) -> String {
+    pub(crate) fn request_config(&self, path: &str) -> Result<String> {
         let mut config = format!(
             "url = \"{}{}\"\nsilent\nshow-error\nfail\nrequest = \"GET\"\nheader = \"Accept: application/json\"\nheader = \"User-Agent: rivora-connectors\"\n",
             self.base_url, path
         );
-        if let Some(token) = self.auth.token.as_ref() {
-            config.push_str(&format!("header = \"Authorization: Bearer {token}\"\n"));
-        }
-        config
+        let authorization = self.auth.authorization_header_value()?;
+        config.push_str(&format!("header = \"Authorization: {authorization}\"\n"));
+        Ok(config)
     }
 
     fn database_path(
@@ -192,10 +285,10 @@ impl HttpPlanetScaleClient {
 
     fn get(&self, path: &str) -> Result<String> {
         ensure_planetscale_read_only_method("GET")?;
-        let config = self.request_config(path);
-        let mut child = Command::new("curl")
-            .arg("--config")
-            .arg("-")
+        let config = self.request_config(path)?;
+        let mut command = Command::new("curl");
+        command.args(planetscale_curl_args());
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -235,6 +328,11 @@ impl HttpPlanetScaleClient {
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
+}
+
+#[must_use]
+fn planetscale_curl_args() -> &'static [&'static str] {
+    &["-q", "--proto", "=https", "--config", "-"]
 }
 
 impl PlanetScaleClient for HttpPlanetScaleClient {
@@ -381,12 +479,13 @@ impl PlanetScaleConnector {
     }
 
     pub fn ingest(&self, request: PlanetScaleIngestRequest) -> Result<PlanetScaleIngestResult> {
-        if request.limit == 0 || request.limit > 100 {
+        if request.limit == 0 {
             return Err(RivoraError::invalid_value(
                 "limit",
-                "PlanetScale limit must be between 1 and 100",
+                "PlanetScale limit must be positive",
             ));
         }
+        let limit = clamp_limit(request.limit);
         validate_target(&request.database)?;
         let cutoff = request
             .since
@@ -395,15 +494,11 @@ impl PlanetScaleConnector {
             .transpose()?;
         let repository = request.database.repository_label();
         let source = EvidenceSource::planetscale(repository.clone());
-        let branches = parse_branch_list(
-            &self
-                .client
-                .fetch_branches(&request.database, request.limit)?,
-        )?;
+        let branches = parse_branch_list(&self.client.fetch_branches(&request.database, limit)?)?;
         let deploy_requests = parse_deploy_request_list(
             &self
                 .client
-                .fetch_deploy_requests(&request.database, request.limit)?,
+                .fetch_deploy_requests(&request.database, limit)?,
         )?;
 
         let branch_filter = request.branch.as_deref();
@@ -428,14 +523,27 @@ impl PlanetScaleConnector {
         if let Some(cutoff) = cutoff {
             evidence.retain(|item| evidence_is_after_cutoff(item, cutoff));
         }
+        let mut evidence_by_id = std::collections::BTreeMap::new();
+        for item in evidence {
+            match evidence_by_id.entry(item.id.clone()) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(item);
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    if evidence_winner_key(&item) > evidence_winner_key(entry.get()) {
+                        entry.insert(item);
+                    }
+                }
+            }
+        }
+        let mut evidence = evidence_by_id.into_values().collect::<Vec<_>>();
         evidence.sort_by(|left, right| {
             right
                 .timestamp
                 .cmp(&left.timestamp)
                 .then_with(|| left.id.cmp(&right.id))
         });
-        evidence.dedup_by(|left, right| left.id == right.id);
-        evidence.truncate(request.limit);
+        evidence.truncate(limit);
 
         let branches = evidence
             .iter()
@@ -463,6 +571,15 @@ impl PlanetScaleConnector {
     }
 }
 
+fn evidence_winner_key(item: &EvidenceItem) -> (&Option<String>, &str, &str, &str) {
+    (
+        &item.timestamp,
+        item.title.as_str(),
+        item.summary.as_str(),
+        item.body.as_str(),
+    )
+}
+
 fn validate_target(database: &PlanetScaleDatabaseRef) -> Result<()> {
     if !is_safe_target_identifier(&database.org) || !is_safe_target_identifier(&database.database) {
         return Err(RivoraError::invalid_value(
@@ -483,7 +600,6 @@ fn is_safe_target_identifier(value: &str) -> bool {
 
 #[derive(Debug, Clone, Deserialize)]
 struct ListResponse<T> {
-    #[serde(default)]
     data: Vec<T>,
 }
 
@@ -602,7 +718,7 @@ fn branch_item(
     let created_at = safe_timestamp(branch.created_at.as_deref());
     let updated_at = safe_timestamp(branch.updated_at.as_deref());
     let actor = safe_actor(branch.actor.as_ref());
-    let base_branch = safe_text(branch.parent_branch.as_deref());
+    let base_branch = safe_identifier_value(branch.parent_branch.as_deref()).unwrap_or_default();
     let permalink = safe_permalink(branch.html_url.as_deref());
     let body = render_metadata(
         BRANCH_METADATA_KEYS,
@@ -673,15 +789,17 @@ fn deploy_request_item(
         )
     })?;
     let id = safe_identifier_value(deploy_request.id.as_deref()).unwrap_or_default();
-    let branch = safe_text(deploy_request.branch.as_deref());
-    let base_branch = safe_text(deploy_request.into_branch.as_deref());
-    let state = safe_text(deploy_request.state.as_deref());
-    let status = safe_text(
+    let branch = safe_identifier_value(deploy_request.branch.as_deref()).unwrap_or_default();
+    let base_branch =
+        safe_identifier_value(deploy_request.into_branch.as_deref()).unwrap_or_default();
+    let state = safe_identifier_value(deploy_request.state.as_deref()).unwrap_or_default();
+    let status = safe_identifier_value(
         deploy_request
             .deployment_state
             .as_deref()
             .or_else(|| deploy_request.deployment.as_ref()?.state.as_deref()),
-    );
+    )
+    .unwrap_or_default();
     let deployability_state = deploy_request
         .deployment
         .as_ref()
@@ -852,6 +970,13 @@ fn looks_sensitive(value: &str) -> bool {
         || lower.starts_with("/home/")
         || lower.contains("password")
         || lower.contains("connection_string")
+        || lower.contains(".internal")
+        || lower.contains(".local")
+        || lower == "localhost"
+        || (lower.contains(':')
+            && lower
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() || character == ':'))
 }
 
 fn trim_sensitive(value: &str) -> &str {
@@ -875,7 +1000,10 @@ fn safe_identifier_value(value: Option<&str>) -> Option<String> {
 
 fn safe_permalink(value: Option<&str>) -> String {
     value
-        .filter(|value| value.starts_with("https://") && !value.contains('@'))
+        .filter(|value| {
+            value.starts_with("https://app.planetscale.com/")
+                && !value.contains(['@', '?', '#', '\n', '\r'])
+        })
         .map(sanitize_metadata_value)
         .unwrap_or_default()
 }
@@ -1179,24 +1307,167 @@ mod tests {
         for method in planetscale_forbidden_http_methods() {
             assert!(ensure_planetscale_read_only_method(method).is_err());
         }
-        let client = HttpPlanetScaleClient::new(PlanetScaleAuthConfig::with_token("secret"));
-        let config = client.request_config("/organizations/org/databases/db/branches");
+        let client = HttpPlanetScaleClient::new(PlanetScaleAuthConfig::with_service_token(
+            "token-id", "secret",
+        ));
+        let config = client
+            .request_config("/organizations/org/databases/db/branches")
+            .unwrap();
         assert!(config.contains("request = \"GET\""));
+        assert!(config.contains("Authorization: token-id:secret"));
+        assert!(!config.contains("Bearer secret"));
         assert!(!config.contains("\"POST\""));
+        assert_eq!(
+            planetscale_curl_args(),
+            &["-q", "--proto", "=https", "--config", "-"]
+        );
     }
 
     #[test]
-    fn auth_is_redacted_and_prefers_service_token() {
-        let auth = PlanetScaleAuthConfig::with_token("pscale_tkn_secret");
+    fn auth_is_redacted_and_prefers_complete_service_token_credentials() {
+        let auth = PlanetScaleAuthConfig::with_service_token("token-id", "pscale_tkn_secret");
         assert!(!format!("{auth:?}").contains("pscale_tkn_secret"));
+        assert!(!format!("{auth:?}").contains("token-id"));
         assert_eq!(auth.redact("Bearer pscale_tkn_secret"), "[redacted]");
 
+        std::env::set_var("PLANETSCALE_SERVICE_TOKEN_ID", "primary-id");
         std::env::set_var("PLANETSCALE_AUTH_TOKEN", "fallback");
         std::env::set_var("PLANETSCALE_SERVICE_TOKEN", "primary");
         let auth = PlanetScaleAuthConfig::from_env();
-        assert_eq!(auth.redact("primary fallback"), "[redacted] fallback");
+        assert_eq!(
+            auth.redact("primary-id primary fallback"),
+            "[redacted] [redacted] [redacted]"
+        );
+        let config = HttpPlanetScaleClient::new(auth)
+            .request_config("/organizations/org/databases/db/branches")
+            .unwrap();
+        assert!(config.contains("Authorization: primary-id:primary"));
+        assert!(!config.contains("fallback"));
+        std::env::remove_var("PLANETSCALE_SERVICE_TOKEN_ID");
         std::env::remove_var("PLANETSCALE_SERVICE_TOKEN");
         std::env::remove_var("PLANETSCALE_AUTH_TOKEN");
+    }
+
+    #[test]
+    fn oauth_fallback_uses_bearer_and_incomplete_service_credentials_are_invalid() {
+        let oauth = PlanetScaleAuthConfig::with_oauth_token("pscale_oauth_secret");
+        let config = HttpPlanetScaleClient::new(oauth)
+            .request_config("/organizations/org/databases/db/branches")
+            .unwrap();
+        assert!(config.contains("Authorization: Bearer pscale_oauth_secret"));
+
+        assert!(PlanetScaleAuthConfig::with_service_token("", "secret")
+            .configuration_error()
+            .is_some());
+        assert!(PlanetScaleAuthConfig::with_service_token("token-id", "")
+            .configuration_error()
+            .is_some());
+    }
+
+    #[test]
+    fn credential_like_values_and_private_permalinks_are_redacted_or_omitted() {
+        let auth = PlanetScaleAuthConfig::with_service_token("configured-id", "configured-token");
+        let redacted = auth.redact(
+            "configured-id configured-token pscale_oauth_secret access_token=secret service_token=secret api_key=secret password=secret branch_password=secret connection_string=mysql://user:password@private.internal/db",
+        );
+        for forbidden in [
+            "configured-id",
+            "configured-token",
+            "pscale_oauth_secret",
+            "access_token=secret",
+            "service_token=secret",
+            "api_key=secret",
+            "password=secret",
+            "branch_password=secret",
+            "mysql://",
+            "private.internal",
+        ] {
+            assert!(
+                !redacted.contains(forbidden),
+                "leaked {forbidden}: {redacted}"
+            );
+        }
+        assert_eq!(
+            safe_permalink(Some("https://private.internal/deploy/42")),
+            ""
+        );
+        assert_eq!(
+            safe_permalink(Some(
+                "https://app.planetscale.com/org/db/deploy-requests/42?token=secret"
+            )),
+            ""
+        );
+    }
+
+    #[test]
+    fn malformed_list_responses_fail_closed() {
+        let malformed = PlanetScaleConnector::new(
+            FixturePlanetScaleClient::builder()
+                .branches("{}")
+                .deploy_requests(r#"{"data":[]}"#)
+                .build(),
+        );
+        assert!(malformed.ingest(request()).is_err());
+    }
+
+    #[test]
+    fn poisoned_allowlisted_fields_are_omitted_or_redacted() {
+        let client = FixturePlanetScaleClient::builder()
+            .branches(
+                r#"{"data":[{"name":"safe-branch","parent_branch":"mysql://user:password@private.internal/db","actor":{"display_name":"api_key=actor-secret private.internal 2001:db8::1"},"html_url":"https://private.internal/branch?access_token=secret","updated_at":"2026-07-01T11:00:00Z"}]}"#,
+            )
+            .deploy_requests(
+                r#"{"data":[{"id":"dr_99","number":99,"branch":"ALTER TABLE users","into_branch":"pscale_oauth_secret","state":"api_key=state-secret","deployment_state":"password=state-secret","actor":{"display_name":"person@example.com"},"html_url":"https://app.planetscale.com/org/db/deploy-requests/99?access_token=secret","updated_at":"2026-07-01T12:00:00Z"}]}"#,
+            )
+            .build();
+        let result = PlanetScaleConnector::new(client).ingest(request()).unwrap();
+        let serialized = serde_json::to_string(&result.evidence).unwrap();
+        for forbidden in [
+            "mysql://",
+            "private.internal",
+            "actor-secret",
+            "2001:db8::1",
+            "access_token",
+            "ALTER TABLE",
+            "pscale_oauth_secret",
+            "state-secret",
+            "person@example.com",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "leaked {forbidden}: {serialized}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_ids_choose_newest_evidence_independent_of_provider_order() {
+        let branch_old = r#"{"name":"main","production":true,"updated_at":"2026-07-01T09:00:00Z"}"#;
+        let branch_other =
+            r#"{"name":"other","production":false,"updated_at":"2026-07-01T10:00:00Z"}"#;
+        let branch_new =
+            r#"{"name":"main","production":false,"updated_at":"2026-07-01T11:00:00Z"}"#;
+        let ingest = |items: &str| {
+            PlanetScaleConnector::new(
+                FixturePlanetScaleClient::builder()
+                    .branches(format!(r#"{{"data":[{items}]}}"#))
+                    .deploy_requests(r#"{"data":[]}"#)
+                    .build(),
+            )
+            .ingest(request())
+            .unwrap()
+        };
+        let first = ingest(&format!("{branch_old},{branch_other},{branch_new}"));
+        let second = ingest(&format!("{branch_new},{branch_other},{branch_old}"));
+        assert_eq!(first.evidence, second.evidence);
+        assert_eq!(first.evidence.len(), 2);
+        let main = first
+            .evidence
+            .iter()
+            .find(|item| item.id.as_str().ends_with(":main"))
+            .unwrap();
+        assert_eq!(main.timestamp.as_deref(), Some("2026-07-01T11:00:00Z"));
+        assert!(main.body.contains("Branch role: development"));
     }
 
     #[test]
@@ -1209,6 +1480,13 @@ mod tests {
         );
         assert!(empty.ingest(request()).unwrap().evidence.is_empty());
         assert!(connector().ingest(request().with_limit(0)).is_err());
-        assert!(connector().ingest(request().with_limit(101)).is_err());
+        assert_eq!(
+            connector()
+                .ingest(request().with_limit(250))
+                .unwrap()
+                .evidence
+                .len(),
+            2
+        );
     }
 }

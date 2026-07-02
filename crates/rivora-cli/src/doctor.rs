@@ -23,6 +23,7 @@ const PROVIDER_TOKEN_VARS: &[&str] = &[
     "CF_API_TOKEN",
     "SENTRY_AUTH_TOKEN",
     "SENTRY_TOKEN",
+    "PLANETSCALE_SERVICE_TOKEN_ID",
     "PLANETSCALE_SERVICE_TOKEN",
     "PLANETSCALE_AUTH_TOKEN",
     "SLACK_BOT_TOKEN",
@@ -51,6 +52,7 @@ struct DoctorReport {
     store: DoctorStoreReport,
     providers: DoctorProviderReport,
     no_tokens_printed: bool,
+    no_database_actions: bool,
     no_infrastructure_actions: bool,
     next: Vec<&'static str>,
 }
@@ -122,6 +124,7 @@ impl DoctorReport {
                     .collect(),
             },
             no_tokens_printed: true,
+            no_database_actions: true,
             no_infrastructure_actions: true,
             next: next_steps(found, &snapshot),
         }
@@ -169,6 +172,7 @@ impl DoctorReport {
 
         lines.push(String::new());
         lines.push("No tokens were printed.".to_string());
+        lines.push("No database actions were taken.".to_string());
         lines.push("No infrastructure actions were taken.".to_string());
 
         if !self.next.is_empty() {
@@ -327,6 +331,31 @@ mod tests {
     }
 
     #[test]
+    fn doctor_redacts_all_planetscale_credentials_in_text_and_json() {
+        let (_temp, store) = temp_store();
+        std::env::set_var("PLANETSCALE_SERVICE_TOKEN_ID", "pscale-id-secret");
+        std::env::set_var("PLANETSCALE_SERVICE_TOKEN", "pscale_tkn_doctor_secret");
+        std::env::set_var("PLANETSCALE_AUTH_TOKEN", "pscale_oauth_doctor_secret");
+        let text = run(&store, DoctorOptions::default()).unwrap();
+        let json = run(&store, DoctorOptions { json: true }).unwrap();
+        std::env::remove_var("PLANETSCALE_SERVICE_TOKEN_ID");
+        std::env::remove_var("PLANETSCALE_SERVICE_TOKEN");
+        std::env::remove_var("PLANETSCALE_AUTH_TOKEN");
+
+        for output in [&text, &json] {
+            assert!(output.contains("PLANETSCALE_SERVICE_TOKEN_ID"));
+            assert!(output.contains("PLANETSCALE_SERVICE_TOKEN"));
+            assert!(output.contains("PLANETSCALE_AUTH_TOKEN"));
+            assert!(!output.contains("pscale-id-secret"));
+            assert!(!output.contains("pscale_tkn_doctor_secret"));
+            assert!(!output.contains("pscale_oauth_doctor_secret"));
+        }
+        assert!(text.contains("No database actions were taken."));
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["no_database_actions"], true);
+    }
+
+    #[test]
     fn doctor_json_is_stable_and_safe() {
         let (_temp, store) = temp_store();
         std::env::set_var("VERCEL_TOKEN", "vercel_secret_value");
@@ -335,6 +364,7 @@ mod tests {
 
         let json: serde_json::Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["no_tokens_printed"], true);
+        assert_eq!(json["no_database_actions"], true);
         assert_eq!(json["no_infrastructure_actions"], true);
         assert_eq!(json["store"]["found"], false);
         let tokens = json["providers"]["tokens"].as_array().unwrap();
@@ -344,6 +374,13 @@ mod tests {
         assert!(tokens.iter().any(|t| t["name"] == "CF_API_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SENTRY_AUTH_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SENTRY_TOKEN"));
+        assert!(tokens
+            .iter()
+            .any(|t| t["name"] == "PLANETSCALE_SERVICE_TOKEN_ID"));
+        assert!(tokens
+            .iter()
+            .any(|t| t["name"] == "PLANETSCALE_SERVICE_TOKEN"));
+        assert!(tokens.iter().any(|t| t["name"] == "PLANETSCALE_AUTH_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_BOT_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_APP_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_SIGNING_SECRET"));
