@@ -41,7 +41,7 @@ rivora demo --scenario multi-source-release
 ```
 
 The `multi-source-release` scenario demonstrates cross-source evidence from
-GitHub, Vercel, Cloudflare Pages, and Cloudflare Workers in a single release
+GitHub, Vercel, Cloudflare Pages, Cloudflare Workers, and Sentry in a single release
 window.
 
 ---
@@ -109,7 +109,27 @@ R2, D1, or Queues actions are taken.
 
 ---
 
+## Optional: ingest Sentry issue evidence
+
+Use a narrow Sentry token with `event:read` to test metadata-first issue
+evidence:
+
+```bash
+export SENTRY_AUTH_TOKEN=...
+rivora ingest sentry --org my-org --project checkout-api --limit 20
+rivora ask "what errors happened recently?"
+rivora ask "what failed recently?"
+rivora ask "what happened during the release?"
+```
+
+Rivora only reads normalized issue metadata. It does not ingest raw stack
+traces, request data, user emails, IPs, replay data, or breadcrumbs, and it
+does not resolve, assign, or otherwise mutate Sentry issues. Evidence stays
+local and is not memory until approved. No infrastructure actions are taken.
+
 ## Create and approve memory
+
+Continue through the normal review flow:
 
 ```bash
 # List evidence

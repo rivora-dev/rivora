@@ -14,6 +14,7 @@ sources implemented so far:
 * Vercel (deployment evidence)
 * Cloudflare Pages (deployment evidence)
 * Cloudflare Workers (deployment evidence)
+* Sentry (metadata-first issue/error evidence)
 
 This phase proves that Rivora works as an end-to-end adaptive reliability
 memory product before adding more provider connectors.
@@ -49,6 +50,7 @@ The demo simulates a checkout release window across multiple evidence sources:
 * Vercel production deployment completed for checkout-web
 * Cloudflare Pages preview deployment failed for checkout-web
 * Cloudflare Worker deployment completed for checkout-worker
+* Sentry TypeError issue observed for checkout-api
 
 You will see:
 
@@ -78,7 +80,7 @@ and `evidence.json`.
 rivora ingest fixture --path examples/demo/scenarios/multi-source-release/evidence.json
 ```
 
-This loads synthetic evidence from all five provider types.
+This loads six synthetic records across GitHub, Vercel, Cloudflare, and Sentry.
 
 ### 3. Ask questions
 
@@ -107,6 +109,9 @@ Cloudflare Pages
 
 Cloudflare Workers
 - Cloudflare Worker deployment for checkout-worker completed — ...
+
+Sentry
+- Sentry issue CHECKOUT-9001 (error) — ...
 
 These events occurred in the same window.
 This may be related.
@@ -205,6 +210,11 @@ rivora ingest cloudflare pages --account <account-id> --project <project-name> -
 
 # Cloudflare Workers
 rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20
+
+# Sentry issues (event:read token)
+export SENTRY_AUTH_TOKEN=...
+rivora ingest sentry --org <org-slug> --project <project-slug> --limit 20
+rivora ask "what errors happened recently?"
 ```
 
 All provider integrations are read-only. Tokens are never stored in
@@ -219,7 +229,7 @@ pasting it into an issue:
 
 1. Remove any `xoxb-`, `xapp-`, `ghp_`, `gho_`, `ghu_`, `ghs_`, or `ghr_`
    prefixed values.
-2. Remove `VERCEL_TOKEN` and `CLOUDFLARE_API_TOKEN` values.
+2. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, and `SENTRY_AUTH_TOKEN` values.
 3. Remove signing secrets and private keys.
 4. Remove internal hostnames, customer identifiers, and production incident
    timelines that include sensitive data.
@@ -239,7 +249,7 @@ rivora doctor
 
 * `.rivora/` store exists and is valid
 * `.gitignore` includes `.rivora/`
-* Provider tokens are set for configured connectors (GitHub, Vercel, Cloudflare)
+* Provider tokens are set for configured connectors (GitHub, Vercel, Cloudflare, Sentry)
 
 No infrastructure actions are taken. No data leaves your machine.
 
@@ -261,7 +271,7 @@ without guidance.
 ## Known limitations
 
 * Crates are not published; install from source
-* No AWS, GCP, Azure, Render, or Kubernetes connectors yet
+* No AWS, GCP, Azure, Render, PlanetScale, or Kubernetes connectors yet
 * No official Slack Marketplace app
 * No hosted OAuth flow
 * No Rivora Cloud
@@ -272,6 +282,7 @@ without guidance.
   embeddings, LLMs, or probabilistic ranking
 * Live Vercel and Cloudflare connectors were not tested against production
   APIs during this phase (tokens were unavailable)
+* Live Sentry was not tested during Phase 20A because no token was available
 
 ---
 
