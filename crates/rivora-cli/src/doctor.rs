@@ -21,6 +21,8 @@ const PROVIDER_TOKEN_VARS: &[&str] = &[
     "VERCEL_TOKEN",
     "CLOUDFLARE_API_TOKEN",
     "CF_API_TOKEN",
+    "SENTRY_AUTH_TOKEN",
+    "SENTRY_TOKEN",
     "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN",
     "SLACK_SIGNING_SECRET",
@@ -338,6 +340,8 @@ mod tests {
         assert!(tokens.iter().any(|t| t["name"] == "VERCEL_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "CLOUDFLARE_API_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "CF_API_TOKEN"));
+        assert!(tokens.iter().any(|t| t["name"] == "SENTRY_AUTH_TOKEN"));
+        assert!(tokens.iter().any(|t| t["name"] == "SENTRY_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_BOT_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_APP_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_SIGNING_SECRET"));

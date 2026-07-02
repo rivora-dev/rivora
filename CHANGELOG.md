@@ -9,6 +9,17 @@
 
   ### Added
 
+  - Phase 20A.1 Sentry connector safety audit covering GET-only enforcement,
+    malicious nested payload exclusion, token/debug redaction, CLI and Slack
+    parity, evidence rendering, memory recall, and public documentation
+  - Phase 20A: read-only, metadata-first Sentry issue evidence connector
+    (`rivora ingest sentry`)
+  - Sentry environment, query, limit, and `--since` filters with stable
+    evidence IDs and offline fixture clients
+  - Sentry-aware ask, recall, memory candidate, and cross-source release
+    summaries
+  - Explicit Sentry metadata/tag allowlists and token/PII redaction
+  - Synthetic Sentry issue in the multi-source release scenario
   - Phase 19: `rivora doctor` command for local diagnostics (store,
     `.gitignore`, provider tokens)
   - Subcommand help (`rivora <command> --help`) for all commands
@@ -19,8 +30,8 @@
   - Output formatting improvements (timestamps in evidence list)
   - Phase 18.5: evidence-to-memory product validation across Git, GitHub,
     Vercel, Cloudflare Pages, and Cloudflare Workers
-  - `multi-source-release` demo scenario with cross-source fixture evidence
-    from five provider types
+  - `multi-source-release` demo scenario with cross-source fixture evidence;
+    Phase 20A expands it to six records including Sentry
   - `CrossSourceEvidenceSummary` helper for deterministic cross-source evidence
     grouping by provider, timestamp, and status
   - Cross-source ask behavior: `what changed?`, `what deployed recently?`,
@@ -59,6 +70,16 @@
 
   ### Changed
 
+  - Sentry issue parsing now honors the current `issueType` and numeric
+    `userCount` response fields, caps all clients at 100 records, rejects
+    malformed JSON, and drops undated evidence when `--since` is used
+  - Sentry auth debug output, `Bearer` values, `sntrys_` values, unsafe
+    permalinks, invalid counts/timestamps, and private paths are redacted or
+    omitted before local persistence
+  - Sentry empty-state, evidence show, top-level help, memory candidate, and
+    recall output now identify the source and metadata-first safety boundary
+  - Multi-source summaries now group Sentry issue evidence alongside GitHub,
+    Vercel, and Cloudflare evidence using root-cause-neutral language
   - Phase 18.5: `what deployed recently?` now includes Vercel and Cloudflare
     deployments; `what failed recently?` now includes failed workflow and
     deployment evidence from all providers

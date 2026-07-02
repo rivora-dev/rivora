@@ -75,31 +75,56 @@ empty-state messages with a "What happened? Why? What next?" structure.
 Malformed `--since` guidance for provider ingests. Output formatting
 improvements. Slack dev/socket parity improvements.
 
+### Phase 20A — Sentry Observability Evidence Connector
+
+Read-only, metadata-first Sentry issue/error evidence ingestion. Supports
+explicit organization and project selection, environment/query/time filters,
+stable local evidence IDs, deterministic recall, and cross-source release
+summaries. It never resolves or assigns issues, mutates Sentry, or ingests raw
+event payloads and stack traces by default.
+
+### Phase 20A.1 — Sentry Connector Audit + Hardening
+
+Audits and hardens GET-only enforcement, the exact metadata allowlist,
+malicious nested-field exclusion, token/debug redaction, deterministic limits
+and filtering, evidence and memory rendering, CLI/Slack parity, doctor output,
+fixtures, and public documentation. Live Sentry remains optional and was not
+required for the audit.
+
 ---
 
 ## Planned
 
-### Phase 20 — Ability Proposal Runtime
+### Phase 20B — PlanetScale Data-Layer Evidence Connector
 
-Deferred until Phase 19 usability improvements are validated by design partner
-feedback. A runtime that proposes actions for human approval. Rivora still does
-not execute infrastructure actions; proposals are explainable and
-receipt-backed.
+Metadata-first data-layer evidence. It must not read customer rows or ingest
+query parameters, row values, credentials, or other customer data.
 
-### Phase 21 — Next Provider Connector
+### Phase 21 — Evidence Correlation / Release Window Review
 
-Deferred until Phase 19 usability improvements are validated by design partner
-feedback. The next provider connector will be chosen based on design partner
-feedback and the connector prioritization table in
-[FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md). Render, AWS, GCP, Azure,
-Kubernetes, Sentry, Datadog, and PagerDuty are deferred until the current
-product loop is validated by real usage.
+Careful cross-source review using same-window and nearby-evidence language,
+without claiming root cause.
+
+### Phase 22 — Reliability Wiki Memory
+
+Human-approved operational memory organized for team review and recall.
+
+### Phase 23 — Ability Proposal Runtime
+
+Explainable, receipt-backed action proposals for human approval. Rivora still
+does not execute infrastructure actions.
+
+### Phase 24 — Next Provider Connector Based on Feedback
+
+Selected from real user and design-partner demand. Render remains deferred
+until that demand exists. AWS, GCP, Azure, Kubernetes, OpenObserve, and other
+providers are not part of Phase 20A.
 
 ---
 
 ## Prioritization principles
 
-* **Phase 18 order may change based on design partner feedback.** The
+* **Provider order may change based on design partner feedback.** The
   connector prioritization table in
   [FEEDBACK_ANALYSIS.md](FEEDBACK_ANALYSIS.md) drives the decision.
 * **All provider integrations start as read-only evidence connectors.** They
@@ -107,6 +132,9 @@ product loop is validated by real usage.
   back, or run remediation.
 * **The Ability Runtime remains deferred** until evidence quality and recall
   usefulness are validated by real usage.
+* **Evidence correlation precedes wiki memory and proposals.** Rivora first
+  learns to present nearby evidence carefully, then organizes approved memory,
+  then considers an Ability Proposal Runtime.
 * **Safety is not traded for speed.** Every memory operation produces a
   receipt. Human approval is required before evidence becomes memory.
 

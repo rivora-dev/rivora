@@ -7,7 +7,7 @@ Phase 10 added `crates/rivora-connectors` and started with local Git history.
 Phase 11 adds a read-only GitHub connector. Phase 13 adds deterministic local
 fixture ingestion for demos and tests. Together they make Rivora useful
 without cloud credentials, hosted services, or connector secrets beyond an
-optional GitHub token.
+optional GitHub token. Phase 20A adds metadata-first Sentry issue evidence.
 
 ## What Connectors Do
 
@@ -30,6 +30,9 @@ such as `commit`, `push`, `pull`, `reset`, `checkout`, `rebase`, `merge`, or
 The Phase 11 GitHub connector is read-only and only issues `GET` requests
 against the GitHub REST API. It never calls `POST`, `PUT`, `PATCH`, or
 `DELETE` endpoints.
+
+The Phase 20A Sentry connector is read-only and only issues `GET` requests.
+It has no issue, alert, project, release, or deploy mutation operations.
 
 ## Local Git Connector
 
@@ -260,6 +263,52 @@ rivora remember --from-evidence <evidence-id>
 rivora feedback <memory-id> approve
 ```
 
+## Sentry Connector
+
+The Sentry connector reads issue/error metadata from the Sentry REST API and
+normalizes it as `SentryIssue` evidence.
+
+```bash
+export SENTRY_AUTH_TOKEN=...
+rivora ingest sentry --org my-org --project checkout-api --limit 20
+rivora ingest sentry --org my-org --project checkout-api --environment production --since 24h
+rivora ingest sentry --org my-org --project checkout-api --query "is:unresolved" --limit 20
+```
+
+When `--query` is omitted, Sentry's default `is:unresolved` query applies.
+The limit defaults to 20 and is capped at 100 for both live and fixture
+clients. Rivora reads one issue-list page per invocation.
+
+Use the narrowest practical read-only token with `event:read`. Sentry controls
+token scopes; Rivora only calls list/read endpoints. `SENTRY_AUTH_TOKEN` is
+preferred, with `SENTRY_TOKEN` accepted as a fallback. Tokens are passed to
+`curl` through stdin, redacted from errors, and never persisted.
+
+Stored metadata is explicitly allowlisted: issue id, org, project, title,
+culprit, level, status, permalink, first/last seen, count, user count,
+environment, release, transaction, and platform. Only environment, release,
+and transaction tag values are considered. Arbitrary JSON, arbitrary metadata,
+and all other tags are discarded. Current Sentry `issueType`, numeric
+`userCount`, and `matchingEventEnvironment` response shapes are normalized.
+
+Rivora does not ingest raw stack traces, raw event payloads, request bodies,
+headers, cookies, auth headers, user emails, usernames, IP addresses, session
+replays, sessions, contexts, or breadcrumbs. Unsafe values inside allowlisted
+text fields are redacted; invalid timestamps, counts, and permalinks are
+omitted or normalized. Malformed issue-list JSON fails closed. Rivora does not
+resolve, assign, or mute issues and does not mutate alerts, projects,
+releases, or deploys.
+
+Stable IDs use:
+
+```text
+sentry:issue:<org-slug>:<project-slug>:<issue-id>
+```
+
+All automated tests use `FixtureSentryClient`; no live Sentry access is
+required. Evidence is stored locally and is not memory until approved. No
+infrastructure actions are taken.
+
 ## Diagnostics
 
 Before ingesting from live providers, verify your environment:
@@ -316,7 +365,7 @@ data and does not require network access.
 - `what changed?` and `what changed in checkout?` show recent matching
   evidence. When evidence comes from multiple providers, the response is
   grouped by source (GitHub, Vercel, Cloudflare Pages, Cloudflare Workers,
-  Git).
+  Sentry, Git).
 - `what changed across providers?` shows cross-source grouped evidence.
 - `what happened during the release?` shows cross-source grouped evidence.
 - `what changed in github?` shows recent GitHub evidence only.
@@ -329,6 +378,8 @@ data and does not require network access.
 - `what changed in vercel?` and `what failed in vercel?` show Vercel evidence.
 - `what changed on cloudflare?` and `what failed in cloudflare?` show
   Cloudflare evidence.
+- `what errors happened recently?`, `what happened in sentry?`, and
+  `what changed around sentry?` show Sentry issue evidence.
 - `have we seen checkout deploy failures before?` routes to recall.
 
 Cross-source summaries are evidence-backed, not root-cause claims. Rivora

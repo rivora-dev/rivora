@@ -101,5 +101,25 @@
     "tags": ["checkout", "checkout-worker", "deployment", "production"],
     "refs": ["https://cloudflare.example/demo/multi-source-release/cf-worker-checkout-001"],
     "confidence": 0.88
+  },
+  {
+    "id": "sentry:issue:demo-org:checkout-api:9001",
+    "kind": "sentry_issue",
+    "source": {
+      "connector": "sentry",
+      "version": "0.1.0",
+      "repository": "demo-org/checkout-api",
+      "read_only": true
+    },
+    "title": "Sentry issue CHECKOUT-9001 (error)",
+    "summary": "Sentry issue CHECKOUT-9001 in checkout-api: TypeError in checkout request handling (error, 48 events)",
+    "body": "Issue: CHECKOUT-9001\nOrg: demo-org\nProject: checkout-api\nTitle: TypeError in checkout request handling\nLevel: error\nStatus: unresolved\nFirst seen: 2026-06-27T10:42:00Z\nLast seen: 2026-06-27T10:55:00Z\nCount: 48\nEnvironment: production\nRelease: checkout-api@2.4.1\nPlatform: javascript",
+    "service": "checkout-api",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:55:00Z",
+    "author": null,
+    "tags": ["checkout", "checkout-api", "error", "failed", "issue", "observability", "production", "sentry"],
+    "refs": ["issue:9001"],
+    "confidence": 0.9
   }
 ]

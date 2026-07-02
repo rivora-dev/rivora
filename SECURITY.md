@@ -42,15 +42,29 @@ and never takes infrastructure actions.
   read-only; it uses only `GET` requests and never creates, rolls back, or
   promotes deployments. It does not read or write environment variables,
   secrets, KV, R2, D1, or Queues.
+- `SENTRY_AUTH_TOKEN` (or `SENTRY_TOKEN`) is never stored in `.rivora/`,
+  printed, or written to evidence, memory, feedback, or receipts. The Sentry
+  connector uses only `GET` requests and requires no mutation scopes.
+  `SENTRY_AUTH_TOKEN` takes precedence when both variables are set. Exact,
+  `sntrys_`-prefixed, and `Bearer` token-like values are redacted from errors
+  and debug representations.
+- Sentry evidence is metadata-first and explicitly allowlisted. Rivora does
+  not ingest raw stack traces or events, request bodies or headers, cookies,
+  user emails, usernames, IP addresses, replays, or breadcrumbs. Common token,
+  email, IP, and private absolute-path shapes are redacted from allowlisted
+  user-controlled fields. Malformed responses fail closed instead of being
+  persisted as evidence.
 - Rivora does not intentionally ingest secrets. Connector evidence can include
   source-authored text such as commit messages or issue bodies, so review source
   content before ingestion and rotate any credential exposed in a source.
 
 ## Least privilege
 
-- Git, GitHub, Vercel, and Cloudflare connectors are read-only. GitHub API
+- Git, GitHub, Vercel, Cloudflare, and Sentry connectors are read-only. GitHub API
   ingestion uses only `GET` requests. Vercel API ingestion uses only `GET`
   requests. Cloudflare API ingestion uses only `GET` requests.
+  Sentry issue ingestion uses only `GET` requests and should use the narrowest
+  practical token with `event:read`.
 - The Slack adapter uses minimal `app_mentions:read` and `chat:write` bot
   scopes. No channel history ingestion or workspace crawling.
 - Use `rivora slack doctor` to validate the self-hosted Slack setup without
@@ -88,7 +102,5 @@ best-effort basis.
 ## Related
 
 - [AGENTS.md](AGENTS.md) · [CODEX.md](CODEX.md)
-- [docs/01-Manifesto.md](docs/01-Manifesto.md)
-- [docs/adr/0002-human-in-the-loop.md](docs/adr/0002-human-in-the-loop.md) ·
-  [docs/adr/0003-read-only-default.md](docs/adr/0003-read-only-default.md) ·
-  [docs/adr/0009-explain-everything.md](docs/adr/0009-explain-everything.md)
+- [docs/PRINCIPLES.md](docs/PRINCIPLES.md) ·
+  [docs/EVIDENCE_CONNECTORS.md](docs/EVIDENCE_CONNECTORS.md)

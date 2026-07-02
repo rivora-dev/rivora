@@ -8,16 +8,19 @@
 //! runs, releases, and deployments. Phase 18A adds a read-only Vercel
 //! connector (`vercel`) for deployment evidence. Phase 18B adds a read-only
 //! Cloudflare connector (`cloudflare`) for Pages and Workers deployment
-//! evidence.
+//! evidence. Phase 20A adds a read-only Sentry connector (`sentry`) for
+//! observability issue/error evidence.
 
 pub mod cloudflare;
 pub mod git;
 pub mod github;
+pub mod sentry;
 pub mod vercel;
 
 pub use cloudflare::*;
 pub use git::*;
 pub use github::*;
+pub use sentry::*;
 pub use vercel::*;
 
 use rivora_errors::{Result, RivoraError};
@@ -58,6 +61,7 @@ impl EvidenceId {
 /// Git kinds cover local repository history. GitHub kinds cover pull requests,
 /// issues, workflow runs, releases, and deployments ingested from the GitHub
 /// REST API. Vercel kinds cover deployments ingested from the Vercel REST API.
+/// Sentry kinds cover observability issues ingested from the Sentry REST API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceKind {
@@ -77,6 +81,7 @@ pub enum EvidenceKind {
     VercelDeployment,
     CloudflarePagesDeployment,
     CloudflareWorkerDeployment,
+    SentryIssue,
 }
 
 impl EvidenceKind {
@@ -99,6 +104,7 @@ impl EvidenceKind {
             Self::VercelDeployment => "vercel_deployment",
             Self::CloudflarePagesDeployment => "cloudflare_pages_deployment",
             Self::CloudflareWorkerDeployment => "cloudflare_worker_deployment",
+            Self::SentryIssue => "sentry_issue",
         }
     }
 
@@ -122,6 +128,7 @@ impl EvidenceKind {
             Self::VercelDeployment => "Vercel deployment",
             Self::CloudflarePagesDeployment => "Cloudflare Pages deployment",
             Self::CloudflareWorkerDeployment => "Cloudflare Worker deployment",
+            Self::SentryIssue => "Sentry observability issue",
         }
     }
 
@@ -161,6 +168,11 @@ impl EvidenceKind {
     #[must_use]
     pub fn is_cloudflare_worker(self) -> bool {
         matches!(self, Self::CloudflareWorkerDeployment)
+    }
+
+    #[must_use]
+    pub fn is_sentry(self) -> bool {
+        matches!(self, Self::SentryIssue)
     }
 }
 
@@ -214,6 +226,16 @@ impl EvidenceSource {
             read_only: true,
         }
     }
+
+    #[must_use]
+    pub fn sentry(repository: impl Into<String>) -> Self {
+        Self {
+            connector: sentry::SENTRY_CONNECTOR.to_string(),
+            version: CONNECTOR_VERSION.to_string(),
+            repository: Some(repository.into()),
+            read_only: true,
+        }
+    }
 }
 
 /// Normalized, serializable evidence captured by a connector.
@@ -258,6 +280,11 @@ impl EvidenceItem {
     #[must_use]
     pub fn is_cloudflare_worker(&self) -> bool {
         self.kind.is_cloudflare_worker()
+    }
+
+    #[must_use]
+    pub fn is_sentry(&self) -> bool {
+        self.source.connector == sentry::SENTRY_CONNECTOR || self.kind.is_sentry()
     }
 }
 
@@ -411,6 +438,23 @@ mod tests {
         assert!(source.read_only);
         assert_eq!(source.repository.as_deref(), Some("my-app"));
         assert_eq!(source.version, crate::CONNECTOR_VERSION);
+    }
+
+    #[test]
+    fn evidence_source_sentry_is_read_only() {
+        let source = EvidenceSource::sentry("my-org/checkout-api");
+        assert_eq!(source.connector, "sentry");
+        assert!(source.read_only);
+        assert_eq!(source.repository.as_deref(), Some("my-org/checkout-api"));
+        assert_eq!(source.version, crate::CONNECTOR_VERSION);
+    }
+
+    #[test]
+    fn evidence_kind_is_sentry_partition_is_correct() {
+        assert!(EvidenceKind::SentryIssue.is_sentry());
+        assert!(!EvidenceKind::GitCommit.is_sentry());
+        assert!(!EvidenceKind::VercelDeployment.is_sentry());
+        assert!(!EvidenceKind::CloudflarePagesDeployment.is_sentry());
     }
 
     #[test]

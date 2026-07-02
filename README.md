@@ -87,7 +87,7 @@ rivora demo --scenario multi-source-release
 | `checkout-incident` | Checkout latency, PR merge, human approval |
 | `release-regression` | Release rollback, incident response |
 | `workflow-failure` | CI/CD workflow failure and learning |
-| `multi-source-release` | Cross-source evidence from GitHub, Vercel, Cloudflare |
+| `multi-source-release` | Cross-source evidence from GitHub, Vercel, Cloudflare, Sentry |
 
 All scenarios use synthetic fixture data. No tokens, no network, no data
 leaves your machine.
@@ -174,6 +174,39 @@ Worker, Pages, KV, R2, D1, or Queues actions are taken.
 ```bash
 rivora ask "what changed on cloudflare?"
 rivora ask "what failed in cloudflare?"
+```
+
+---
+
+## Sentry observability evidence
+
+```bash
+export SENTRY_AUTH_TOKEN=...
+rivora init
+rivora ingest sentry --org my-org --project checkout-api --limit 20
+rivora ingest sentry --org my-org --project checkout-api --environment production --since 24h
+rivora ask "what errors happened recently?"
+rivora ask "what failed recently?"
+rivora ask "what happened during the release?"
+```
+
+Sentry ingestion is read-only and metadata-first. Rivora uses GET requests
+with a narrow `event:read` token, stores normalized issue metadata locally,
+and never resolves or assigns issues or mutates alerts, projects, releases,
+or deploys. Raw stack traces, event payloads, request bodies, headers,
+cookies, user emails, IP addresses, replay data, and breadcrumbs are not
+ingested. Evidence is not memory until approved. No infrastructure actions
+are taken.
+
+When `--query` is omitted, Sentry's default unresolved-issue query applies.
+`--limit` defaults to 20 and is capped at 100. `SENTRY_AUTH_TOKEN` takes
+precedence over the optional `SENTRY_TOKEN` fallback; neither value is
+printed, persisted, or exposed through debug output.
+
+```bash
+rivora evidence list
+rivora remember --from-evidence <evidence-id>
+rivora feedback <memory-id> approve
 ```
 
 ---

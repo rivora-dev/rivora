@@ -59,11 +59,18 @@ quality, high evidence usefulness, low safety risk, and high demo value.
 | GCP | | | | | | | |
 | Azure | | | | | | | |
 | Kubernetes | | | | | | | |
-| Sentry | | | | | | | |
+| Sentry (Phase 20A) | Validating | Low | Good (`GET`, `event:read`) | High | Low | High | Done |
 | Datadog | | | | | | | |
 | PagerDuty | | | | | | | |
 | Linear | | | | | | | |
 | Jira | | | | | | | |
+
+Sentry is metadata-first in Phase 20A. Render remains deferred until direct
+user or design-partner demand. The next planned data-layer connector is
+PlanetScale and must remain metadata-first without reading customer rows.
+Phase 20A.1 audited GET-only enforcement, field allowlisting, token and PII
+redaction, offline fixtures, CLI/Slack parity, and cross-source behavior before
+the roadmap proceeds.
 
 ### Scoring guide
 
