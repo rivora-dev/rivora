@@ -128,7 +128,7 @@ impl EvidenceKind {
             Self::VercelDeployment => "Vercel deployment",
             Self::CloudflarePagesDeployment => "Cloudflare Pages deployment",
             Self::CloudflareWorkerDeployment => "Cloudflare Worker deployment",
-            Self::SentryIssue => "Sentry issue",
+            Self::SentryIssue => "Sentry observability issue",
         }
     }
 

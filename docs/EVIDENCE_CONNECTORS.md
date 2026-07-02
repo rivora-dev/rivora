@@ -275,6 +275,10 @@ rivora ingest sentry --org my-org --project checkout-api --environment productio
 rivora ingest sentry --org my-org --project checkout-api --query "is:unresolved" --limit 20
 ```
 
+When `--query` is omitted, Sentry's default `is:unresolved` query applies.
+The limit defaults to 20 and is capped at 100 for both live and fixture
+clients. Rivora reads one issue-list page per invocation.
+
 Use the narrowest practical read-only token with `event:read`. Sentry controls
 token scopes; Rivora only calls list/read endpoints. `SENTRY_AUTH_TOKEN` is
 preferred, with `SENTRY_TOKEN` accepted as a fallback. Tokens are passed to
@@ -283,13 +287,17 @@ preferred, with `SENTRY_TOKEN` accepted as a fallback. Tokens are passed to
 Stored metadata is explicitly allowlisted: issue id, org, project, title,
 culprit, level, status, permalink, first/last seen, count, user count,
 environment, release, transaction, and platform. Only environment, release,
-transaction, and runtime tag values are considered. Arbitrary JSON and tags
-are discarded.
+and transaction tag values are considered. Arbitrary JSON, arbitrary metadata,
+and all other tags are discarded. Current Sentry `issueType`, numeric
+`userCount`, and `matchingEventEnvironment` response shapes are normalized.
 
 Rivora does not ingest raw stack traces, raw event payloads, request bodies,
 headers, cookies, auth headers, user emails, usernames, IP addresses, session
-replays, or breadcrumbs. It does not resolve, assign, or mute issues and does
-not mutate alerts, projects, releases, or deploys.
+replays, sessions, contexts, or breadcrumbs. Unsafe values inside allowlisted
+text fields are redacted; invalid timestamps, counts, and permalinks are
+omitted or normalized. Malformed issue-list JSON fails closed. Rivora does not
+resolve, assign, or mute issues and does not mutate alerts, projects,
+releases, or deploys.
 
 Stable IDs use:
 

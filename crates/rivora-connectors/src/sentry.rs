@@ -21,7 +21,7 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rivora_errors::{Result, RivoraError};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::{slug, EvidenceId, EvidenceItem, EvidenceKind, EvidenceSource};
 
@@ -55,17 +55,40 @@ pub fn ensure_sentry_read_only_method(method: &str) -> Result<()> {
     }
 }
 
-/// Replace any occurrence of `token` in `value` with `[redacted]`.
+/// Replace exact and recognizable Sentry token values with `[redacted]`.
 ///
 /// Used to scrub `curl` stderr and any other string before it can appear in an
 /// error message. Returns `value` unchanged when `token` is empty.
 #[must_use]
 fn redact_token(value: &str, token: &str) -> String {
-    if token.is_empty() {
+    let exact_redacted = if token.is_empty() {
         value.to_string()
     } else {
         value.replace(token, "[redacted]")
+    };
+    redact_token_like_values(&exact_redacted)
+}
+
+fn redact_token_like_values(value: &str) -> String {
+    let parts = value.split_whitespace().collect::<Vec<_>>();
+    let mut redacted = Vec::with_capacity(parts.len());
+    let mut index = 0;
+    while index < parts.len() {
+        let part = parts[index];
+        let trimmed = trim_sensitive_token(part);
+        if trimmed.eq_ignore_ascii_case("bearer") {
+            redacted.push("[redacted]".to_string());
+            index += usize::from(index + 1 < parts.len()) + 1;
+            continue;
+        }
+        if is_token_like(trimmed) {
+            redacted.push(part.replace(trimmed, "[redacted]"));
+        } else {
+            redacted.push(part.to_string());
+        }
+        index += 1;
     }
+    redacted.join(" ")
 }
 
 /// Sentry authentication configuration.
@@ -73,9 +96,18 @@ fn redact_token(value: &str, token: &str) -> String {
 /// The token is held privately and never exposed through a getter. Use
 /// [`Self::has_token`] to check whether a token is configured and
 /// [`Self::redact`] to scrub strings before they can appear in errors or logs.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SentryAuthConfig {
     token: Option<String>,
+}
+
+impl std::fmt::Debug for SentryAuthConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SentryAuthConfig")
+            .field("token", &self.token.as_ref().map(|_| "[redacted]"))
+            .finish()
+    }
 }
 
 impl SentryAuthConfig {
@@ -118,7 +150,7 @@ impl SentryAuthConfig {
     pub fn redact(&self, value: &str) -> String {
         match &self.token {
             Some(token) => redact_token(value, token),
-            None => value.to_string(),
+            None => redact_token(value, ""),
         }
     }
 }
@@ -201,6 +233,37 @@ impl HttpSentryClient {
         config
     }
 
+    fn issues_path(
+        &self,
+        project: &SentryProjectRef,
+        limit: usize,
+        query: Option<&str>,
+        environment: Option<&str>,
+        since: Option<&str>,
+    ) -> String {
+        let mut path = format!(
+            "/organizations/{}/issues/?project={}&limit={}",
+            url_encode(&project.org),
+            url_encode(&project.project),
+            clamp_limit(limit),
+        );
+        if let Some(query) = query {
+            path.push_str(&format!("&query={}", url_encode(query)));
+        }
+        if let Some(environment) = environment {
+            path.push_str(&format!("&environment={}", url_encode(environment)));
+        }
+        if let Some(since_value) = since {
+            if let Some(seconds) = parse_since_to_epoch_seconds(since_value) {
+                path.push_str(&format!(
+                    "&start={}",
+                    url_encode(&epoch_secs_to_iso(seconds))
+                ));
+            }
+        }
+        path
+    }
+
     fn get(&self, path: &str) -> Result<String> {
         ensure_sentry_read_only_method("GET")?;
         let config = self.request_config(path);
@@ -228,11 +291,12 @@ impl HttpSentryClient {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let redacted = self.auth.redact(stderr.as_ref());
+            let redacted_path = self.auth.redact(path);
             return Err(RivoraError::provider(
                 "sentry",
                 format!(
                     "Sentry API request failed for {}: {}",
-                    path,
+                    redacted_path,
                     redacted.trim()
                 ),
             ));
@@ -250,21 +314,7 @@ impl SentryClient for HttpSentryClient {
         environment: Option<&str>,
         since: Option<&str>,
     ) -> Result<String> {
-        let mut path = format!(
-            "/organizations/{}/issues/?project={}&query={}&limit={}",
-            url_encode(&project.org),
-            url_encode(&project.project),
-            url_encode(query.unwrap_or("")),
-            clamp_limit(limit),
-        );
-        if let Some(env) = environment {
-            path.push_str(&format!("&environment={}", url_encode(env)));
-        }
-        if let Some(since_value) = since {
-            if let Some(secs) = parse_since_to_epoch_seconds(since_value) {
-                path.push_str(&format!("&start={}", epoch_secs_to_iso(secs)));
-            }
-        }
+        let path = self.issues_path(project, limit, query, environment, since);
         self.get(&path)
     }
 }
@@ -427,7 +477,7 @@ impl SentryConnector {
         let project = request.project.clone();
         let repository = project.repository_label();
         let source = EvidenceSource::sentry(repository.clone());
-        let limit = request.limit;
+        let limit = clamp_limit(request.limit);
 
         let mut evidence = Vec::new();
         let since_cutoff = request
@@ -435,8 +485,6 @@ impl SentryConnector {
             .as_deref()
             .map(parse_since_cutoff)
             .transpose()?;
-        let mut topics = std::collections::BTreeSet::new();
-
         let raw = self.client.fetch_issues(
             &project,
             limit,
@@ -444,10 +492,9 @@ impl SentryConnector {
             request.environment.as_deref(),
             request.since.as_deref(),
         )?;
-        let parsed = parse_issues(&raw);
+        let parsed = parse_issues(&raw)?;
         for issue in parsed {
-            let item = issue_item(&source, &project, &issue)?;
-            collect_topics(&item, &mut topics);
+            let item = issue_item(&source, &project, &issue, request.environment.as_deref())?;
             evidence.push(item);
         }
 
@@ -455,10 +502,12 @@ impl SentryConnector {
         evidence.dedup_by(|a, b| a.id == b.id);
         if let Some(cutoff) = since_cutoff {
             evidence.retain(|item| evidence_is_after_cutoff(item, cutoff));
-            topics.clear();
-            for item in &evidence {
-                collect_topics(item, &mut topics);
-            }
+        }
+        evidence.truncate(limit);
+
+        let mut topics = std::collections::BTreeSet::new();
+        for item in &evidence {
+            collect_topics(item, &mut topics);
         }
 
         let issues = evidence.len();
@@ -485,7 +534,7 @@ fn evidence_is_after_cutoff(item: &EvidenceItem, cutoff: i64) -> bool {
     item.timestamp
         .as_deref()
         .and_then(parse_sentry_timestamp)
-        .is_none_or(|timestamp| timestamp >= cutoff)
+        .is_some_and(|timestamp| timestamp >= cutoff)
 }
 
 fn parse_since_cutoff(value: &str) -> Result<i64> {
@@ -604,7 +653,6 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 // Fields are captured for forward compatibility even when not yet read,
 // so `dead_code` is allowed on the DTOs.
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IssueResponse {
@@ -618,38 +666,41 @@ struct IssueResponse {
     permalink: Option<String>,
     first_seen: Option<String>,
     last_seen: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_scalar")]
     count: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_scalar")]
     user_count: Option<String>,
-    #[serde(rename = "type")]
     issue_type: Option<String>,
-    metadata: Option<serde_json::Map<String, serde_json::Value>>,
-    project: Option<IssueProjectRef>,
-    environment: Option<serde_json::Value>,
+    #[serde(rename = "type")]
+    legacy_type: Option<String>,
+    matching_event_environment: Option<String>,
     tags: Option<Vec<IssueTag>>,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
-struct IssueProjectRef {
-    id: Option<String>,
-    slug: Option<String>,
-    name: Option<String>,
-    platform: Option<String>,
+fn deserialize_optional_scalar<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(serde_json::Value::String(value)) => Some(value),
+        Some(serde_json::Value::Number(value)) => Some(value.to_string()),
+        _ => None,
+    })
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct IssueTag {
     key: Option<String>,
     value: Option<String>,
-    name: Option<String>,
 }
 
-#[must_use]
-fn parse_issues(raw: &str) -> Vec<IssueResponse> {
-    serde_json::from_str::<Vec<IssueResponse>>(raw)
-        .ok()
-        .unwrap_or_default()
+fn parse_issues(raw: &str) -> Result<Vec<IssueResponse>> {
+    serde_json::from_str::<Vec<IssueResponse>>(raw).map_err(|error| {
+        RivoraError::provider("sentry", format!("invalid Sentry issue response: {error}"))
+    })
 }
 
 // --- Metadata allowlist -----------------------------------------------------
@@ -657,7 +708,6 @@ fn parse_issues(raw: &str) -> Vec<IssueResponse> {
 /// Allowed metadata keys for Sentry evidence. Only these keys are written
 /// into the evidence body. This is intentionally narrow to avoid leaking
 /// sensitive data.
-#[allow(dead_code)]
 const ALLOWED_METADATA_KEYS: &[&str] = &[
     "issue_id",
     "org",
@@ -680,9 +730,8 @@ const ALLOWED_METADATA_KEYS: &[&str] = &[
 
 /// Allowed tag keys that may be included in evidence. Tags not in this list
 /// are silently dropped to avoid leaking PII or secrets.
-const ALLOWED_TAG_KEYS: &[&str] = &["environment", "release", "transaction", "runtime"];
+const ALLOWED_TAG_KEYS: &[&str] = &["environment", "release", "transaction"];
 
-#[allow(dead_code)]
 #[must_use]
 fn is_allowed_metadata_key(key: &str) -> bool {
     ALLOWED_METADATA_KEYS.contains(&key)
@@ -710,15 +759,20 @@ fn issue_item(
     source: &EvidenceSource,
     project: &SentryProjectRef,
     issue: &IssueResponse,
+    requested_environment: Option<&str>,
 ) -> Result<EvidenceItem> {
     let issue_id = issue.id.clone().unwrap_or_default();
-    if issue_id.trim().is_empty() {
+    if !is_safe_identifier(&issue_id) {
         return Err(RivoraError::invalid_value(
             "sentry_issue_id",
-            "Sentry issue response did not include an id",
+            "Sentry issue response did not include a safe id",
         ));
     }
-    let short_id = issue.short_id.clone().unwrap_or_default();
+    let short_id = issue
+        .short_id
+        .clone()
+        .filter(|value| is_safe_identifier(value))
+        .unwrap_or_default();
     let title = sanitize_metadata_value(
         &issue
             .title
@@ -726,23 +780,25 @@ fn issue_item(
             .unwrap_or_else(|| "Unknown error".to_string()),
     );
     let culprit = sanitize_metadata_value(&issue.culprit.clone().unwrap_or_default());
-    let level = issue.level.clone().unwrap_or_else(|| "unknown".to_string());
-    let status = issue
-        .status
-        .clone()
-        .unwrap_or_else(|| "unresolved".to_string());
+    let level = sanitize_metadata_value(issue.level.as_deref().unwrap_or("unknown"));
+    let status = sanitize_metadata_value(issue.status.as_deref().unwrap_or("unresolved"));
     let platform = sanitize_metadata_value(&issue.platform.clone().unwrap_or_default());
-    let permalink = sanitize_metadata_value(&issue.permalink.clone().unwrap_or_default());
-    let first_seen = issue.first_seen.clone().unwrap_or_default();
-    let last_seen = issue.last_seen.clone().unwrap_or_default();
-    let count = issue.count.clone().unwrap_or_else(|| "0".to_string());
-    let user_count = issue.user_count.clone().unwrap_or_else(|| "0".to_string());
-    let issue_type = issue
-        .issue_type
-        .clone()
-        .unwrap_or_else(|| "error".to_string());
+    let permalink = safe_permalink(issue.permalink.as_deref());
+    let first_seen = safe_timestamp(issue.first_seen.as_deref());
+    let last_seen = safe_timestamp(issue.last_seen.as_deref());
+    let count = safe_count(issue.count.as_deref());
+    let user_count = safe_count(issue.user_count.as_deref());
+    let issue_type = sanitize_metadata_value(
+        issue
+            .issue_type
+            .as_deref()
+            .or(issue.legacy_type.as_deref())
+            .unwrap_or("error"),
+    );
 
     let environment = extract_allowed_tag(&issue.tags, "environment")
+        .or_else(|| issue.matching_event_environment.clone())
+        .or_else(|| requested_environment.map(str::to_string))
         .map(|value| sanitize_metadata_value(&value))
         .unwrap_or_default();
     let release = extract_allowed_tag(&issue.tags, "release")
@@ -762,7 +818,7 @@ fn issue_item(
     };
 
     let is_error = matches!(level.to_ascii_lowercase().as_str(), "error" | "fatal");
-    let is_resolved = status == "resolved";
+    let is_resolved = status.eq_ignore_ascii_case("resolved");
 
     let summary = if is_resolved {
         format!(
@@ -781,26 +837,25 @@ fn issue_item(
         )
     };
 
-    let body = format!(
-        "Issue: {}\nOrg: {}\nProject: {}\nTitle: {}\nCulprit: {}\nLevel: {}\nStatus: {}\nType: {}\nPermalink: {}\nFirst seen: {}\nLast seen: {}\nCount: {}\nUser count: {}\nEnvironment: {}\nRelease: {}\nTransaction: {}\nPlatform: {}",
-        display_id,
-        project.org,
-        project.project,
-        title,
-        culprit,
-        level,
-        status,
-        issue_type,
-        permalink,
-        first_seen,
-        last_seen,
-        count,
-        user_count,
-        if environment.is_empty() { "unknown" } else { &environment },
-        if release.is_empty() { "unknown" } else { &release },
-        if transaction.is_empty() { "unknown" } else { &transaction },
-        if platform.is_empty() { "unknown" } else { &platform },
-    );
+    let body = render_allowed_metadata(&[
+        ("issue_id", display_id.clone()),
+        ("org", project.org.clone()),
+        ("project", project.project.clone()),
+        ("title", title.clone()),
+        ("culprit", culprit),
+        ("issue_type", issue_type),
+        ("level", level.clone()),
+        ("status", status.clone()),
+        ("permalink", permalink.clone()),
+        ("first_seen", first_seen.clone()),
+        ("last_seen", last_seen.clone()),
+        ("count", count),
+        ("user_count", user_count),
+        ("environment", value_or_unknown(&environment).to_string()),
+        ("release", value_or_unknown(&release).to_string()),
+        ("transaction", value_or_unknown(&transaction).to_string()),
+        ("platform", value_or_unknown(&platform).to_string()),
+    ]);
 
     let mut tags = vec![
         "sentry".to_string(),
@@ -808,7 +863,7 @@ fn issue_item(
         "error".to_string(),
         "issue".to_string(),
     ];
-    if is_error {
+    if is_error && !is_resolved {
         tags.push("failed".to_string());
     }
     if !environment.is_empty() {
@@ -819,6 +874,8 @@ fn issue_item(
     }
     tags.push(slug(&project.project));
     tags.push(level.to_ascii_lowercase());
+    tags.push(format!("level-{}", slug(&level)));
+    tags.push(format!("status-{}", slug(&status)));
     tags.sort();
     tags.dedup();
 
@@ -870,13 +927,10 @@ fn issue_item(
 /// Redact common token and PII shapes from allowlisted, user-controlled
 /// metadata such as issue titles, culprits, and transaction names.
 fn sanitize_metadata_value(value: &str) -> String {
-    value
+    redact_token_like_values(value)
         .split_whitespace()
         .map(|part| {
-            let trimmed = part.trim_matches(|character: char| {
-                !character.is_ascii_alphanumeric()
-                    && !matches!(character, '.' | '@' | '_' | '-' | '=')
-            });
+            let trimmed = trim_sensitive_token(part);
             if looks_sensitive(trimmed) {
                 part.replace(trimmed, "[redacted]")
             } else {
@@ -891,10 +945,94 @@ fn looks_sensitive(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     lower.contains('@')
         || is_ipv4(value)
-        || lower.starts_with("sntrys_")
-        || lower.starts_with("sentry_")
+        || is_token_like(&lower)
+        || lower.starts_with("/secret/")
+        || lower.starts_with("/users/")
+        || lower.starts_with("/home/")
+        || lower.contains("\\users\\")
+}
+
+fn is_token_like(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.starts_with("sntrys_")
         || lower.starts_with("sentry_auth_token=")
         || lower.starts_with("sentry_token=")
+}
+
+fn trim_sensitive_token(value: &str) -> &str {
+    value.trim_matches(|character: char| {
+        !character.is_ascii_alphanumeric()
+            && !matches!(character, '.' | '@' | '_' | '-' | '=' | '/' | '\\')
+    })
+}
+
+fn is_safe_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        && !is_token_like(value)
+}
+
+fn safe_count(value: Option<&str>) -> String {
+    value
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+        .to_string()
+}
+
+fn safe_timestamp(value: Option<&str>) -> String {
+    value
+        .filter(|value| parse_sentry_timestamp(value).is_some())
+        .map(str::to_string)
+        .unwrap_or_default()
+}
+
+fn safe_permalink(value: Option<&str>) -> String {
+    value
+        .filter(|value| value.starts_with("https://") || value.starts_with("http://"))
+        .map(sanitize_metadata_value)
+        .unwrap_or_default()
+}
+
+fn value_or_unknown(value: &str) -> &str {
+    if value.is_empty() {
+        "unknown"
+    } else {
+        value
+    }
+}
+
+fn render_allowed_metadata(metadata: &[(&str, String)]) -> String {
+    metadata
+        .iter()
+        .filter(|(key, _)| is_allowed_metadata_key(key))
+        .map(|(key, value)| format!("{}: {}", metadata_label(key), value))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn metadata_label(key: &str) -> &'static str {
+    match key {
+        "issue_id" => "Issue",
+        "org" => "Org",
+        "project" => "Project",
+        "title" => "Title",
+        "culprit" => "Culprit",
+        "issue_type" => "Type",
+        "level" => "Level",
+        "status" => "Status",
+        "permalink" => "Permalink",
+        "first_seen" => "First seen",
+        "last_seen" => "Last seen",
+        "count" => "Count",
+        "user_count" => "User count",
+        "environment" => "Environment",
+        "release" => "Release",
+        "transaction" => "Transaction",
+        "platform" => "Platform",
+        _ => "Unknown",
+    }
 }
 
 fn is_ipv4(value: &str) -> bool {
@@ -930,7 +1068,7 @@ mod tests {
             "firstSeen": "2026-06-27T10:00:00Z",
             "lastSeen": "2026-06-27T10:45:00Z",
             "count": "142",
-            "userCount": "38",
+            "userCount": 38,
             "type": "error",
             "project": {
                 "id": "proj_001",
@@ -1148,6 +1286,23 @@ mod tests {
     }
 
     #[test]
+    fn auth_debug_and_errors_never_expose_exact_or_token_like_values() {
+        let auth = SentryAuthConfig::with_token("sntrys_configured_secret");
+        let debug = format!("{auth:?}");
+        let redacted = auth
+            .redact("Authorization: Bearer sntrys_configured_secret; rejected sntrys_other_secret");
+
+        assert!(!debug.contains("sntrys_configured_secret"), "{debug}");
+        assert!(!redacted.contains("sntrys_configured_secret"), "{redacted}");
+        assert!(!redacted.contains("sntrys_other_secret"), "{redacted}");
+        assert!(!redacted.contains("Bearer"), "{redacted}");
+        assert_eq!(
+            SentryAuthConfig::with_token("").redact("Bearer sntrys_invalid"),
+            "[redacted]"
+        );
+    }
+
+    #[test]
     fn auth_env_var_behavior() {
         std::env::remove_var("SENTRY_AUTH_TOKEN");
         std::env::remove_var("SENTRY_TOKEN");
@@ -1162,6 +1317,10 @@ mod tests {
         let auth_preferred = SentryAuthConfig::from_env();
         assert!(auth_preferred.has_token());
         assert_eq!(auth_preferred.redact("sentry_primary"), "[redacted]");
+        assert_eq!(
+            auth_preferred.redact("sentry_primary sentry_fallback"),
+            "[redacted] sentry_fallback"
+        );
 
         std::env::remove_var("SENTRY_AUTH_TOKEN");
         std::env::remove_var("SENTRY_TOKEN");
@@ -1172,7 +1331,7 @@ mod tests {
         let auth = SentryAuthConfig::with_token("sentry_secret_token");
         let client = HttpSentryClient::new(auth);
         let config =
-            client.request_config("/projects/my-org/checkout-api/issues/?query=&per_page=20");
+            client.request_config("/organizations/my-org/issues/?project=checkout-api&limit=20");
 
         assert!(config.contains("request = \"GET\""));
         assert!(!config.contains("\"POST\""));
@@ -1181,6 +1340,28 @@ mod tests {
         assert!(!config.contains("\"DELETE\""));
         assert!(config.contains("sentry_secret_token"));
         assert!(!client.auth.redact(&config).contains("sentry_secret_token"));
+    }
+
+    #[test]
+    fn issue_list_path_uses_documented_read_endpoint_filters_and_cap() {
+        let client = HttpSentryClient::new(SentryAuthConfig::with_token("token"));
+        let default_path = client.issues_path(&project(), 1_000, None, None, None);
+        let filtered_path = client.issues_path(
+            &project(),
+            20,
+            Some("is:unresolved"),
+            Some("production"),
+            Some("2026-07-01T00:00:00Z"),
+        );
+
+        assert_eq!(
+            default_path,
+            "/organizations/my-org/issues/?project=checkout-api&limit=100"
+        );
+        assert!(!default_path.contains("query="));
+        assert!(filtered_path.contains("query=is%3Aunresolved"));
+        assert!(filtered_path.contains("environment=production"));
+        assert!(filtered_path.contains("start=2026-07-01T00%3A00%3A00Z"));
     }
 
     #[test]
@@ -1201,7 +1382,7 @@ mod tests {
             {
                 "id": "9999",
                 "shortId": "LEAK-001",
-                "title": "sentry_should_not_leak in handler",
+                "title": "sntrys_should_not_leak in handler",
                 "culprit": "handler",
                 "level": "error",
                 "status": "unresolved",
@@ -1220,15 +1401,15 @@ mod tests {
 
         for item in &result.evidence {
             assert!(
-                !item.body.contains("sentry_should_not_leak"),
+                !item.body.contains("sntrys_should_not_leak"),
                 "{}",
                 item.body
             );
-            assert!(!item.summary.contains("sentry_should_not_leak"));
+            assert!(!item.summary.contains("sntrys_should_not_leak"));
             assert!(!item
                 .refs
                 .iter()
-                .any(|r| r.contains("sentry_should_not_leak")));
+                .any(|r| r.contains("sntrys_should_not_leak")));
         }
     }
 
@@ -1271,6 +1452,28 @@ mod tests {
 
     #[test]
     fn metadata_allowlist_filters_disallowed_tag_keys() {
+        assert_eq!(
+            ALLOWED_METADATA_KEYS,
+            &[
+                "issue_id",
+                "org",
+                "project",
+                "title",
+                "culprit",
+                "issue_type",
+                "level",
+                "status",
+                "permalink",
+                "first_seen",
+                "last_seen",
+                "count",
+                "user_count",
+                "environment",
+                "release",
+                "transaction",
+                "platform",
+            ]
+        );
         assert!(is_allowed_metadata_key("issue_id"));
         assert!(is_allowed_metadata_key("org"));
         assert!(is_allowed_metadata_key("title"));
@@ -1278,10 +1481,15 @@ mod tests {
         assert!(!is_allowed_metadata_key("request_body"));
         assert!(!is_allowed_metadata_key("user_email"));
         assert!(!is_allowed_metadata_key("ip_address"));
+        assert_eq!(
+            render_allowed_metadata(&[("request", "secret".to_string())]),
+            ""
+        );
     }
 
     #[test]
     fn tag_allowlist_filters_sensitive_tags() {
+        assert_eq!(ALLOWED_TAG_KEYS, &["environment", "release", "transaction"]);
         assert!(is_allowed_tag_key("environment"));
         assert!(is_allowed_tag_key("release"));
         assert!(is_allowed_tag_key("transaction"));
@@ -1327,5 +1535,123 @@ mod tests {
             assert!(!item.body.contains("session_replay"));
             assert!(!item.body.contains("breadcrumb"));
         }
+    }
+
+    #[test]
+    fn malicious_nested_fields_and_sensitive_allowlisted_values_are_not_persisted() {
+        let fixture = r#"[{
+            "id": "7001",
+            "shortId": "SAFE-7001",
+            "title": "Failure for person@example.com from 192.0.2.1 Bearer title-secret",
+            "culprit": "/secret/path sntrys_culprit_secret",
+            "level": "error",
+            "status": "unresolved",
+            "platform": "javascript",
+            "permalink": "javascript:alert('secret permalink')",
+            "firstSeen": "secret first seen",
+            "lastSeen": "2026-07-01T10:00:00Z",
+            "count": "secret-count",
+            "userCount": "person@example.com",
+            "type": "default",
+            "issueType": "error_generic",
+            "tags": [
+                {"key":"environment","value":"production"},
+                {"key":"secret_tag","value":"secret arbitrary tag"}
+            ],
+            "user": {
+                "email": "nested-person@example.com",
+                "username": "private-user",
+                "ip_address": "192.0.2.99"
+            },
+            "request": {
+                "headers": {"Authorization": "Bearer request-secret"},
+                "data": {"password": "secret-password"},
+                "cookies": "secret-cookie"
+            },
+            "entries": [{
+                "type": "exception",
+                "data": {"values": [{"stacktrace": {"frames": [{"filename": "/secret/path"}]}}]}
+            }],
+            "contexts": {"secret": "secret-context"},
+            "breadcrumbs": {"values": [{"message": "secret breadcrumb"}]},
+            "replay_id": "secret-replay",
+            "session": {"id": "secret-session"}
+        }]"#;
+        let result = SentryConnector::new(FixtureSentryClient::builder().issues(fixture).build())
+            .ingest(default_request())
+            .unwrap();
+        let serialized = serde_json::to_string(&result.evidence).unwrap();
+
+        for forbidden in [
+            "person@example.com",
+            "192.0.2.1",
+            "title-secret",
+            "sntrys_culprit_secret",
+            "secret permalink",
+            "secret first seen",
+            "secret-count",
+            "nested-person@example.com",
+            "private-user",
+            "192.0.2.99",
+            "request-secret",
+            "secret-password",
+            "secret-cookie",
+            "/secret/path",
+            "secret-context",
+            "secret breadcrumb",
+            "secret-replay",
+            "secret-session",
+            "secret arbitrary tag",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "persisted {forbidden}: {serialized}"
+            );
+        }
+        assert!(serialized.contains("Type: error_generic"), "{serialized}");
+        assert!(serialized.contains("Count: 0"), "{serialized}");
+        assert!(serialized.contains("User count: 0"), "{serialized}");
+        assert!(!serialized.contains("javascript:alert"), "{serialized}");
+    }
+
+    #[test]
+    fn connector_caps_fixture_results_at_one_hundred() {
+        let issues = (0..105)
+            .map(|id| {
+                serde_json::json!({
+                    "id": id.to_string(),
+                    "shortId": format!("ISSUE-{id}"),
+                    "title": format!("Issue {id}"),
+                    "level": "error",
+                    "status": "unresolved",
+                    "lastSeen": "2026-07-01T10:00:00Z",
+                    "count": "1",
+                    "userCount": "0"
+                })
+            })
+            .collect::<Vec<_>>();
+        let fixture = serde_json::to_string(&issues).unwrap();
+        let result = SentryConnector::new(FixtureSentryClient::builder().issues(fixture).build())
+            .ingest(SentryIngestRequest::new(project()).with_limit(1_000))
+            .unwrap();
+
+        assert_eq!(result.evidence.len(), 100);
+        assert_eq!(result.issues, 100);
+    }
+
+    #[test]
+    fn malformed_issue_response_is_an_error_not_an_empty_result() {
+        let connector =
+            SentryConnector::new(FixtureSentryClient::builder().issues("not-json").build());
+        assert!(connector.ingest(default_request()).is_err());
+    }
+
+    #[test]
+    fn since_filter_rejects_evidence_without_a_valid_timestamp() {
+        let fixture = r#"[{"id":"8001","title":"No timestamp","level":"error"}]"#;
+        let result = SentryConnector::new(FixtureSentryClient::builder().issues(fixture).build())
+            .ingest(SentryIngestRequest::new(project()).with_since("2026-07-01T00:00:00Z"))
+            .unwrap();
+        assert!(result.evidence.is_empty());
     }
 }

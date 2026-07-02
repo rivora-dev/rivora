@@ -126,6 +126,8 @@ Rivora only reads normalized issue metadata. It does not ingest raw stack
 traces, request data, user emails, IPs, replay data, or breadcrumbs, and it
 does not resolve, assign, or otherwise mutate Sentry issues. Evidence stays
 local and is not memory until approved. No infrastructure actions are taken.
+`SENTRY_AUTH_TOKEN` takes precedence over the optional `SENTRY_TOKEN`
+fallback. The default query is `is:unresolved`, and results are capped at 100.
 
 ## Create and approve memory
 

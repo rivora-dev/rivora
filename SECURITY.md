@@ -45,10 +45,15 @@ and never takes infrastructure actions.
 - `SENTRY_AUTH_TOKEN` (or `SENTRY_TOKEN`) is never stored in `.rivora/`,
   printed, or written to evidence, memory, feedback, or receipts. The Sentry
   connector uses only `GET` requests and requires no mutation scopes.
+  `SENTRY_AUTH_TOKEN` takes precedence when both variables are set. Exact,
+  `sntrys_`-prefixed, and `Bearer` token-like values are redacted from errors
+  and debug representations.
 - Sentry evidence is metadata-first and explicitly allowlisted. Rivora does
   not ingest raw stack traces or events, request bodies or headers, cookies,
   user emails, usernames, IP addresses, replays, or breadcrumbs. Common token,
-  email, and IP shapes are redacted from allowlisted user-controlled fields.
+  email, IP, and private absolute-path shapes are redacted from allowlisted
+  user-controlled fields. Malformed responses fail closed instead of being
+  persisted as evidence.
 - Rivora does not intentionally ingest secrets. Connector evidence can include
   source-authored text such as commit messages or issue bodies, so review source
   content before ingestion and rotate any credential exposed in a source.

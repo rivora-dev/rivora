@@ -198,6 +198,11 @@ cookies, user emails, IP addresses, replay data, and breadcrumbs are not
 ingested. Evidence is not memory until approved. No infrastructure actions
 are taken.
 
+When `--query` is omitted, Sentry's default unresolved-issue query applies.
+`--limit` defaults to 20 and is capped at 100. `SENTRY_AUTH_TOKEN` takes
+precedence over the optional `SENTRY_TOKEN` fallback; neither value is
+printed, persisted, or exposed through debug output.
+
 ```bash
 rivora evidence list
 rivora remember --from-evidence <evidence-id>

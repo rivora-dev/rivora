@@ -749,9 +749,10 @@ pub fn parse_ask_intent(prompt: &str) -> AskIntent {
         AskIntent::RememberPrompt
     } else if normalized.contains("what merged recently") || normalized.contains("what merged") {
         AskIntent::WhatMergedRecently
+    } else if normalized.contains("errors increased after") {
+        AskIntent::WhatChanged
     } else if normalized.contains("what errors happened recently")
         || normalized.contains("what error happened recently")
-        || normalized.contains("errors increased after")
     {
         AskIntent::WhatErrorsHappenedRecently
     } else if normalized.contains("what failed in sentry")
@@ -1139,7 +1140,14 @@ pub fn ingest_cloudflare_with_connector(
 
 pub fn ingest_sentry(store: &LocalMemoryStore, options: SentryIngestOptions) -> Result<String> {
     validate_sentry_options(&options)?;
-    let auth = SentryAuthConfig::from_env();
+    ingest_sentry_with_auth(store, options, SentryAuthConfig::from_env())
+}
+
+fn ingest_sentry_with_auth(
+    store: &LocalMemoryStore,
+    options: SentryIngestOptions,
+    auth: SentryAuthConfig,
+) -> Result<String> {
     if !auth.has_token() {
         return Err(RivoraError::invalid_value(
             "sentry_token",
@@ -1157,10 +1165,10 @@ pub fn ingest_sentry_with_connector(
     connector: &SentryConnector,
 ) -> Result<String> {
     validate_sentry_options(&options)?;
-    store.init()?;
     if let Some(since) = &options.since {
         validate_provider_since(since, "sentry")?;
     }
+    store.init()?;
     let mut request = SentryIngestRequest::new(SentryProjectRef::new(options.org, options.project))
         .with_limit(options.limit);
     if let Some(since) = options.since {
@@ -1188,6 +1196,12 @@ fn validate_sentry_options(options: &SentryIngestOptions) -> Result<()> {
         return Err(RivoraError::invalid_value(
             "sentry_project",
             "rivora ingest sentry requires --project <project-slug>.\n\nTry:\nrivora ingest sentry --org <org-slug> --project <project-slug> --limit 20\n\nNo infrastructure actions were taken.",
+        ));
+    }
+    if options.limit == 0 {
+        return Err(RivoraError::invalid_value(
+            "sentry_limit",
+            "rivora ingest sentry requires --limit to be at least 1. Values above 100 are safely capped at 100.\n\nNo infrastructure actions were taken.",
         ));
     }
     Ok(())
@@ -1454,9 +1468,9 @@ pub fn demo(store: &LocalMemoryStore, options: DemoOptions) -> Result<String> {
         output.push_str("\n\nRecall:\n");
         output.push_str(&compact_section(&recall_output));
         output.push_str("\n\nAsk:\n");
-        output.push_str(&compact_section(&ask_output));
+        output.push_str(&compact_section_with_limit(&ask_output, 24));
         output.push_str("\n\nSlack dev:\n");
-        output.push_str(&compact_section(&slack_output));
+        output.push_str(&compact_section_with_limit(&slack_output, 24));
         output.push_str("\n\nDemo complete.\n\nYou just saw:\nEvidence -> Memory Candidate -> Human Approval -> Recall\n\nEvidence is not memory until a human approves it.\nNo root cause was inferred without evidence.\nNo infrastructure actions were taken.");
         if options.keep || options.store.is_some() {
             output.push_str(&format!(
@@ -2197,6 +2211,13 @@ fn render_sentry_ingest_result(
     added: usize,
     store: &LocalMemoryStore,
 ) -> String {
+    if result.evidence.is_empty() {
+        return format!(
+            "No Sentry issues found for {}.\n\nTry a wider --since window, a different --environment, or an explicit --query. Sentry defaults to unresolved issues when --query is omitted.\n\nEvidence is not memory until approved.\nNo infrastructure actions were taken.{}",
+            result.repository,
+            next_steps_after_ingest()
+        );
+    }
     let existing = result.evidence.len().saturating_sub(added);
     format!(
         "Ingested {} Sentry issue evidence records.\nNew: {}\nExisting: {}\n\nProject: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nSentry access is read-only.\nEvidence is not memory until approved.\nNo infrastructure actions were taken.{}",
@@ -2230,8 +2251,13 @@ fn render_evidence_item(item: &EvidenceItem) -> String {
     let status = evidence_status_label(item);
     let timestamp = item.timestamp.as_deref().unwrap_or("unknown");
     let service = item.service.as_deref().unwrap_or("unknown");
+    let sensitive_data_note = if item.is_sentry() {
+        "\n\nSensitive Sentry event data is not stored."
+    } else {
+        ""
+    };
     format!(
-        "Evidence: {}\nSource: {}\nKind: {}\nStatus: {}\nTopic: {}\nWhen: {}\nConfidence: {}\nFiles:\n{}\n\nDetails:\n{}\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo infrastructure actions were taken.",
+        "Evidence: {}\nSource: {}\nKind: {}\nStatus: {}\nTopic: {}\nWhen: {}\nConfidence: {}\nFiles:\n{}\n\nDetails:\n{}{}\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo infrastructure actions were taken.",
         item.id.as_str(),
         provider,
         item.kind.label(),
@@ -2241,6 +2267,7 @@ fn render_evidence_item(item: &EvidenceItem) -> String {
         confidence_label(item.confidence),
         render_bullets(&item.files_changed),
         item.body,
+        sensitive_data_note,
         item.id.as_str()
     )
 }
@@ -2333,8 +2360,8 @@ fn ask_what_failed_recently(store: &LocalMemoryStore) -> Result<String> {
     if summary.provider_count() > 1 {
         let mut output = summary.render();
         output = output.replace(
-            "These events occurred in the same window.\nThis may be related.\n",
-            "These failures occurred in the same window.\nThis may be related.\n",
+            "These events occurred in the same window.\nNearby evidence may be related and may be worth investigating.\n",
+            "These failures occurred in the same window.\nNearby evidence may be related and may be worth investigating.\n",
         );
         return Ok(output);
     }
@@ -2625,15 +2652,7 @@ fn render_remembered(memory: &MemoryRecord) -> String {
 }
 
 fn render_remembered_from_evidence(memory: &MemoryRecord, evidence: &EvidenceItem) -> String {
-    let source_label = if evidence.is_github() {
-        "GitHub"
-    } else if evidence.is_vercel() {
-        "Vercel"
-    } else if evidence.is_cloudflare() {
-        "Cloudflare"
-    } else {
-        "Git"
-    };
+    let source_label = provider_label_for_evidence(evidence);
     let evidence_refs = memory_evidence(memory);
     format!(
         "Memory candidate created from {source_label} evidence.\n\nMemory: {}\nSource: {}\nSummary: {}\nStatus: {}\nConfidence: {}\nEvidence:\n{}\n\nNo action was taken.\n\nNext:\nrivora feedback {} approve\nrivora recall <topic>",
@@ -2658,9 +2677,10 @@ fn render_recall_result(result: &RecallResult) -> String {
     let mut output = format!("Similar memories found: {}\n", result.matches.len());
     for (index, matched) in result.matches.iter().enumerate() {
         output.push_str(&format!(
-            "\n{}. {}\n   Score: {}\n   Confidence: {}\n   Status: {}\n\n   Why it matched:\n{}\n\n   Evidence:\n{}\n",
+            "\n{}. {}\n   Summary: {}\n   Score: {}\n   Confidence: {}\n   Status: {}\n\n   Why it matched:\n{}\n\n   Evidence:\n{}\n",
             index + 1,
             matched.memory.title.as_str(),
+            matched.memory.body.as_str(),
             score_label(matched.score.value),
             confidence_label(matched.confidence),
             status_label(matched.memory.status),
@@ -2686,7 +2706,7 @@ fn help_text_for(topic: HelpTopic) -> String {
         HelpTopic::IngestGithub => "rivora ingest github\n\nIngest read-only evidence from the GitHub REST API (pull requests, issues,\nworkflow runs, releases, deployments).\n\nFlags:\n  --repo owner/name    Required repository reference\n  --since <value>      Optional time window\n  --limit <n>          Maximum items per source (default: 20)\n  --pull-requests      Include merged pull requests\n  --issues             Include issues\n  --workflow-runs      Include workflow runs\n  --releases           Include releases\n  --deployments        Include deployments\n\n`GITHUB_TOKEN` is optional for public repos and never stored. The connector\nonly issues `GET` requests. No infrastructure actions are taken.".to_string(),
         HelpTopic::IngestVercel => "rivora ingest vercel\n\nIngest read-only deployment evidence from the Vercel REST API.\n\nFlags:\n  --project <id-or-name>  Required project reference\n  --team <id-or-slug>     Optional team scope\n  --since <value>         Optional time window\n  --limit <n>             Maximum deployments (default: 20)\n\n`VERCEL_TOKEN` is required and never stored. The connector is read-only. No\ndeployment, rollback, or promotion actions are taken.".to_string(),
         HelpTopic::IngestCloudflare => "rivora ingest cloudflare <pages|worker>\n\nIngest read-only deployment evidence from the Cloudflare REST API.\n\nSubcommands:\n  pages    Cloudflare Pages deployment evidence\n  worker   Cloudflare Workers deployment evidence\n\nFlags:\n  --account <account-id>     Required account id\n  --project <project-name>   Required for `pages`\n  --script <script-name>     Required for `worker`\n  --since <value>            Optional time window\n  --limit <n>                Maximum deployments (default: 20)\n\n`CLOUDFLARE_API_TOKEN` is required (`CF_API_TOKEN` is accepted as a\nfallback) and never stored. The connector is read-only. No deployment,\nrollback, promotion, DNS, route, Worker, Pages, KV, R2, D1, or Queues\nactions are taken.".to_string(),
-        HelpTopic::IngestSentry => "rivora ingest sentry\n\nIngest metadata-first issue evidence from the Sentry REST API.\n\nFlags:\n  --org <org-slug>             Required organization slug\n  --project <project-slug>     Required project slug\n  --environment <environment>  Optional environment filter\n  --since <value>              Optional timestamp or duration (for example 24h or 7d)\n  --query <query>              Optional Sentry issue query\n  --limit <n>                  Maximum issues (default: 20)\n\n`SENTRY_AUTH_TOKEN` is required (`SENTRY_TOKEN` is accepted as a fallback)\nand never stored. Only GET requests are used. Rivora does not ingest raw\nstack traces, event payloads, request data, user emails, IPs, replays, or\nbreadcrumbs. No Sentry or infrastructure actions are taken.".to_string(),
+        HelpTopic::IngestSentry => "rivora ingest sentry\n\nIngest metadata-first issue evidence from the Sentry REST API.\n\nFlags:\n  --org <org-slug>             Required organization slug\n  --project <project-slug>     Required project slug\n  --environment <environment>  Optional environment filter\n  --since <value>              Optional timestamp or duration (for example 24h or 7d)\n  --query <query>              Optional Sentry issue query (default: is:unresolved)\n  --limit <n>                  Maximum issues (default: 20; maximum: 100)\n\n`SENTRY_AUTH_TOKEN` is required (`SENTRY_TOKEN` is accepted as a fallback)\nand never stored. Only GET requests are used. Rivora does not ingest raw\nstack traces, event payloads, request data, user emails, IPs, replays, or\nbreadcrumbs. No Sentry or infrastructure actions are taken.".to_string(),
         HelpTopic::Evidence => "rivora evidence <list|show>\n\nReview local evidence stored in `.rivora/evidence.json`.\n\nCommands:\n  rivora evidence list           List recent evidence items\n  rivora evidence show <id>      Show one evidence item in full\n\nEvidence is not memory until a human chooses to remember and approve it.\nNo infrastructure actions are taken.\n\nNext:\nrivora remember --from-evidence <evidence-id>".to_string(),
         HelpTopic::Remember => format!("rivora remember\n\nPropose a memory candidate from evidence or an explicit summary.\n\nFlags:\n  --from-evidence <id>     Build a candidate from stored evidence\n  --service <name>         Service or topic (required without --from-evidence)\n  --summary \"text\"         Memory summary (required without --from-evidence)\n  --symptom <name>         Repeatable symptom tag\n  --tag <name>             Repeatable tag\n  --evidence <id>          Repeatable evidence reference\n  --source <name>          Source label\n  --confidence <low|medium|high|number>\n  --approve                Also approve the candidate immediately\n\nA candidate is `MemoryStatus::Candidate` until approved. No action is taken\non your infrastructure.\n\nExample:\n  {}\n\nNext:\nrivora feedback <memory-id> approve\nrivora recall <topic>", remember_example()),
         HelpTopic::Feedback => "rivora feedback <memory-id> <kind>\n\nApply human feedback to a memory. Feedback changes memory status only; no\ninfrastructure action is taken.\n\nKinds:\n  approve               Approve the candidate (status -> Active)\n  reject                Reject the candidate (status -> Rejected)\n  correct               Correct the candidate (status -> Corrected)\n  useful                Mark useful\n  not-useful            Mark not useful\n  needs-more-evidence   Request more evidence\n\nFlags:\n  --note \"text\"   Optional note (required context for `correct`)\n\nEvery feedback operation produces a receipt.\n\nNext:\nrivora ask \"have we seen this before?\"".to_string(),
@@ -2702,9 +2722,13 @@ fn help_text_for(topic: HelpTopic) -> String {
 }
 
 fn root_help() -> String {
-    format!(
+    let help = format!(
         "Rivora local-first, evidence-backed reliability memory CLI\n\nRivora is local-first. Evidence and memory are stored in `.rivora/` under\nyour current directory. Evidence is not memory until a human approves it.\nProvider connectors are read-only. No infrastructure actions are taken.\nTokens are loaded from environment variables and never stored.\n\nCommands:\n\nGet started:\n* rivora init\n* rivora demo\n* rivora doctor\n\nIngest read-only evidence:\n* rivora ingest git --repo . --limit 20\n* rivora ingest github --repo owner/name --limit 20\n* rivora ingest vercel --project <project> --limit 20\n* rivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n* rivora ingest cloudflare worker --account <account-id> --script <script-name> --limit 20\n* rivora ingest fixture --path examples/demo/evidence.json\n\nReview evidence and memory:\n* rivora evidence list\n* rivora evidence show <evidence-id>\n* {}\n* rivora remember --from-evidence <evidence-id>\n* rivora recall <service> --symptom latency --include-candidates\n* rivora feedback <memory-id> approve\n* rivora status\n\nAsk questions:\n* rivora ask \"what changed?\"\n* rivora ask \"what deployed recently?\"\n* rivora ask \"what failed recently?\"\n* rivora ask \"have we seen this before?\"\n\nSlack (self-hosted):\n* rivora slack doctor\n* rivora slack dev --text \"what changed?\"\n* rivora slack socket\n\nHelp:\n* rivora help\n* rivora <command> --help\n\nEvidence is not memory until a human approves it. Rivora proposes and updates memory only. No infrastructure actions are taken.",
         remember_example()
+    );
+    help.replace(
+        "* rivora ingest fixture --path examples/demo/evidence.json",
+        "* rivora ingest sentry --org <org-slug> --project <project-slug> --limit 20\n* rivora ingest fixture --path examples/demo/evidence.json",
     )
 }
 
@@ -2932,9 +2956,13 @@ fn new_demo_temp_dir() -> Result<PathBuf> {
 }
 
 fn compact_section(output: &str) -> String {
+    compact_section_with_limit(output, 12)
+}
+
+fn compact_section_with_limit(output: &str, limit: usize) -> String {
     output
         .lines()
-        .take(12)
+        .take(limit)
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
@@ -3110,7 +3138,21 @@ fn provider_label_for_evidence(item: &EvidenceItem) -> &'static str {
 }
 
 fn evidence_status_label(item: &EvidenceItem) -> &'static str {
-    if item
+    if item.is_sentry() {
+        if item.tags.iter().any(|tag| tag == "status-resolved") {
+            "Resolved"
+        } else if item
+            .tags
+            .iter()
+            .any(|tag| tag == "level-error" || tag == "level-fatal")
+        {
+            "Unresolved error"
+        } else if item.tags.iter().any(|tag| tag == "level-warning") {
+            "Warning"
+        } else {
+            "Observed"
+        }
+    } else if item
         .tags
         .iter()
         .any(|tag| tag == "failed-deploy" || tag == "failed")
@@ -4839,6 +4881,7 @@ mod tests {
         assert_eq!(snapshot.feedback.len(), 1);
         assert!(snapshot.receipts.len() >= 4);
         assert!(output.contains("Evidence -> Memory Candidate -> Human Approval -> Recall"));
+        assert!(output.contains("Sentry"), "{output}");
         assert!(output.contains("No infrastructure actions were taken."));
         assert!(!output_contains_infrastructure_action(&output));
     }
@@ -5321,6 +5364,39 @@ mod tests {
     }
 
     #[test]
+    fn sentry_cli_parses_all_read_only_filters() {
+        let parsed = parse_command(&[
+            "ingest".into(),
+            "sentry".into(),
+            "--org".into(),
+            "my-org".into(),
+            "--project".into(),
+            "checkout-api".into(),
+            "--environment".into(),
+            "production".into(),
+            "--since".into(),
+            "24h".into(),
+            "--query".into(),
+            "is:unresolved".into(),
+            "--limit".into(),
+            "100".into(),
+        ])
+        .unwrap();
+
+        match parsed {
+            Command::Ingest(IngestOptions::Sentry(options)) => {
+                assert_eq!(options.org, "my-org");
+                assert_eq!(options.project, "checkout-api");
+                assert_eq!(options.environment.as_deref(), Some("production"));
+                assert_eq!(options.since.as_deref(), Some("24h"));
+                assert_eq!(options.query.as_deref(), Some("is:unresolved"));
+                assert_eq!(options.limit, 100);
+            }
+            other => panic!("expected Sentry ingest, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn sentry_evidence_answers_error_failure_and_release_questions() {
         let (_temp, store) = temp_store();
         ingest_sentry_with_connector(&store, sentry_options(), &sentry_fixture_connector())
@@ -5358,5 +5434,250 @@ mod tests {
             store.load().unwrap().memories[0].status,
             MemoryStatus::Candidate
         );
+    }
+
+    #[test]
+    fn empty_sentry_ingest_has_a_helpful_safe_state() {
+        let (_temp, store) = temp_store();
+        let connector = SentryConnector::new(FixtureSentryClient::builder().issues("[]").build());
+        let output = ingest_sentry_with_connector(&store, sentry_options(), &connector).unwrap();
+        assert!(output.contains("No Sentry issues found"), "{output}");
+        assert!(
+            output.contains("Evidence is not memory until approved."),
+            "{output}"
+        );
+        assert!(
+            output.contains("No infrastructure actions were taken."),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn sentry_evidence_list_and_show_are_clear_and_metadata_first() {
+        let (_temp, store) = temp_store();
+        ingest_sentry_with_connector(&store, sentry_options(), &sentry_fixture_connector())
+            .unwrap();
+        let list = evidence_list(&store).unwrap();
+        let show = evidence_show(&store, "sentry:issue:demo-org:checkout-api:9001").unwrap();
+
+        assert!(list.contains("Source: Sentry"), "{list}");
+        assert!(list.contains("Status: Unresolved error"), "{list}");
+        assert!(
+            list.contains("sentry:issue:demo-org:checkout-api:9001"),
+            "{list}"
+        );
+        assert!(show.contains("Kind: Sentry observability issue"), "{show}");
+        for field in [
+            "Project:",
+            "Level:",
+            "Status:",
+            "First seen:",
+            "Last seen:",
+            "Count:",
+            "User count:",
+            "Environment:",
+            "Release:",
+            "Permalink:",
+        ] {
+            assert!(show.contains(field), "missing {field}: {show}");
+        }
+        assert!(
+            show.contains("Sensitive Sentry event data is not stored."),
+            "{show}"
+        );
+    }
+
+    #[test]
+    fn sentry_routes_all_audit_prompts_without_causal_or_mutation_claims() {
+        let (_temp, store) = temp_store();
+        ingest_fixture_data(
+            &store,
+            demo_fixtures::packaged_demo_fixture(DemoScenario::MultiSourceRelease),
+            "audit fixture",
+        )
+        .unwrap();
+        for prompt in [
+            "what errors happened recently?",
+            "what failed recently?",
+            "what changed around these errors?",
+            "what happened in sentry?",
+            "what errors increased after deploy?",
+            "what happened during the release?",
+        ] {
+            let output = ask(&store, prompt).unwrap();
+            assert!(output.contains("Sentry"), "{prompt}: {output}");
+            for forbidden in [
+                "caused by",
+                "confirmed regression",
+                "Rivora fixed",
+                "Rivora resolved",
+                "Rivora assigned",
+                "Rivora muted",
+            ] {
+                assert!(!output.contains(forbidden), "{prompt}: {output}");
+            }
+        }
+    }
+
+    #[test]
+    fn approved_sentry_memory_is_recalled_for_error_prompt() {
+        let (_temp, store) = temp_store();
+        ingest_sentry_with_connector(&store, sentry_options(), &sentry_fixture_connector())
+            .unwrap();
+        remember(
+            &store,
+            RememberOptions {
+                from_evidence: Some("sentry:issue:demo-org:checkout-api:9001".to_string()),
+                ..RememberOptions::default()
+            },
+        )
+        .unwrap();
+        let memory_id = store.load().unwrap().memories[0].id.as_str().to_string();
+        feedback(
+            &store,
+            FeedbackOptions {
+                memory_id,
+                kind: FeedbackCommandKind::Approve,
+                note: Some("Approved Sentry evidence".to_string()),
+            },
+        )
+        .unwrap();
+        let output = ask(&store, "have we seen this error before?").unwrap();
+        assert!(output.contains("Sentry evidence"), "{output}");
+        assert!(output.contains("Evidence:"), "{output}");
+    }
+
+    #[test]
+    fn slack_dev_uses_shared_sentry_routing_for_audit_prompts() {
+        let (_temp, store) = temp_store();
+        ingest_fixture_data(
+            &store,
+            demo_fixtures::packaged_demo_fixture(DemoScenario::MultiSourceRelease),
+            "audit fixture",
+        )
+        .unwrap();
+        for prompt in [
+            "what failed recently?",
+            "what errors happened recently?",
+            "what happened during the release?",
+        ] {
+            let output = run_slack_dev(
+                &store,
+                SlackDevOptions {
+                    text: prompt.to_string(),
+                    channel: "C-AUDIT".to_string(),
+                    user: "U-AUDIT".to_string(),
+                    bot_user_id: None,
+                },
+            )
+            .unwrap();
+            assert!(output.contains("Sentry"), "{prompt}: {output}");
+            assert!(!output.contains("caused by"), "{prompt}: {output}");
+            assert!(
+                output.contains("No infrastructure actions were taken."),
+                "{output}"
+            );
+        }
+    }
+
+    #[test]
+    fn sentry_help_documents_cap_and_top_level_help_lists_connector() {
+        let sentry_help = help_text_for(HelpTopic::IngestSentry);
+        let root = help_text();
+        assert!(sentry_help.contains("maximum: 100"), "{sentry_help}");
+        assert!(
+            sentry_help.contains("default: is:unresolved"),
+            "{sentry_help}"
+        );
+        assert!(root.contains("rivora ingest sentry"), "{root}");
+    }
+
+    #[test]
+    fn missing_sentry_token_and_invalid_since_are_helpful_and_redacted() {
+        let (_temp, store) = temp_store();
+        let missing =
+            ingest_sentry_with_auth(&store, sentry_options(), SentryAuthConfig::with_token(""))
+                .unwrap_err()
+                .to_string();
+        assert!(missing.contains("Missing SENTRY_AUTH_TOKEN."), "{missing}");
+        assert!(
+            missing.contains("export SENTRY_AUTH_TOKEN=..."),
+            "{missing}"
+        );
+        assert!(
+            missing.contains("No infrastructure actions were taken."),
+            "{missing}"
+        );
+        assert!(
+            !store.store_dir().exists(),
+            "missing auth must not initialize storage"
+        );
+
+        let mut malformed_options = sentry_options();
+        malformed_options.since = Some("recently".to_string());
+        let malformed =
+            ingest_sentry_with_connector(&store, malformed_options, &sentry_fixture_connector())
+                .unwrap_err()
+                .to_string();
+        assert!(malformed.contains("Malformed --since"), "{malformed}");
+        assert!(malformed.contains("24h"), "{malformed}");
+        assert!(
+            !store.store_dir().exists(),
+            "malformed input must not initialize storage"
+        );
+    }
+
+    #[test]
+    fn sentry_limit_zero_is_rejected_with_cap_guidance() {
+        let mut options = sentry_options();
+        options.limit = 0;
+        let error = validate_sentry_options(&options).unwrap_err().to_string();
+        assert!(error.contains("at least 1"), "{error}");
+        assert!(error.contains("capped at 100"), "{error}");
+    }
+
+    #[test]
+    fn sentry_token_like_values_never_reach_any_local_store() {
+        let (_temp, store) = temp_store();
+        let secret = "sntrys_audit_secret";
+        let fixture = format!(
+            r#"[{{
+                "id":"9100",
+                "shortId":"AUDIT-9100",
+                "title":"TypeError Bearer {secret}",
+                "culprit":"{secret}",
+                "level":"error",
+                "status":"unresolved",
+                "lastSeen":"2026-07-01T10:00:00Z",
+                "count":"1",
+                "userCount":0,
+                "request":{{"headers":{{"Authorization":"Bearer {secret}"}}}}
+            }}]"#
+        );
+        let connector =
+            SentryConnector::new(FixtureSentryClient::builder().issues(fixture).build());
+        ingest_sentry_with_connector(&store, sentry_options(), &connector).unwrap();
+        remember(
+            &store,
+            RememberOptions {
+                from_evidence: Some("sentry:issue:demo-org:checkout-api:9100".to_string()),
+                ..RememberOptions::default()
+            },
+        )
+        .unwrap();
+        let memory_id = store.load().unwrap().memories[0].id.as_str().to_string();
+        feedback(
+            &store,
+            FeedbackOptions {
+                memory_id,
+                kind: FeedbackCommandKind::Approve,
+                note: Some("Approved sanitized Sentry evidence".to_string()),
+            },
+        )
+        .unwrap();
+
+        let serialized = serde_json::to_string(&store.load().unwrap()).unwrap();
+        assert!(!serialized.contains(secret), "{serialized}");
+        assert!(!serialized.contains("Bearer"), "{serialized}");
     }
 }

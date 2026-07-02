@@ -217,6 +217,10 @@ rivora ingest sentry --org <org-slug> --project <project-slug> --limit 20
 rivora ask "what errors happened recently?"
 ```
 
+Sentry defaults to unresolved issues when `--query` is omitted and caps one
+issue-list page at 100 records. Evidence show identifies Sentry as
+metadata-first and confirms that sensitive event data is not stored.
+
 All provider integrations are read-only. Tokens are never stored in
 `.rivora/`.
 
@@ -229,7 +233,8 @@ pasting it into an issue:
 
 1. Remove any `xoxb-`, `xapp-`, `ghp_`, `gho_`, `ghu_`, `ghs_`, or `ghr_`
    prefixed values.
-2. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, and `SENTRY_AUTH_TOKEN` values.
+2. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `SENTRY_AUTH_TOKEN`, and
+   `SENTRY_TOKEN` values.
 3. Remove signing secrets and private keys.
 4. Remove internal hostnames, customer identifiers, and production incident
    timelines that include sensitive data.
@@ -282,7 +287,8 @@ without guidance.
   embeddings, LLMs, or probabilistic ranking
 * Live Vercel and Cloudflare connectors were not tested against production
   APIs during this phase (tokens were unavailable)
-* Live Sentry was not tested during Phase 20A because no token was available
+* Live Sentry was not tested during Phase 20A or its safety audit because no
+  token was available
 
 ---
 

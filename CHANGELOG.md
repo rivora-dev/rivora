@@ -9,6 +9,9 @@
 
   ### Added
 
+  - Phase 20A.1 Sentry connector safety audit covering GET-only enforcement,
+    malicious nested payload exclusion, token/debug redaction, CLI and Slack
+    parity, evidence rendering, memory recall, and public documentation
   - Phase 20A: read-only, metadata-first Sentry issue evidence connector
     (`rivora ingest sentry`)
   - Sentry environment, query, limit, and `--since` filters with stable
@@ -67,6 +70,14 @@
 
   ### Changed
 
+  - Sentry issue parsing now honors the current `issueType` and numeric
+    `userCount` response fields, caps all clients at 100 records, rejects
+    malformed JSON, and drops undated evidence when `--since` is used
+  - Sentry auth debug output, `Bearer` values, `sntrys_` values, unsafe
+    permalinks, invalid counts/timestamps, and private paths are redacted or
+    omitted before local persistence
+  - Sentry empty-state, evidence show, top-level help, memory candidate, and
+    recall output now identify the source and metadata-first safety boundary
   - Multi-source summaries now group Sentry issue evidence alongside GitHub,
     Vercel, and Cloudflare evidence using root-cause-neutral language
   - Phase 18.5: `what deployed recently?` now includes Vercel and Cloudflare

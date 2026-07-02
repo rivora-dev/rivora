@@ -340,6 +340,8 @@ mod tests {
         assert!(tokens.iter().any(|t| t["name"] == "VERCEL_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "CLOUDFLARE_API_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "CF_API_TOKEN"));
+        assert!(tokens.iter().any(|t| t["name"] == "SENTRY_AUTH_TOKEN"));
+        assert!(tokens.iter().any(|t| t["name"] == "SENTRY_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_BOT_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_APP_TOKEN"));
         assert!(tokens.iter().any(|t| t["name"] == "SLACK_SIGNING_SECRET"));

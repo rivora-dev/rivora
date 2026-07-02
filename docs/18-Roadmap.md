@@ -83,6 +83,14 @@ stable local evidence IDs, deterministic recall, and cross-source release
 summaries. It never resolves or assigns issues, mutates Sentry, or ingests raw
 event payloads and stack traces by default.
 
+### Phase 20A.1 — Sentry Connector Audit + Hardening
+
+Audits and hardens GET-only enforcement, the exact metadata allowlist,
+malicious nested-field exclusion, token/debug redaction, deterministic limits
+and filtering, evidence and memory rendering, CLI/Slack parity, doctor output,
+fixtures, and public documentation. Live Sentry remains optional and was not
+required for the audit.
+
 ---
 
 ## Planned
