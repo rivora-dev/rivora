@@ -103,6 +103,26 @@
     "confidence": 0.88
   },
   {
+    "id": "planetscale:deploy-request:demo-org:checkout-db:42",
+    "kind": "database_deploy_request",
+    "source": {
+      "connector": "planetscale",
+      "version": "0.1.0",
+      "repository": "demo-org/checkout-db",
+      "read_only": true
+    },
+    "title": "PlanetScale deploy request #42",
+    "summary": "PlanetScale deploy request #42 for checkout-db was deployed during the same release window.",
+    "body": "Org: demo-org\nDatabase: checkout-db\nDeploy request: 42\nState: closed\nStatus: complete\nBranch: checkout-schema-change\nBase branch: main\nDeployed at: 2026-06-27T10:45:00Z\nReview state: approved\nDeployability: deployable",
+    "service": "checkout-db",
+    "files_changed": [],
+    "timestamp": "2026-06-27T10:45:00Z",
+    "author": "Schema Reviewer",
+    "tags": ["checkout", "checkout-db", "database", "deploy-request", "planetscale", "schema", "state-complete"],
+    "refs": ["deploy-request:42"],
+    "confidence": 0.9
+  },
+  {
     "id": "sentry:issue:demo-org:checkout-api:9001",
     "kind": "sentry_issue",
     "source": {

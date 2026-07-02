@@ -9,17 +9,20 @@
 //! connector (`vercel`) for deployment evidence. Phase 18B adds a read-only
 //! Cloudflare connector (`cloudflare`) for Pages and Workers deployment
 //! evidence. Phase 20A adds a read-only Sentry connector (`sentry`) for
-//! observability issue/error evidence.
+//! observability issue/error evidence. Phase 20B adds a read-only PlanetScale
+//! connector (`planetscale`) for database branch and deploy-request metadata.
 
 pub mod cloudflare;
 pub mod git;
 pub mod github;
+pub mod planetscale;
 pub mod sentry;
 pub mod vercel;
 
 pub use cloudflare::*;
 pub use git::*;
 pub use github::*;
+pub use planetscale::*;
 pub use sentry::*;
 pub use vercel::*;
 
@@ -82,6 +85,10 @@ pub enum EvidenceKind {
     CloudflarePagesDeployment,
     CloudflareWorkerDeployment,
     SentryIssue,
+    #[serde(rename = "database_branch")]
+    PlanetScaleDatabaseBranch,
+    #[serde(rename = "database_deploy_request")]
+    PlanetScaleDeployRequest,
 }
 
 impl EvidenceKind {
@@ -105,6 +112,8 @@ impl EvidenceKind {
             Self::CloudflarePagesDeployment => "cloudflare_pages_deployment",
             Self::CloudflareWorkerDeployment => "cloudflare_worker_deployment",
             Self::SentryIssue => "sentry_issue",
+            Self::PlanetScaleDatabaseBranch => "database_branch",
+            Self::PlanetScaleDeployRequest => "database_deploy_request",
         }
     }
 
@@ -129,6 +138,8 @@ impl EvidenceKind {
             Self::CloudflarePagesDeployment => "Cloudflare Pages deployment",
             Self::CloudflareWorkerDeployment => "Cloudflare Worker deployment",
             Self::SentryIssue => "Sentry observability issue",
+            Self::PlanetScaleDatabaseBranch => "PlanetScale database branch",
+            Self::PlanetScaleDeployRequest => "PlanetScale database deploy request",
         }
     }
 
@@ -173,6 +184,14 @@ impl EvidenceKind {
     #[must_use]
     pub fn is_sentry(self) -> bool {
         matches!(self, Self::SentryIssue)
+    }
+
+    #[must_use]
+    pub fn is_planetscale(self) -> bool {
+        matches!(
+            self,
+            Self::PlanetScaleDatabaseBranch | Self::PlanetScaleDeployRequest
+        )
     }
 }
 
@@ -236,6 +255,16 @@ impl EvidenceSource {
             read_only: true,
         }
     }
+
+    #[must_use]
+    pub fn planetscale(repository: impl Into<String>) -> Self {
+        Self {
+            connector: planetscale::PLANETSCALE_CONNECTOR.to_string(),
+            version: CONNECTOR_VERSION.to_string(),
+            repository: Some(repository.into()),
+            read_only: true,
+        }
+    }
 }
 
 /// Normalized, serializable evidence captured by a connector.
@@ -285,6 +314,11 @@ impl EvidenceItem {
     #[must_use]
     pub fn is_sentry(&self) -> bool {
         self.source.connector == sentry::SENTRY_CONNECTOR || self.kind.is_sentry()
+    }
+
+    #[must_use]
+    pub fn is_planetscale(&self) -> bool {
+        self.source.connector == planetscale::PLANETSCALE_CONNECTOR || self.kind.is_planetscale()
     }
 }
 
@@ -455,6 +489,21 @@ mod tests {
         assert!(!EvidenceKind::GitCommit.is_sentry());
         assert!(!EvidenceKind::VercelDeployment.is_sentry());
         assert!(!EvidenceKind::CloudflarePagesDeployment.is_sentry());
+    }
+
+    #[test]
+    fn evidence_kind_is_planetscale_partition_is_correct() {
+        assert!(EvidenceKind::PlanetScaleDatabaseBranch.is_planetscale());
+        assert!(EvidenceKind::PlanetScaleDeployRequest.is_planetscale());
+        assert!(!EvidenceKind::GitCommit.is_planetscale());
+    }
+
+    #[test]
+    fn evidence_source_planetscale_is_read_only() {
+        let source = EvidenceSource::planetscale("my-org/checkout-db");
+        assert_eq!(source.connector, "planetscale");
+        assert!(source.read_only);
+        assert_eq!(source.repository.as_deref(), Some("my-org/checkout-db"));
     }
 
     #[test]

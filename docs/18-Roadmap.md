@@ -91,14 +91,26 @@ and filtering, evidence and memory rendering, CLI/Slack parity, doctor output,
 fixtures, and public documentation. Live Sentry remains optional and was not
 required for the audit.
 
+### Phase 20B — PlanetScale Data-Layer Evidence Connector
+
+Read-only, metadata-first PlanetScale branch and deploy-request evidence.
+Supports explicit organization/database selection, optional branch/time
+filters, stable local IDs, deterministic recall, and cross-source release
+summaries. It never connects to a database, runs SQL, reads customer rows or
+branch passwords, ingests connection strings/raw query results/schema dumps/
+schema diffs/raw DDL, or mutates PlanetScale.
+
+### Phase 20B.1 — PlanetScale Connector Audit + Hardening
+
+Audits and hardens PlanetScale service-token/OAuth authentication, GET-only
+transport, credential redaction, poisoned allowlisted fields, safe permalinks,
+deterministic deduplication and limits, approval-gated recall, CLI/Slack/doctor
+parity, fixtures, and public documentation. Deploy operations remain deferred
+because their payloads can contain raw DDL and table-level details.
+
 ---
 
 ## Planned
-
-### Phase 20B — PlanetScale Data-Layer Evidence Connector
-
-Metadata-first data-layer evidence. It must not read customer rows or ingest
-query parameters, row values, credentials, or other customer data.
 
 ### Phase 21 — Evidence Correlation / Release Window Review
 
@@ -117,8 +129,8 @@ does not execute infrastructure actions.
 ### Phase 24 — Next Provider Connector Based on Feedback
 
 Selected from real user and design-partner demand. Render remains deferred
-until that demand exists. AWS, GCP, Azure, Kubernetes, OpenObserve, and other
-providers are not part of Phase 20A.
+until that demand exists. OpenObserve is a future observability evidence
+candidate. AWS, GCP, Azure, Kubernetes, and other providers remain deferred.
 
 ---
 

@@ -87,7 +87,7 @@ rivora demo --scenario multi-source-release
 | `checkout-incident` | Checkout latency, PR merge, human approval |
 | `release-regression` | Release rollback, incident response |
 | `workflow-failure` | CI/CD workflow failure and learning |
-| `multi-source-release` | Cross-source evidence from GitHub, Vercel, Cloudflare, Sentry |
+| `multi-source-release` | Cross-source evidence from GitHub, Vercel, Cloudflare, Sentry, PlanetScale |
 
 All scenarios use synthetic fixture data. No tokens, no network, no data
 leaves your machine.
@@ -211,6 +211,37 @@ rivora feedback <memory-id> approve
 
 ---
 
+## PlanetScale data-layer evidence
+
+```bash
+export PLANETSCALE_SERVICE_TOKEN_ID=...
+export PLANETSCALE_SERVICE_TOKEN=...
+rivora init
+rivora ingest planetscale --org my-org --database checkout-db --limit 20
+rivora ask "what database changes happened recently?"
+rivora ask "what schema changes happened recently?"
+rivora ask "what happened during the release?"
+rivora evidence list
+rivora remember --from-evidence <evidence-id>
+rivora feedback <memory-id> approve
+```
+
+PlanetScale ingestion is read-only, metadata-first, API-only, and GET-only.
+It stores normalized database branch and deploy-request metadata locally.
+PlanetScale service-token authentication requires both
+`PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN`.
+`PLANETSCALE_AUTH_TOKEN` is accepted only as an OAuth Bearer-token fallback.
+Credentials are never stored.
+
+Rivora never connects to the customer database, runs SQL, reads customer rows
+or branch passwords, or ingests connection strings, raw query results, full
+schema dumps, full schema diffs, or raw DDL. It does not create, approve, or
+deploy deploy requests and does not create, delete, or promote branches.
+Evidence is not memory until approved. No database or infrastructure actions
+are taken.
+
+---
+
 ## Self-hosted Slack
 
 ```bash
@@ -244,8 +275,8 @@ rivora ask "what happened during the release?"
 ```
 
 Cross-source summaries are evidence-backed, not root-cause claims. Rivora
-never says "X caused Y." It says "these events occurred in the same window"
-and "this may be related."
+never says "X caused Y." It says recent evidence was found across providers
+and nearby evidence may be related.
 
 See [docs/PRODUCT_VALIDATION.md](docs/PRODUCT_VALIDATION.md) for the full
 validation flow.

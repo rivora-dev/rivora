@@ -15,6 +15,7 @@ sources implemented so far:
 * Cloudflare Pages (deployment evidence)
 * Cloudflare Workers (deployment evidence)
 * Sentry (metadata-first issue/error evidence)
+* PlanetScale (metadata-first database branch and deploy-request evidence)
 
 This phase proves that Rivora works as an end-to-end adaptive reliability
 memory product before adding more provider connectors.
@@ -51,6 +52,7 @@ The demo simulates a checkout release window across multiple evidence sources:
 * Cloudflare Pages preview deployment failed for checkout-web
 * Cloudflare Worker deployment completed for checkout-worker
 * Sentry TypeError issue observed for checkout-api
+* PlanetScale deploy request observed for checkout-db
 
 You will see:
 
@@ -80,7 +82,8 @@ and `evidence.json`.
 rivora ingest fixture --path examples/demo/scenarios/multi-source-release/evidence.json
 ```
 
-This loads six synthetic records across GitHub, Vercel, Cloudflare, and Sentry.
+This loads seven synthetic records across GitHub, Vercel, Cloudflare, Sentry,
+and PlanetScale.
 
 ### 3. Ask questions
 
@@ -113,13 +116,18 @@ Cloudflare Workers
 Sentry
 - Sentry issue CHECKOUT-9001 (error) — ...
 
-These events occurred in the same window.
-This may be related.
+PlanetScale
+- PlanetScale deploy request #42 — ...
+
+Recent evidence was found across providers.
+Nearby evidence may be related.
 
 This may be worth remembering.
 Evidence is not memory until approved.
 No infrastructure actions were taken.
 ```
+
+PlanetScale sections also state that no database actions were taken.
 
 ### 4. Review evidence
 
@@ -215,11 +223,23 @@ rivora ingest cloudflare worker --account <account-id> --script <script-name> --
 export SENTRY_AUTH_TOKEN=...
 rivora ingest sentry --org <org-slug> --project <project-slug> --limit 20
 rivora ask "what errors happened recently?"
+
+# PlanetScale branches and deploy requests (read_branch + read_deploy_request)
+export PLANETSCALE_SERVICE_TOKEN_ID=...
+export PLANETSCALE_SERVICE_TOKEN=...
+rivora ingest planetscale --org <org-slug> --database <database-name> --limit 20
+rivora ask "what database changes happened recently?"
+rivora ask "what schema changes happened recently?"
 ```
 
 Sentry defaults to unresolved issues when `--query` is omitted and caps one
 issue-list page at 100 records. Evidence show identifies Sentry as
 metadata-first and confirms that sensitive event data is not stored.
+
+PlanetScale is metadata-first and never connects to the customer database,
+runs SQL, reads customer rows or branch passwords, or ingests connection
+strings, raw query results, full schema dumps, schema diffs, or raw DDL. It
+never creates, approves, or deploys deploy requests or mutates branches.
 
 All provider integrations are read-only. Tokens are never stored in
 `.rivora/`.
@@ -233,8 +253,9 @@ pasting it into an issue:
 
 1. Remove any `xoxb-`, `xapp-`, `ghp_`, `gho_`, `ghu_`, `ghs_`, or `ghr_`
    prefixed values.
-2. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `SENTRY_AUTH_TOKEN`, and
-   `SENTRY_TOKEN` values.
+2. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `SENTRY_AUTH_TOKEN`,
+   `SENTRY_TOKEN`, `PLANETSCALE_SERVICE_TOKEN_ID`, `PLANETSCALE_SERVICE_TOKEN`, and
+   `PLANETSCALE_AUTH_TOKEN` values.
 3. Remove signing secrets and private keys.
 4. Remove internal hostnames, customer identifiers, and production incident
    timelines that include sensitive data.
@@ -254,7 +275,13 @@ rivora doctor
 
 * `.rivora/` store exists and is valid
 * `.gitignore` includes `.rivora/`
-* Provider tokens are set for configured connectors (GitHub, Vercel, Cloudflare, Sentry)
+* Provider tokens are set for configured connectors (GitHub, Vercel,
+  Cloudflare, Sentry, PlanetScale)
+
+PlanetScale service-token diagnostics report both
+`PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN` as `set` or
+`not set`; OAuth fallback diagnostics report `PLANETSCALE_AUTH_TOKEN`. Values
+are never printed.
 
 No infrastructure actions are taken. No data leaves your machine.
 
@@ -276,7 +303,7 @@ without guidance.
 ## Known limitations
 
 * Crates are not published; install from source
-* No AWS, GCP, Azure, Render, PlanetScale, or Kubernetes connectors yet
+* No AWS, GCP, Azure, Render, or Kubernetes connectors yet
 * No official Slack Marketplace app
 * No hosted OAuth flow
 * No Rivora Cloud
@@ -289,6 +316,8 @@ without guidance.
   APIs during this phase (tokens were unavailable)
 * Live Sentry was not tested during Phase 20A or its safety audit because no
   token was available
+* Live PlanetScale was not tested during Phase 20B because no token was
+  available
 
 ---
 

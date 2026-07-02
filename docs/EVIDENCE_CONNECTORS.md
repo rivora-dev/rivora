@@ -8,6 +8,7 @@ Phase 11 adds a read-only GitHub connector. Phase 13 adds deterministic local
 fixture ingestion for demos and tests. Together they make Rivora useful
 without cloud credentials, hosted services, or connector secrets beyond an
 optional GitHub token. Phase 20A adds metadata-first Sentry issue evidence.
+Phase 20B adds metadata-first PlanetScale branch and deploy-request evidence.
 
 ## What Connectors Do
 
@@ -33,6 +34,9 @@ against the GitHub REST API. It never calls `POST`, `PUT`, `PATCH`, or
 
 The Phase 20A Sentry connector is read-only and only issues `GET` requests.
 It has no issue, alert, project, release, or deploy mutation operations.
+
+The Phase 20B PlanetScale connector is API-only and GET-only. It never
+connects to a database, runs SQL, reads customer rows, or mutates PlanetScale.
 
 ## Local Git Connector
 
@@ -309,6 +313,62 @@ All automated tests use `FixtureSentryClient`; no live Sentry access is
 required. Evidence is stored locally and is not memory until approved. No
 infrastructure actions are taken.
 
+## PlanetScale Connector
+
+Phase 20B adds read-only, metadata-first PlanetScale data-layer evidence:
+
+```bash
+export PLANETSCALE_SERVICE_TOKEN_ID=...
+export PLANETSCALE_SERVICE_TOKEN=...
+rivora ingest planetscale --org my-org --database checkout-db --limit 20
+rivora ingest pscale --org my-org --database checkout-db --branch main --since 7d
+```
+
+The connector calls PlanetScale's REST API directly and uses only `GET` on the
+documented branch-list and deploy-request-list endpoints. Use the narrowest
+practical service token with `read_branch` and `read_deploy_request`. For OAuth
+integrations, the equivalent scopes are `read_branches` and
+`read_deploy_requests`. Service-token authentication requires both
+`PLANETSCALE_SERVICE_TOKEN_ID` and `PLANETSCALE_SERVICE_TOKEN`, sent in
+PlanetScale's documented `ID:TOKEN` authorization format.
+`PLANETSCALE_AUTH_TOKEN` is an optional OAuth Bearer-token fallback. Complete
+service-token credentials take precedence. No credential value is printed or
+persisted.
+
+Official references: [list branches](https://planetscale.com/docs/api/reference/list_branches),
+[list deploy requests](https://planetscale.com/docs/api/reference/list_deploy_requests),
+and [service token access](https://planetscale.com/docs/api/reference/service-tokens).
+
+Supported evidence kinds are `database_branch` and
+`database_deploy_request`. Stable IDs use:
+
+```text
+planetscale:branch:<org>:<database>:<branch>
+planetscale:deploy-request:<org>:<database>:<number>
+```
+
+Branch metadata is allowlisted to organization, database, branch, role,
+production/default status when available, base branch, timestamps, safe actor,
+and safe permalink. Deploy-request metadata is allowlisted to organization,
+database, request number/id, title when available, state/status, head/base
+branch, timestamps, safe actor, review/deployability state, and safe permalink.
+All other response fields are ignored.
+
+Rivora does not connect to the customer database, run SQL, read customer rows,
+read branch passwords, ingest connection strings, read raw query results, or
+store full schema dumps, full schema diffs, or raw DDL. It does not create,
+approve, comment on, or deploy deploy requests; create, delete, or promote
+branches; restore backups; or mutate PlanetScale. The list-deploy-requests
+response may contain nested deploy-operation objects with raw DDL and table
+names; Rivora ignores those nested fields and never calls the dedicated deploy
+operations endpoint. Deploy-operation ingestion remains deferred.
+
+Automated tests use `FixturePlanetScaleClient` and require no live PlanetScale
+network access. Sensitive fixtures verify that credentials, hostnames, emails,
+IP addresses, rows, schema content, DDL, query results, and arbitrary metadata
+are not persisted. Evidence stays local and is not memory until approved. No
+database or infrastructure actions are taken.
+
 ## Diagnostics
 
 Before ingesting from live providers, verify your environment:
@@ -365,7 +425,7 @@ data and does not require network access.
 - `what changed?` and `what changed in checkout?` show recent matching
   evidence. When evidence comes from multiple providers, the response is
   grouped by source (GitHub, Vercel, Cloudflare Pages, Cloudflare Workers,
-  Sentry, Git).
+  Sentry, PlanetScale, Git).
 - `what changed across providers?` shows cross-source grouped evidence.
 - `what happened during the release?` shows cross-source grouped evidence.
 - `what changed in github?` shows recent GitHub evidence only.
@@ -380,10 +440,13 @@ data and does not require network access.
   Cloudflare evidence.
 - `what errors happened recently?`, `what happened in sentry?`, and
   `what changed around sentry?` show Sentry issue evidence.
+- `what database changes happened recently?`, `what schema changes happened
+  recently?`, `what deploy requests happened recently?`, and `what happened in
+  planetscale?` show PlanetScale evidence.
 - `have we seen checkout deploy failures before?` routes to recall.
 
-Cross-source summaries are evidence-backed, not root-cause claims. Rivora
-says "these events occurred in the same window" and "this may be related."
+Cross-source summaries are evidence-backed, not root-cause claims. Rivora says
+recent evidence was found across providers and nearby evidence may be related.
 It never says "X caused Y."
 
 The CLI does not claim root cause. It suggests the explicit next step:

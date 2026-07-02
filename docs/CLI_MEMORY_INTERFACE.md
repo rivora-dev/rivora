@@ -24,6 +24,8 @@ memory state in JSON files under `.rivora/` in the current working directory.
 - Ingests local Git evidence with `rivora ingest git`.
 - Ingests read-only GitHub evidence with `rivora ingest github`.
 - Ingests deterministic local fixture evidence with `rivora ingest fixture`.
+- Ingests read-only PlanetScale branch and deploy-request metadata with
+  `rivora ingest planetscale`.
 - Lists and shows evidence with `rivora evidence`.
 - Routes simple prompts through `rivora ask` without an LLM dependency.
 - Routes self-hosted Slack dev messages with `rivora slack dev`.
@@ -154,6 +156,25 @@ rivora ingest fixture --path examples/demo/evidence.json
 Fixture ingestion is local-only, deduplicates by evidence id, and is intended
 for demos, tests, and launch recordings. It does not require network access.
 
+### `rivora ingest planetscale`
+
+Reads PlanetScale branch and deploy-request metadata through GET-only REST API
+endpoints and stores normalized evidence locally:
+
+```bash
+export PLANETSCALE_SERVICE_TOKEN_ID=...
+export PLANETSCALE_SERVICE_TOKEN=...
+rivora ingest planetscale --org my-org --database checkout-db --limit 20
+rivora ingest pscale --org my-org --database checkout-db --branch main --since 7d
+```
+
+Both values are required for service-token authentication. The optional
+`PLANETSCALE_AUTH_TOKEN` fallback is an OAuth access token. The connector never
+connects to the database, runs SQL, reads customer rows or
+branch passwords, stores connection strings/raw query results/schema dumps/
+schema diffs/raw DDL, or mutates PlanetScale. Evidence is not memory until
+approved. No database or infrastructure actions are taken.
+
 ### `rivora evidence`
 
 Reviews stored local evidence:
@@ -210,6 +231,9 @@ Routes simple natural-language-ish prompts without an LLM:
 - `what changed in github?` shows recent GitHub evidence only.
 - `what merged recently?` shows GitHub PR-merge evidence.
 - `what failed recently?` shows GitHub workflow-failure evidence.
+- `what database changes happened recently?`, `what schema changes happened
+  recently?`, and `what deploy requests happened recently?` show PlanetScale
+  metadata.
 
 Unknown prompts return examples instead of pretending to understand.
 
@@ -285,8 +309,7 @@ Slack is the primary team memory interface. The CLI is the local engineer
 interface. Both surfaces use the same adaptive memory engine and receipt-backed
 memory model, but neither surface takes control away from engineers.
 
-Related: [13-CLI-UX.md](13-CLI-UX.md) ·
-[ADAPTIVE_MEMORY_ENGINE.md](ADAPTIVE_MEMORY_ENGINE.md) ·
+Related: [ADAPTIVE_MEMORY_ENGINE.md](ADAPTIVE_MEMORY_ENGINE.md) ·
 [DEMO.md](DEMO.md) ·
 [SLACK_APP.md](SLACK_APP.md) ·
 [SLACK_SELF_HOSTING.md](SLACK_SELF_HOSTING.md) ·
