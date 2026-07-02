@@ -12,6 +12,7 @@
 * (Optional) A GitHub personal access token for public repo evidence
 * (Optional) A Vercel token for deployment evidence
 * (Optional) A Cloudflare API token for Pages/Workers deployment evidence
+* (Optional) A read-only PlanetScale service token for data-layer evidence
 * (Optional) A self-hosted Slack app for team use
 
 ---
@@ -41,8 +42,8 @@ rivora demo --scenario multi-source-release
 ```
 
 The `multi-source-release` scenario demonstrates cross-source evidence from
-GitHub, Vercel, Cloudflare Pages, Cloudflare Workers, and Sentry in a single release
-window.
+GitHub, Vercel, Cloudflare Pages, Cloudflare Workers, Sentry, and PlanetScale
+in a single release window.
 
 ---
 
@@ -128,6 +129,26 @@ does not resolve, assign, or otherwise mutate Sentry issues. Evidence stays
 local and is not memory until approved. No infrastructure actions are taken.
 `SENTRY_AUTH_TOKEN` takes precedence over the optional `SENTRY_TOKEN`
 fallback. The default query is `is:unresolved`, and results are capped at 100.
+
+## Optional: ingest PlanetScale data-layer evidence
+
+Use a service token with only `read_branch` and `read_deploy_request`:
+
+```bash
+export PLANETSCALE_SERVICE_TOKEN=...
+rivora ingest planetscale --org my-org --database checkout-db --limit 20
+rivora ask "what database changes happened recently?"
+rivora ask "what schema changes happened recently?"
+rivora ask "what happened during the release?"
+```
+
+The connector is read-only, metadata-first, API-only, and GET-only. It stores
+branch and deploy-request metadata locally. It never connects to the database,
+runs SQL, reads customer rows or branch passwords, or stores connection
+strings, raw query results, full schema dumps, schema diffs, or raw DDL. It
+does not create, approve, or deploy deploy requests or mutate branches.
+Evidence is not memory until approved. No database or infrastructure actions
+are taken.
 
 ## Create and approve memory
 
@@ -281,9 +302,12 @@ text before pasting it into an issue:
 1. Remove any `xoxb-`, `xapp-`, `ghp_`, `gho_`, `ghu_`, `ghs_`, or `ghr_`
    prefixed values.
 2. Remove signing secrets and private keys.
-3. Remove internal hostnames, customer identifiers, and production incident
+3. Remove `VERCEL_TOKEN`, `CLOUDFLARE_API_TOKEN`, `SENTRY_AUTH_TOKEN`,
+   `SENTRY_TOKEN`, `PLANETSCALE_SERVICE_TOKEN`, and
+   `PLANETSCALE_AUTH_TOKEN` values.
+4. Remove internal hostnames, customer identifiers, and production incident
    timelines that include sensitive data.
-4. Replace real private repository URLs with `owner/name` placeholders.
+5. Replace real private repository URLs with `owner/name` placeholders.
 
 ### How to report security issues privately
 

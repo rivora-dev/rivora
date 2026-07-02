@@ -25,8 +25,10 @@ use rivora_connectors::{
     CloudflareAuthConfig, CloudflareConnector, CloudflareIngestRequest, CloudflareIngestResult,
     CloudflarePlatform, CloudflareTarget, EvidenceIngestResult, EvidenceItem, EvidenceKind,
     GitHubAuthConfig, GitHubConnector, GitHubIngestRequest, GitHubIngestResult,
-    GitHubRepositoryRef, HttpCloudflareClient, HttpGitHubClient, HttpSentryClient,
-    HttpVercelClient, LocalGitConnector, SentryAuthConfig, SentryConnector, SentryIngestRequest,
+    GitHubRepositoryRef, HttpCloudflareClient, HttpGitHubClient, HttpPlanetScaleClient,
+    HttpSentryClient, HttpVercelClient, LocalGitConnector, PlanetScaleAuthConfig,
+    PlanetScaleConnector, PlanetScaleDatabaseRef, PlanetScaleIngestRequest,
+    PlanetScaleIngestResult, SentryAuthConfig, SentryConnector, SentryIngestRequest,
     SentryIngestResult, SentryProjectRef, VercelAuthConfig, VercelConnector, VercelIngestRequest,
     VercelIngestResult, VercelProjectRef,
 };
@@ -208,6 +210,7 @@ pub enum HelpTopic {
     IngestVercel,
     IngestCloudflare,
     IngestSentry,
+    IngestPlanetScale,
     Evidence,
     Remember,
     Feedback,
@@ -392,6 +395,7 @@ pub enum IngestOptions {
     Vercel(VercelIngestOptions),
     Cloudflare(CloudflareIngestOptions),
     Sentry(SentryIngestOptions),
+    PlanetScale(PlanetScaleIngestOptions),
     Fixture(FixtureIngestOptions),
 }
 
@@ -491,6 +495,27 @@ pub struct SentryIngestOptions {
     pub query: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanetScaleIngestOptions {
+    pub org: String,
+    pub database: String,
+    pub limit: usize,
+    pub since: Option<String>,
+    pub branch: Option<String>,
+}
+
+impl Default for PlanetScaleIngestOptions {
+    fn default() -> Self {
+        Self {
+            org: String::new(),
+            database: String::new(),
+            limit: 20,
+            since: None,
+            branch: None,
+        }
+    }
+}
+
 impl Default for SentryIngestOptions {
     fn default() -> Self {
         Self {
@@ -567,6 +592,9 @@ pub enum AskIntent {
     WhatFailedInSentry,
     WhatChangedInSentry,
     WhatErrorsHappenedRecently,
+    WhatChangedInPlanetScale,
+    WhatDatabaseChangedRecently,
+    WhatDeployRequestsHappenedRecently,
     Help,
 }
 
@@ -708,6 +736,7 @@ fn ingest_help_topic(args: &[String]) -> HelpTopic {
         Some("vercel") => HelpTopic::IngestVercel,
         Some("cloudflare") | Some("cf") => HelpTopic::IngestCloudflare,
         Some("sentry") => HelpTopic::IngestSentry,
+        Some("planetscale") | Some("pscale") => HelpTopic::IngestPlanetScale,
         _ => HelpTopic::Ingest,
     }
 }
@@ -764,6 +793,19 @@ pub fn parse_ask_intent(prompt: &str) -> AskIntent {
         || (normalized.contains("sentry") && normalized.contains("changed"))
     {
         AskIntent::WhatChangedInSentry
+    } else if normalized.contains("what happened in planetscale")
+        || normalized.contains("what changed in planetscale")
+        || normalized.contains("what changed around planetscale")
+    {
+        AskIntent::WhatChangedInPlanetScale
+    } else if normalized.contains("what deploy requests happened")
+        || normalized.contains("what database deploys happened")
+    {
+        AskIntent::WhatDeployRequestsHappenedRecently
+    } else if normalized.contains("what database changes happened")
+        || normalized.contains("what schema changes happened")
+    {
+        AskIntent::WhatDatabaseChangedRecently
     } else if normalized.contains("what failed recently") || normalized.contains("what failed") {
         AskIntent::WhatFailedRecently
     } else if normalized.contains("what changed in github") {
@@ -972,6 +1014,7 @@ pub fn ingest(store: &LocalMemoryStore, options: IngestOptions) -> Result<String
         IngestOptions::Vercel(options) => ingest_vercel(store, options),
         IngestOptions::Cloudflare(options) => ingest_cloudflare(store, options),
         IngestOptions::Sentry(options) => ingest_sentry(store, options),
+        IngestOptions::PlanetScale(options) => ingest_planetscale(store, options),
         IngestOptions::Fixture(options) => ingest_fixture(store, options),
     }
 }
@@ -1207,6 +1250,75 @@ fn validate_sentry_options(options: &SentryIngestOptions) -> Result<()> {
     Ok(())
 }
 
+pub fn ingest_planetscale(
+    store: &LocalMemoryStore,
+    options: PlanetScaleIngestOptions,
+) -> Result<String> {
+    validate_planetscale_options(&options)?;
+    ingest_planetscale_with_auth(store, options, PlanetScaleAuthConfig::from_env())
+}
+
+fn ingest_planetscale_with_auth(
+    store: &LocalMemoryStore,
+    options: PlanetScaleIngestOptions,
+    auth: PlanetScaleAuthConfig,
+) -> Result<String> {
+    if !auth.has_token() {
+        return Err(RivoraError::invalid_value(
+            "planetscale_token",
+            "Missing PLANETSCALE_SERVICE_TOKEN.\n\nCreate a read-only PlanetScale service token and run:\n\nexport PLANETSCALE_SERVICE_TOKEN=...\n\nThen try:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
+        ));
+    }
+    let connector = PlanetScaleConnector::new(HttpPlanetScaleClient::new(auth));
+    ingest_planetscale_with_connector(store, options, &connector)
+}
+
+pub fn ingest_planetscale_with_connector(
+    store: &LocalMemoryStore,
+    options: PlanetScaleIngestOptions,
+    connector: &PlanetScaleConnector,
+) -> Result<String> {
+    validate_planetscale_options(&options)?;
+    if let Some(since) = &options.since {
+        validate_provider_since(since, "planetscale")?;
+    }
+    let mut request =
+        PlanetScaleIngestRequest::new(PlanetScaleDatabaseRef::new(options.org, options.database))
+            .with_limit(options.limit);
+    if let Some(since) = options.since {
+        request = request.with_since(since);
+    }
+    if let Some(branch) = options.branch {
+        request = request.with_branch(branch);
+    }
+    let result = connector.ingest(request)?;
+    store.init()?;
+    let added = store.append_evidence(result.evidence.clone())?;
+    Ok(render_planetscale_ingest_result(&result, added, store))
+}
+
+fn validate_planetscale_options(options: &PlanetScaleIngestOptions) -> Result<()> {
+    if options.org.trim().is_empty() {
+        return Err(RivoraError::invalid_value(
+            "planetscale_org",
+            "rivora ingest planetscale requires --org <org-slug>.\n\nTry:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
+        ));
+    }
+    if options.database.trim().is_empty() {
+        return Err(RivoraError::invalid_value(
+            "planetscale_database",
+            "rivora ingest planetscale requires --database <database-name>.\n\nTry:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
+        ));
+    }
+    if !(1..=100).contains(&options.limit) {
+        return Err(RivoraError::invalid_value(
+            "planetscale_limit",
+            "rivora ingest planetscale requires --limit between 1 and 100.\n\nNo database actions were taken.\nNo infrastructure actions were taken.",
+        ));
+    }
+    Ok(())
+}
+
 pub fn ingest_fixture(store: &LocalMemoryStore, options: FixtureIngestOptions) -> Result<String> {
     store.init()?;
     let path = if options.path.is_absolute() {
@@ -1258,7 +1370,7 @@ pub fn evidence_list(store: &LocalMemoryStore) -> Result<String> {
     let snapshot = store.load()?;
     if snapshot.evidence.is_empty() {
         return Ok(
-            "No evidence found yet.\n\nEvidence is what Rivora reads before anything becomes memory. Without evidence, Rivora cannot suggest what to remember.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\n\nOr run:\nrivora demo --scenario multi-source-release\n\nNo infrastructure actions were taken."
+            "No evidence found yet.\n\nEvidence is what Rivora reads before anything becomes memory. Without evidence, Rivora cannot suggest what to remember.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\nrivora ingest sentry --org <org-slug> --project <project-slug> --limit 20\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nOr run:\nrivora demo --scenario multi-source-release\n\nNo infrastructure actions were taken."
                 .to_string(),
         );
     }
@@ -1281,7 +1393,10 @@ pub fn evidence_list(store: &LocalMemoryStore) -> Result<String> {
             output.push_str(&format!("\n  Topic: {service}"));
         }
     }
-    output.push_str("\n\nNo infrastructure actions were taken.");
+    if snapshot.evidence.iter().any(EvidenceItem::is_planetscale) {
+        output.push_str("\n\nNo database actions were taken.");
+    }
+    output.push_str("\nNo infrastructure actions were taken.");
     Ok(output)
 }
 
@@ -1337,6 +1452,18 @@ pub fn ask(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         AskIntent::WhatChangedInSentry => {
             ask_sentry_evidence(store, "Rivora found recent Sentry issue evidence.")
         }
+        AskIntent::WhatChangedInPlanetScale | AskIntent::WhatDatabaseChangedRecently => {
+            ask_planetscale_evidence(
+                store,
+                "Rivora found recent PlanetScale data-layer evidence.",
+                |_| true,
+            )
+        }
+        AskIntent::WhatDeployRequestsHappenedRecently => ask_planetscale_evidence(
+            store,
+            "Rivora found recent PlanetScale deploy-request evidence.",
+            |item| item.kind == EvidenceKind::PlanetScaleDeployRequest,
+        ),
         AskIntent::Help => Ok(help_text_for(HelpTopic::Ask)),
     }
 }
@@ -1636,6 +1763,9 @@ fn parse_ingest_options(args: &[String]) -> Result<IngestOptions> {
         Some("sentry") => Ok(IngestOptions::Sentry(parse_sentry_ingest_options(
             &args[1..],
         )?)),
+        Some("planetscale") | Some("pscale") => Ok(IngestOptions::PlanetScale(
+            parse_planetscale_ingest_options(&args[1..])?,
+        )),
         Some("fixture") => Ok(IngestOptions::Fixture(parse_fixture_ingest_options(
             &args[1..],
         )?)),
@@ -1645,7 +1775,7 @@ fn parse_ingest_options(args: &[String]) -> Result<IngestOptions> {
         )),
         None => Err(RivoraError::invalid_value(
             "ingest_connector",
-            "usage: rivora ingest git | rivora ingest github --repo owner/name | rivora ingest vercel --project <project> | rivora ingest cloudflare pages --account <account-id> --project <project-name> | rivora ingest sentry --org <org-slug> --project <project-slug> | rivora ingest fixture --path examples/demo/evidence.json",
+            "usage: rivora ingest git | rivora ingest github --repo owner/name | rivora ingest vercel --project <project> | rivora ingest cloudflare pages --account <account-id> --project <project-name> | rivora ingest sentry --org <org-slug> --project <project-slug> | rivora ingest planetscale --org <org-slug> --database <database-name> | rivora ingest fixture --path examples/demo/evidence.json",
         )),
     }
 }
@@ -1875,6 +2005,33 @@ fn parse_sentry_ingest_options(args: &[String]) -> Result<SentryIngestOptions> {
         }
     }
     validate_sentry_options(&options)?;
+    Ok(options)
+}
+
+fn parse_planetscale_ingest_options(args: &[String]) -> Result<PlanetScaleIngestOptions> {
+    let mut options = PlanetScaleIngestOptions::default();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--org" => options.org = flag_value(args, &mut index, "--org")?,
+            "--database" => options.database = flag_value(args, &mut index, "--database")?,
+            "--branch" => options.branch = Some(flag_value(args, &mut index, "--branch")?),
+            "--since" => options.since = Some(flag_value(args, &mut index, "--since")?),
+            "--limit" => {
+                let value = flag_value(args, &mut index, "--limit")?;
+                options.limit = value.parse::<usize>().map_err(|_| {
+                    RivoraError::invalid_value("limit", "limit must be a positive integer")
+                })?;
+            }
+            other => {
+                return Err(RivoraError::invalid_value(
+                    "ingest_planetscale_flag",
+                    format!("unsupported PlanetScale ingest flag '{other}'"),
+                ));
+            }
+        }
+    }
+    validate_planetscale_options(&options)?;
     Ok(options)
 }
 
@@ -2231,6 +2388,33 @@ fn render_sentry_ingest_result(
     )
 }
 
+fn render_planetscale_ingest_result(
+    result: &PlanetScaleIngestResult,
+    added: usize,
+    store: &LocalMemoryStore,
+) -> String {
+    if result.evidence.is_empty() {
+        return format!(
+            "No PlanetScale branch or deploy-request evidence found for {}.\n\nTry a wider --since window or remove --branch.\n\nEvidence is not memory until approved.\nNo database actions were taken.\nNo infrastructure actions were taken.{}",
+            result.repository,
+            next_steps_after_ingest()
+        );
+    }
+    let existing = result.evidence.len().saturating_sub(added);
+    format!(
+        "Ingested {} PlanetScale evidence records.\nNew: {}\nExisting: {}\n\nDatabase: {}\nBranches: {}\nDeploy requests: {}\nInferred topics:\n{}\n\nEvidence store:\n{}\n\nPlanetScale access is read-only and metadata-first.\nEvidence is not memory until approved.\nNo database actions were taken.\nNo infrastructure actions were taken.{}",
+        result.evidence.len(),
+        added,
+        existing,
+        result.repository,
+        result.branches,
+        result.deploy_requests,
+        render_bullets(&result.topics),
+        display_path(&store.evidence_path()),
+        next_steps_after_ingest()
+    )
+}
+
 fn render_fixture_ingest_result(
     label: &str,
     ingested: usize,
@@ -2253,6 +2437,8 @@ fn render_evidence_item(item: &EvidenceItem) -> String {
     let service = item.service.as_deref().unwrap_or("unknown");
     let sensitive_data_note = if item.is_sentry() {
         "\n\nSensitive Sentry event data is not stored."
+    } else if item.is_planetscale() {
+        "\n\nPlanetScale evidence is metadata-only. No SQL, customer rows, credentials, connection strings, raw schema dumps, schema diffs, or raw DDL are stored.\nNo database actions were taken."
     } else {
         ""
     };
@@ -2279,7 +2465,7 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
     let summary = CrossSourceEvidenceSummary::from_evidence(&snapshot.evidence, topic.as_deref());
     if summary.is_empty() {
         return Ok(
-            "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\nrivora ingest sentry --org <org-slug> --project <project-slug> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
+            "No evidence found yet.\n\nTry:\nrivora ingest git --repo . --limit 20\nrivora ingest github --repo owner/name --limit 20\nrivora ingest vercel --project <project> --limit 20\nrivora ingest cloudflare pages --account <account-id> --project <project-name> --limit 20\nrivora ingest sentry --org <org-slug> --project <project-slug> --limit 20\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nOr run:\nrivora demo\n\nNo root cause was inferred.\nNo infrastructure actions were taken."
                 .to_string(),
         );
     }
@@ -2295,6 +2481,8 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         "Rivora found recent Cloudflare deployment evidence."
     } else if !summary.sentry.is_empty() {
         "Rivora found recent Sentry issue evidence."
+    } else if !summary.planetscale.is_empty() {
+        "Rivora found recent PlanetScale data-layer evidence."
     } else {
         "Rivora found recent Git evidence."
     };
@@ -2307,6 +2495,7 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
         .collect();
     all_items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| a.id.cmp(&b.id)));
     let all_items = all_items.into_iter().take(5).collect::<Vec<_>>();
+    let includes_planetscale = all_items.iter().any(|item| item.is_planetscale());
     let first_id = all_items.first().map(|item| item.id.as_str().to_string());
     for item in &all_items {
         output.push_str(&format!(
@@ -2318,9 +2507,13 @@ fn ask_what_changed(store: &LocalMemoryStore, prompt: &str) -> Result<String> {
     }
     if let Some(first_id) = first_id {
         output.push_str(&format!(
-            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo infrastructure actions were taken.",
+            "\n\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.",
             first_id
         ));
+        if includes_planetscale {
+            output.push_str("\nNo database actions were taken.");
+        }
+        output.push_str("\nNo infrastructure actions were taken.");
     }
     Ok(output)
 }
@@ -2427,6 +2620,7 @@ fn ask_what_deployed_recently(store: &LocalMemoryStore) -> Result<String> {
         cloudflare_pages: summary.cloudflare_pages,
         cloudflare_workers: summary.cloudflare_workers,
         sentry: Vec::new(),
+        planetscale: Vec::new(),
         github: Vec::new(),
         git: Vec::new(),
         has_failures: summary.has_failures,
@@ -2521,6 +2715,45 @@ fn ask_sentry_evidence(store: &LocalMemoryStore, header: &str) -> Result<String>
     if let Some(first) = matches.first() {
         output.push_str(&format!(
             "\n\nThis may be worth investigating.\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo infrastructure actions were taken.",
+            first.id.as_str()
+        ));
+    }
+    Ok(output)
+}
+
+fn ask_planetscale_evidence(
+    store: &LocalMemoryStore,
+    header: &str,
+    predicate: impl Fn(&EvidenceItem) -> bool,
+) -> Result<String> {
+    store.init()?;
+    let snapshot = store.load()?;
+    let mut matches = snapshot
+        .evidence
+        .iter()
+        .filter(|item| item.is_planetscale() && predicate(item))
+        .collect::<Vec<_>>();
+    if matches.is_empty() {
+        return Ok("Rivora did not find PlanetScale data-layer evidence yet.\n\nTry:\nrivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n\nNo root cause was inferred.\nNo database actions were taken.\nNo infrastructure actions were taken.".to_string());
+    }
+    matches.sort_by(|left, right| {
+        right
+            .timestamp
+            .cmp(&left.timestamp)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let mut output = format!("{header}\n");
+    for item in matches.iter().take(5) {
+        output.push_str(&format!(
+            "\n* {}\n  {}\n  Evidence: {}",
+            item.title,
+            item.summary,
+            item.id.as_str()
+        ));
+    }
+    if let Some(first) = matches.first() {
+        output.push_str(&format!(
+            "\n\nThis data-layer evidence may be near recent deployment or error evidence.\nThis may be worth investigating.\nThis may be worth remembering.\n\nRun:\nrivora remember --from-evidence {}\n\nNo root cause was inferred.\nNo database actions were taken.\nNo infrastructure actions were taken.",
             first.id.as_str()
         ));
     }
@@ -2701,23 +2934,24 @@ fn help_text_for(topic: HelpTopic) -> String {
         HelpTopic::Root => root_help(),
         HelpTopic::Init => "rivora init\n\nInitialize the local `.rivora/` store in the current directory.\n\nCreates `memories.json`, `feedback.json`, `receipts.json`, and\n`evidence.json`. Existing data is preserved.\n\nRivora is local-first. No tokens are required. No infrastructure actions are\ntaken.\n\nNext:\nrivora demo --scenario multi-source-release\nrivora ingest git --repo . --limit 20".to_string(),
         HelpTopic::Demo => "rivora demo\n\nRun a deterministic, local-only demo of the full memory loop:\nEvidence -> Memory Candidate -> Human Approval -> Recall.\n\nFlags:\n  --scenario <name>   basic (default), checkout-incident,\n                      release-regression, workflow-failure,\n                      multi-source-release\n  --keep              Keep the demo store on disk after running\n  --store <path>      Use an explicit demo store directory\n  --json              Emit a stable JSON summary\n\nThe demo uses packaged fixture data embedded in the binary. No tokens, no\nnetwork, and no data leaves your machine. Evidence is not memory until\napproved. No infrastructure actions are taken.".to_string(),
-        HelpTopic::Ingest => "rivora ingest <connector>\n\nIngest read-only engineering evidence into the local `.rivora/` store.\n\nConnectors:\n  git        Local Git history (`rivora ingest git --help`)\n  github     GitHub PRs, issues, workflows, releases, deployments\n  vercel     Vercel deployment evidence\n  cloudflare Cloudflare Pages and Workers deployment evidence\n  sentry     Sentry issue/error metadata\n  fixture    Local JSON fixture evidence for demos and tests\n\nAll connectors are read-only. No deployment, rollback, or infrastructure\nactions are taken. Provider tokens are read from environment variables and\nnever stored.\n\nNext:\nrivora evidence list\nrivora ask \"what changed?\"".to_string(),
+        HelpTopic::Ingest => "rivora ingest <connector>\n\nIngest read-only engineering evidence into the local `.rivora/` store.\n\nConnectors:\n  git         Local Git history (`rivora ingest git --help`)\n  github      GitHub PRs, issues, workflows, releases, deployments\n  vercel      Vercel deployment evidence\n  cloudflare  Cloudflare Pages and Workers deployment evidence\n  sentry      Sentry issue/error metadata\n  planetscale PlanetScale branch and deploy-request metadata\n  fixture     Local JSON fixture evidence for demos and tests\n\nAll connectors are read-only. No deployment, rollback, database, or infrastructure\nactions are taken. Provider tokens are read from environment variables and\nnever stored.\n\nNext:\nrivora evidence list\nrivora ask \"what changed?\"".to_string(),
         HelpTopic::IngestGit => "rivora ingest git\n\nIngest read-only evidence from a local Git repository.\n\nFlags:\n  --repo <path>   Repository path (default: current directory)\n  --since <value> Optional time window (e.g. `7d`, `2026-06-01`)\n  --limit <n>     Maximum commits to read (default: 20)\n\nThe connector only reads Git history. It never runs mutating commands such\nas commit, push, pull, reset, checkout, rebase, merge, or clean. No\ninfrastructure actions are taken.\n\nNext:\nrivora evidence list\nrivora remember --from-evidence <evidence-id>".to_string(),
         HelpTopic::IngestGithub => "rivora ingest github\n\nIngest read-only evidence from the GitHub REST API (pull requests, issues,\nworkflow runs, releases, deployments).\n\nFlags:\n  --repo owner/name    Required repository reference\n  --since <value>      Optional time window\n  --limit <n>          Maximum items per source (default: 20)\n  --pull-requests      Include merged pull requests\n  --issues             Include issues\n  --workflow-runs      Include workflow runs\n  --releases           Include releases\n  --deployments        Include deployments\n\n`GITHUB_TOKEN` is optional for public repos and never stored. The connector\nonly issues `GET` requests. No infrastructure actions are taken.".to_string(),
         HelpTopic::IngestVercel => "rivora ingest vercel\n\nIngest read-only deployment evidence from the Vercel REST API.\n\nFlags:\n  --project <id-or-name>  Required project reference\n  --team <id-or-slug>     Optional team scope\n  --since <value>         Optional time window\n  --limit <n>             Maximum deployments (default: 20)\n\n`VERCEL_TOKEN` is required and never stored. The connector is read-only. No\ndeployment, rollback, or promotion actions are taken.".to_string(),
         HelpTopic::IngestCloudflare => "rivora ingest cloudflare <pages|worker>\n\nIngest read-only deployment evidence from the Cloudflare REST API.\n\nSubcommands:\n  pages    Cloudflare Pages deployment evidence\n  worker   Cloudflare Workers deployment evidence\n\nFlags:\n  --account <account-id>     Required account id\n  --project <project-name>   Required for `pages`\n  --script <script-name>     Required for `worker`\n  --since <value>            Optional time window\n  --limit <n>                Maximum deployments (default: 20)\n\n`CLOUDFLARE_API_TOKEN` is required (`CF_API_TOKEN` is accepted as a\nfallback) and never stored. The connector is read-only. No deployment,\nrollback, promotion, DNS, route, Worker, Pages, KV, R2, D1, or Queues\nactions are taken.".to_string(),
         HelpTopic::IngestSentry => "rivora ingest sentry\n\nIngest metadata-first issue evidence from the Sentry REST API.\n\nFlags:\n  --org <org-slug>             Required organization slug\n  --project <project-slug>     Required project slug\n  --environment <environment>  Optional environment filter\n  --since <value>              Optional timestamp or duration (for example 24h or 7d)\n  --query <query>              Optional Sentry issue query (default: is:unresolved)\n  --limit <n>                  Maximum issues (default: 20; maximum: 100)\n\n`SENTRY_AUTH_TOKEN` is required (`SENTRY_TOKEN` is accepted as a fallback)\nand never stored. Only GET requests are used. Rivora does not ingest raw\nstack traces, event payloads, request data, user emails, IPs, replays, or\nbreadcrumbs. No Sentry or infrastructure actions are taken.".to_string(),
+        HelpTopic::IngestPlanetScale => "rivora ingest planetscale\n\nIngest metadata-first database branch and deploy-request evidence from the\nPlanetScale REST API. `pscale` is accepted as an alias.\n\nFlags:\n  --org <org-slug>           Required organization slug\n  --database <database-name> Required database name\n  --branch <branch-name>     Optional branch filter\n  --since <value>            Optional timestamp or duration (for example 24h or 7d)\n  --limit <n>                Maximum combined records (default: 20; range: 1-100)\n\n`PLANETSCALE_SERVICE_TOKEN` is required (`PLANETSCALE_AUTH_TOKEN` is a\nfallback) and never stored. Only GET requests are used. Rivora never connects\nto the database, runs SQL, reads customer rows or branch passwords, or stores\nconnection strings, raw schema dumps, schema diffs, or raw DDL. It does not\ncreate, approve, or deploy deploy requests or create, delete, or promote\nbranches. No database or infrastructure actions are taken.".to_string(),
         HelpTopic::Evidence => "rivora evidence <list|show>\n\nReview local evidence stored in `.rivora/evidence.json`.\n\nCommands:\n  rivora evidence list           List recent evidence items\n  rivora evidence show <id>      Show one evidence item in full\n\nEvidence is not memory until a human chooses to remember and approve it.\nNo infrastructure actions are taken.\n\nNext:\nrivora remember --from-evidence <evidence-id>".to_string(),
         HelpTopic::Remember => format!("rivora remember\n\nPropose a memory candidate from evidence or an explicit summary.\n\nFlags:\n  --from-evidence <id>     Build a candidate from stored evidence\n  --service <name>         Service or topic (required without --from-evidence)\n  --summary \"text\"         Memory summary (required without --from-evidence)\n  --symptom <name>         Repeatable symptom tag\n  --tag <name>             Repeatable tag\n  --evidence <id>          Repeatable evidence reference\n  --source <name>          Source label\n  --confidence <low|medium|high|number>\n  --approve                Also approve the candidate immediately\n\nA candidate is `MemoryStatus::Candidate` until approved. No action is taken\non your infrastructure.\n\nExample:\n  {}\n\nNext:\nrivora feedback <memory-id> approve\nrivora recall <topic>", remember_example()),
         HelpTopic::Feedback => "rivora feedback <memory-id> <kind>\n\nApply human feedback to a memory. Feedback changes memory status only; no\ninfrastructure action is taken.\n\nKinds:\n  approve               Approve the candidate (status -> Active)\n  reject                Reject the candidate (status -> Rejected)\n  correct               Correct the candidate (status -> Corrected)\n  useful                Mark useful\n  not-useful            Mark not useful\n  needs-more-evidence   Request more evidence\n\nFlags:\n  --note \"text\"   Optional note (required context for `correct`)\n\nEvery feedback operation produces a receipt.\n\nNext:\nrivora ask \"have we seen this before?\"".to_string(),
         HelpTopic::Recall => "rivora recall <service> [flags]\n\nRecall similar approved memories for a service or topic.\n\nArguments:\n  <service>   Optional service or topic to match\n\nFlags:\n  --symptom <name>            Repeatable symptom to match\n  --tag <name>                Repeatable tag to match\n  --include-candidates        Also include unapproved candidates\n\nRecall is deterministic and evidence-backed. It never claims root cause.\nNo infrastructure actions are taken.".to_string(),
-        HelpTopic::Ask => "rivora ask \"<question>\"\n\nAsk Rivora a natural-language question about local evidence and memory.\n\nSuggested prompts:\n  rivora ask \"what changed?\"\n  rivora ask \"what changed recently?\"\n  rivora ask \"what merged recently?\"\n  rivora ask \"what deployed recently?\"\n  rivora ask \"what failed recently?\"\n  rivora ask \"what changed in github?\"\n  rivora ask \"what changed in vercel?\"\n  rivora ask \"what changed on cloudflare?\"\n  rivora ask \"what failed in cloudflare?\"\n  rivora ask \"what happened during the release?\"\n  rivora ask \"have we seen this before?\"\n  rivora ask \"have we seen checkout deploy failures before?\"\n\nRivora reads local evidence only. It never claims root cause and never takes\ninfrastructure actions. If a prompt is not understood, this help is shown.".to_string(),
+        HelpTopic::Ask => "rivora ask \"<question>\"\n\nAsk Rivora a natural-language question about local evidence and memory.\n\nSuggested prompts:\n  rivora ask \"what changed?\"\n  rivora ask \"what changed recently?\"\n  rivora ask \"what merged recently?\"\n  rivora ask \"what deployed recently?\"\n  rivora ask \"what failed recently?\"\n  rivora ask \"what database changes happened recently?\"\n  rivora ask \"what schema changes happened recently?\"\n  rivora ask \"what deploy requests happened recently?\"\n  rivora ask \"what changed in github?\"\n  rivora ask \"what changed in vercel?\"\n  rivora ask \"what changed on cloudflare?\"\n  rivora ask \"what failed in cloudflare?\"\n  rivora ask \"what happened during the release?\"\n  rivora ask \"have we seen this before?\"\n  rivora ask \"have we seen checkout deploy failures before?\"\n\nRivora reads local evidence only. It never claims root cause and never takes\ndatabase or infrastructure actions. If a prompt is not understood, this help is shown.".to_string(),
         HelpTopic::Slack => "rivora slack <dev|doctor|socket>\n\nSelf-hosted Slack adapter. This is not the official Slack Marketplace app.\n\nCommands:\n  rivora slack doctor           Validate Slack setup\n  rivora slack dev --text \"...\" Simulate a Slack mention locally\n  rivora slack socket           Start live Slack Socket Mode\n\nSlack tokens are read from the environment and never stored in `.rivora/`.\nNo infrastructure actions are taken.".to_string(),
         HelpTopic::SlackDev => "rivora slack dev --text \"<question>\"\n\nSimulate a Slack app mention locally without connecting to Slack. Useful for\ntesting prompts and output formatting.\n\nFlags:\n  --text \"...\"        Required mention text (supports `@rivora` and `<@id>`)\n  --channel <id>      Optional channel id (default: CLOCAL)\n  --user <id>         Optional user id (default: ULOCAL)\n  --bot-user-id <id>  Optional bot user id to strip from mention text\n\nDev mode uses the same routing logic as live Socket Mode. No Slack tokens\nare used. No infrastructure actions are taken.".to_string(),
         HelpTopic::SlackDoctor => "rivora slack doctor\n\nValidate Slack environment and local store setup.\n\nFlags:\n  --live   Also call `apps.connections.open` to validate Socket Mode access\n\nChecks `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, and\nthe local store. Tokens are reported as `set`/`not set` only and never\nprinted. No infrastructure actions are taken.\n\nFor a general local diagnostic, see `rivora doctor`.".to_string(),
         HelpTopic::SlackSocket => "rivora slack socket\n\nStart the live self-hosted Slack adapter using Socket Mode.\n\nRequires `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_SIGNING_SECRET`.\nRun `rivora slack doctor` first to validate setup.\n\nListens for `@rivora` app mentions and replies in-thread. Reconnects\nautomatically on disconnect. No infrastructure actions are taken. Press\nCtrl-C to stop.".to_string(),
         HelpTopic::Status => "rivora status\n\nShow local store counts: memories by status, evidence, feedback, and\nreceipts. No tokens are required. No infrastructure actions are taken.".to_string(),
-        HelpTopic::Doctor => "rivora doctor\n\nRun a local diagnostic of the Rivora store and provider tokens.\n\nFlags:\n  --json   Emit a stable JSON report\n\nChecks the current directory, `.rivora/` store files, whether `.rivora/` is\ngitignored, and provider env vars (`GITHUB_TOKEN`, `VERCEL_TOKEN`,\n`CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `SENTRY_AUTH_TOKEN`, `SENTRY_TOKEN`,\n`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`). Tokens are\nreported as `set`/`not set` only and never printed. No network access is\nrequired. No infrastructure actions are taken.".to_string(),
+        HelpTopic::Doctor => "rivora doctor\n\nRun a local diagnostic of the Rivora store and provider tokens.\n\nFlags:\n  --json   Emit a stable JSON report\n\nChecks the current directory, `.rivora/` store files, whether `.rivora/` is\ngitignored, and provider env vars (`GITHUB_TOKEN`, `VERCEL_TOKEN`,\n`CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `SENTRY_AUTH_TOKEN`, `SENTRY_TOKEN`,\n`PLANETSCALE_SERVICE_TOKEN`, `PLANETSCALE_AUTH_TOKEN`, `SLACK_BOT_TOKEN`,\n`SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`). Tokens are reported as `set`/`not\nset` only and never printed. No network access is required. No infrastructure\nactions are taken.".to_string(),
     }
 }
 
@@ -2728,7 +2962,7 @@ fn root_help() -> String {
     );
     help.replace(
         "* rivora ingest fixture --path examples/demo/evidence.json",
-        "* rivora ingest sentry --org <org-slug> --project <project-slug> --limit 20\n* rivora ingest fixture --path examples/demo/evidence.json",
+        "* rivora ingest sentry --org <org-slug> --project <project-slug> --limit 20\n* rivora ingest planetscale --org <org-slug> --database <database-name> --limit 20\n* rivora ingest fixture --path examples/demo/evidence.json",
     )
 }
 
@@ -2976,6 +3210,7 @@ pub struct CrossSourceEvidenceSummary {
     pub cloudflare_pages: Vec<String>,
     pub cloudflare_workers: Vec<String>,
     pub sentry: Vec<String>,
+    pub planetscale: Vec<String>,
     pub git: Vec<String>,
     pub has_failures: bool,
     pub has_deployments: bool,
@@ -2990,6 +3225,7 @@ impl CrossSourceEvidenceSummary {
             cloudflare_pages: Vec::new(),
             cloudflare_workers: Vec::new(),
             sentry: Vec::new(),
+            planetscale: Vec::new(),
             git: Vec::new(),
             has_failures: false,
             has_deployments: false,
@@ -3035,6 +3271,11 @@ impl CrossSourceEvidenceSummary {
                 if item.tags.iter().any(|tag| tag == "failed") {
                     summary.has_failures = true;
                 }
+            } else if item.is_planetscale() {
+                summary.planetscale.push(line);
+                if item.kind == EvidenceKind::PlanetScaleDeployRequest {
+                    summary.has_deployments = true;
+                }
             } else {
                 summary.git.push(line);
             }
@@ -3050,6 +3291,7 @@ impl CrossSourceEvidenceSummary {
             !self.cloudflare_pages.is_empty(),
             !self.cloudflare_workers.is_empty(),
             !self.sentry.is_empty(),
+            !self.planetscale.is_empty(),
             !self.git.is_empty(),
         ]
         .iter()
@@ -3064,6 +3306,7 @@ impl CrossSourceEvidenceSummary {
             && self.cloudflare_pages.is_empty()
             && self.cloudflare_workers.is_empty()
             && self.sentry.is_empty()
+            && self.planetscale.is_empty()
             && self.git.is_empty()
     }
 
@@ -3100,6 +3343,12 @@ impl CrossSourceEvidenceSummary {
                 output.push_str(&format!("- {line}\n"));
             }
         }
+        if !self.planetscale.is_empty() {
+            output.push_str("\nPlanetScale\n");
+            for line in &self.planetscale {
+                output.push_str(&format!("- {line}\n"));
+            }
+        }
         if !self.git.is_empty() {
             output.push_str("\nGit\n");
             for line in &self.git {
@@ -3109,7 +3358,11 @@ impl CrossSourceEvidenceSummary {
         if self.provider_count() > 1 {
             output.push_str("\nThese events occurred in the same window.\nNearby evidence may be related and may be worth investigating.\n");
         }
-        output.push_str("\nThis may be worth remembering.\nEvidence is not memory until approved.\nNo infrastructure actions were taken.");
+        output.push_str("\nThis may be worth remembering.\nEvidence is not memory until approved.");
+        if !self.planetscale.is_empty() {
+            output.push_str("\nNo database actions were taken.");
+        }
+        output.push_str("\nNo infrastructure actions were taken.");
         output
     }
 }
@@ -3125,6 +3378,8 @@ fn provider_label_for_evidence(item: &EvidenceItem) -> &'static str {
         "Cloudflare Workers"
     } else if item.is_sentry() {
         "Sentry"
+    } else if item.is_planetscale() {
+        "PlanetScale"
     } else if item.kind == EvidenceKind::GitCommit
         || item.kind == EvidenceKind::GitFileChange
         || item.kind == EvidenceKind::GitTag
@@ -3151,6 +3406,16 @@ fn evidence_status_label(item: &EvidenceItem) -> &'static str {
             "Warning"
         } else {
             "Observed"
+        }
+    } else if item.is_planetscale() {
+        if item.tags.iter().any(|tag| tag == "failed") {
+            "Failed"
+        } else if item.tags.iter().any(|tag| tag == "state-complete") {
+            "Deployed"
+        } else if item.kind == EvidenceKind::PlanetScaleDatabaseBranch {
+            "Observed"
+        } else {
+            "Recorded"
         }
     } else if item
         .tags
@@ -3236,8 +3501,8 @@ where
 mod tests {
     use super::*;
     use rivora_connectors::{
-        EvidenceId, EvidenceKind, EvidenceSource, FixtureGitHubClient, FixtureSentryClient,
-        GitHubConnector,
+        EvidenceId, EvidenceKind, EvidenceSource, FixtureGitHubClient, FixturePlanetScaleClient,
+        FixtureSentryClient, GitHubConnector,
     };
     use std::process::Command as ProcessCommand;
     use tempfile::TempDir;
@@ -4443,7 +4708,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_source_fixture_ingests_all_phase_20a_evidence_types() {
+    fn multi_source_fixture_ingests_all_phase_20b_evidence_types() {
         let (_temp, store) = temp_store();
         let output = run(
             [
@@ -4457,9 +4722,9 @@ mod tests {
         .unwrap();
         let snapshot = store.load().unwrap();
 
-        assert_eq!(snapshot.evidence.len(), 6);
+        assert_eq!(snapshot.evidence.len(), 7);
         assert!(output.contains("Rivora ingested fixture evidence."));
-        assert!(output.contains("New evidence items: 6"));
+        assert!(output.contains("New evidence items: 7"));
 
         let has_github_pr = snapshot
             .evidence
@@ -4479,6 +4744,7 @@ mod tests {
             .iter()
             .any(|item| item.is_cloudflare_worker());
         let has_sentry = snapshot.evidence.iter().any(|item| item.is_sentry());
+        let has_planetscale = snapshot.evidence.iter().any(|item| item.is_planetscale());
 
         assert!(has_github_pr, "missing GitHub PR evidence");
         assert!(has_github_workflow, "missing GitHub workflow evidence");
@@ -4486,6 +4752,7 @@ mod tests {
         assert!(has_cf_pages, "missing Cloudflare Pages evidence");
         assert!(has_cf_worker, "missing Cloudflare Worker evidence");
         assert!(has_sentry, "missing Sentry issue evidence");
+        assert!(has_planetscale, "missing PlanetScale evidence");
     }
 
     #[test]
@@ -4498,7 +4765,7 @@ mod tests {
         let output = run(["ingest", "fixture", "--path", path_str], &store.root).unwrap();
         let snapshot = store.load().unwrap();
 
-        assert_eq!(snapshot.evidence.len(), 6);
+        assert_eq!(snapshot.evidence.len(), 7);
         assert!(output.contains("New evidence items: 0"));
     }
 
@@ -4875,13 +5142,14 @@ mod tests {
             output.contains("Scenario: multi-source-release"),
             "{output}"
         );
-        assert_eq!(snapshot.evidence.len(), 6);
+        assert_eq!(snapshot.evidence.len(), 7);
         assert_eq!(snapshot.memories.len(), 1);
         assert_eq!(snapshot.memories[0].status, MemoryStatus::Active);
         assert_eq!(snapshot.feedback.len(), 1);
         assert!(snapshot.receipts.len() >= 4);
         assert!(output.contains("Evidence -> Memory Candidate -> Human Approval -> Recall"));
         assert!(output.contains("Sentry"), "{output}");
+        assert!(output.contains("PlanetScale"), "{output}");
         assert!(output.contains("No infrastructure actions were taken."));
         assert!(!output_contains_infrastructure_action(&output));
     }
@@ -4898,7 +5166,7 @@ mod tests {
 
         assert_eq!(json["demo"], "complete");
         assert_eq!(json["scenario"], "multi-source-release");
-        assert_eq!(json["evidence_count"], 6);
+        assert_eq!(json["evidence_count"], 7);
         assert_eq!(
             json["selected_evidence_id"],
             "github:pr:demo/multi-source-release:142"
@@ -4997,7 +5265,7 @@ mod tests {
 
         let output = run(["evidence", "list"], &store.root).unwrap();
 
-        assert!(output.contains("Local evidence: 6"));
+        assert!(output.contains("Local evidence: 7"));
         assert!(
             output.contains("Source: GitHub"),
             "missing GitHub source: {output}"
@@ -5679,5 +5947,163 @@ mod tests {
         let serialized = serde_json::to_string(&store.load().unwrap()).unwrap();
         assert!(!serialized.contains(secret), "{serialized}");
         assert!(!serialized.contains("Bearer"), "{serialized}");
+    }
+
+    fn planetscale_fixture_connector() -> PlanetScaleConnector {
+        PlanetScaleConnector::new(
+            FixturePlanetScaleClient::builder()
+                .branches(
+                    r#"{"data":[{"name":"main","production":true,"created_at":"2026-07-01T10:00:00Z","updated_at":"2026-07-01T11:00:00Z","html_url":"https://app.planetscale.com/demo-org/checkout-db/main","password":"secret-password"}]}"#,
+                )
+                .deploy_requests(
+                    r#"{"data":[{"id":"dr_42","number":42,"branch":"checkout-schema-change","into_branch":"main","approved":true,"state":"closed","deployment_state":"complete","created_at":"2026-07-01T10:30:00Z","updated_at":"2026-07-01T11:30:00Z","deployed_at":"2026-07-01T11:25:00Z","html_url":"https://app.planetscale.com/demo-org/checkout-db/deploy-requests/42","actor":{"display_name":"pscale_tkn_store_secret"},"ddl":"ALTER TABLE users ADD COLUMN token varchar(255)","connection_string":"mysql://user:password@host/database","rows":[{"email":"customer@example.com"}]}]}"#,
+                )
+                .build(),
+        )
+    }
+
+    fn planetscale_options() -> PlanetScaleIngestOptions {
+        PlanetScaleIngestOptions {
+            org: "demo-org".to_string(),
+            database: "checkout-db".to_string(),
+            limit: 20,
+            since: None,
+            branch: None,
+        }
+    }
+
+    #[test]
+    fn planetscale_cli_parses_alias_filters_and_validates_required_args() {
+        let parsed = parse_command(&[
+            "ingest".into(),
+            "pscale".into(),
+            "--org".into(),
+            "demo-org".into(),
+            "--database".into(),
+            "checkout-db".into(),
+            "--branch".into(),
+            "main".into(),
+            "--since".into(),
+            "7d".into(),
+            "--limit".into(),
+            "100".into(),
+        ])
+        .unwrap();
+        match parsed {
+            Command::Ingest(IngestOptions::PlanetScale(options)) => {
+                assert_eq!(options.branch.as_deref(), Some("main"));
+                assert_eq!(options.since.as_deref(), Some("7d"));
+                assert_eq!(options.limit, 100);
+            }
+            other => panic!("expected PlanetScale ingest, got {other:?}"),
+        }
+        assert!(parse_command(&["ingest".into(), "planetscale".into()]).is_err());
+    }
+
+    #[test]
+    fn planetscale_fixture_ingest_deduplicates_answers_and_remembers_safely() {
+        let (_temp, store) = temp_store();
+        let connector = planetscale_fixture_connector();
+        let first =
+            ingest_planetscale_with_connector(&store, planetscale_options(), &connector).unwrap();
+        let second =
+            ingest_planetscale_with_connector(&store, planetscale_options(), &connector).unwrap();
+        assert!(
+            first.contains("Ingested 2 PlanetScale evidence records."),
+            "{first}"
+        );
+        assert!(first.contains("New: 2"), "{first}");
+        assert!(second.contains("Existing: 2"), "{second}");
+        for prompt in [
+            "what database changes happened recently?",
+            "what schema changes happened recently?",
+            "what deploy requests happened recently?",
+            "what happened in planetscale?",
+            "what happened during the release?",
+        ] {
+            let output = ask(&store, prompt).unwrap();
+            assert!(output.contains("PlanetScale"), "{prompt}: {output}");
+            assert!(!output.contains("caused"), "{prompt}: {output}");
+            assert!(
+                output.contains("No database actions were taken."),
+                "{output}"
+            );
+        }
+        let remember_output = remember(
+            &store,
+            RememberOptions {
+                from_evidence: Some(
+                    "planetscale:deploy-request:demo-org:checkout-db:42".to_string(),
+                ),
+                ..RememberOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            remember_output.contains("PlanetScale evidence"),
+            "{remember_output}"
+        );
+        assert_eq!(
+            store.load().unwrap().memories[0].status,
+            MemoryStatus::Candidate
+        );
+        let memory_id = store.load().unwrap().memories[0].id.as_str().to_string();
+        feedback(
+            &store,
+            FeedbackOptions {
+                memory_id,
+                kind: FeedbackCommandKind::Approve,
+                note: Some("Approved PlanetScale deploy evidence".to_string()),
+            },
+        )
+        .unwrap();
+        let recall_output = ask(&store, "have we seen this database deploy before?").unwrap();
+        assert!(
+            recall_output.contains("PlanetScale evidence"),
+            "{recall_output}"
+        );
+        let persisted = serde_json::to_string(&store.load().unwrap()).unwrap();
+        for forbidden in [
+            "secret-password",
+            "mysql://",
+            "customer@example.com",
+            "ALTER TABLE",
+            "pscale_tkn_store_secret",
+        ] {
+            assert!(
+                !persisted.contains(forbidden),
+                "persisted {forbidden}: {persisted}"
+            );
+        }
+    }
+
+    #[test]
+    fn planetscale_missing_token_limit_and_since_fail_before_storage() {
+        let (_temp, store) = temp_store();
+        let missing = ingest_planetscale_with_auth(
+            &store,
+            planetscale_options(),
+            PlanetScaleAuthConfig::with_token(""),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            missing.contains("Missing PLANETSCALE_SERVICE_TOKEN."),
+            "{missing}"
+        );
+        assert!(!store.store_dir().exists());
+
+        let mut invalid = planetscale_options();
+        invalid.limit = 101;
+        assert!(validate_planetscale_options(&invalid).is_err());
+        invalid.limit = 20;
+        invalid.since = Some("recently".to_string());
+        assert!(ingest_planetscale_with_connector(
+            &store,
+            invalid,
+            &planetscale_fixture_connector()
+        )
+        .is_err());
+        assert!(!store.store_dir().exists());
     }
 }

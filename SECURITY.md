@@ -54,17 +54,31 @@ and never takes infrastructure actions.
   email, IP, and private absolute-path shapes are redacted from allowlisted
   user-controlled fields. Malformed responses fail closed instead of being
   persisted as evidence.
+- `PLANETSCALE_SERVICE_TOKEN` (or `PLANETSCALE_AUTH_TOKEN`) is never stored in
+  `.rivora/`, printed, or written to evidence, memory, feedback, or receipts.
+  The preferred service token needs only `read_branch` and
+  `read_deploy_request`; the connector uses only `GET` requests.
+- PlanetScale evidence is explicitly allowlisted, metadata-first, and API-only.
+  Rivora never connects to the customer database, runs SQL, reads customer
+  rows or branch passwords, or stores connection strings, raw query results,
+  full schema dumps, full schema diffs, raw DDL, hostnames, IP addresses,
+  emails, credentials, or arbitrary response metadata. It never creates,
+  approves, comments on, or deploys deploy requests and never creates,
+  deletes, or promotes branches.
 - Rivora does not intentionally ingest secrets. Connector evidence can include
   source-authored text such as commit messages or issue bodies, so review source
   content before ingestion and rotate any credential exposed in a source.
 
 ## Least privilege
 
-- Git, GitHub, Vercel, Cloudflare, and Sentry connectors are read-only. GitHub API
+- Git, GitHub, Vercel, Cloudflare, Sentry, and PlanetScale connectors are
+  read-only. GitHub API
   ingestion uses only `GET` requests. Vercel API ingestion uses only `GET`
   requests. Cloudflare API ingestion uses only `GET` requests.
   Sentry issue ingestion uses only `GET` requests and should use the narrowest
   practical token with `event:read`.
+  PlanetScale ingestion uses only `GET` requests and should use the narrowest
+  practical token with `read_branch` and `read_deploy_request`.
 - The Slack adapter uses minimal `app_mentions:read` and `chat:write` bot
   scopes. No channel history ingestion or workspace crawling.
 - Use `rivora slack doctor` to validate the self-hosted Slack setup without

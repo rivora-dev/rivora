@@ -20,7 +20,7 @@
 - [MEMORY_MODEL.md](MEMORY_MODEL.md) — memory statuses and lifecycle
 - [ADAPTIVE_MEMORY_ENGINE.md](ADAPTIVE_MEMORY_ENGINE.md) — candidate proposal and feedback
 - [CLI_MEMORY_INTERFACE.md](CLI_MEMORY_INTERFACE.md) — CLI commands
-- [EVIDENCE_CONNECTORS.md](EVIDENCE_CONNECTORS.md) — audited read-only Git, GitHub, Vercel, Cloudflare, Sentry, and fixture connectors
+- [EVIDENCE_CONNECTORS.md](EVIDENCE_CONNECTORS.md) — audited read-only Git, GitHub, Vercel, Cloudflare, Sentry, PlanetScale, and fixture connectors
 - [PRODUCT_VALIDATION.md](PRODUCT_VALIDATION.md) — end-to-end product validation
 - [PRINCIPLES.md](PRINCIPLES.md) — product principles
 

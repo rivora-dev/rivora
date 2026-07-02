@@ -9,6 +9,15 @@
 
   ### Added
 
+  - Phase 20B: read-only, metadata-first PlanetScale branch and deploy-request
+    evidence connector (`rivora ingest planetscale`, with `pscale` alias)
+  - PlanetScale branch, time-window, and strict 1-100 limit filters; stable
+    branch/deploy-request evidence IDs; offline fixture client
+  - PlanetScale-aware ask, memory candidate, recall, doctor, Slack, and
+    cross-source release behavior
+  - Exact PlanetScale metadata allowlists plus malicious fixture coverage for
+    credentials, rows, connection strings, schema data, query results, and DDL
+  - Synthetic PlanetScale deploy request in the multi-source release scenario
   - Phase 20A.1 Sentry connector safety audit covering GET-only enforcement,
     malicious nested payload exclusion, token/debug redaction, CLI and Slack
     parity, evidence rendering, memory recall, and public documentation
@@ -70,6 +79,11 @@
 
   ### Changed
 
+  - Multi-source summaries now group PlanetScale data-layer evidence alongside
+    GitHub, Vercel, Cloudflare, and Sentry using root-cause-neutral language
+    and an explicit no-database-actions safety statement
+  - `rivora doctor` now reports PlanetScale token presence without printing
+    values
   - Sentry issue parsing now honors the current `issueType` and numeric
     `userCount` response fields, caps all clients at 100 records, rejects
     malformed JSON, and drops undated evidence when `--since` is used
