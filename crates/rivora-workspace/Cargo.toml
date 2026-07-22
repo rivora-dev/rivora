@@ -1,0 +1,25 @@
+[package]
+name = "rivora-workspace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rivora Workspace — primary interactive Investigation experience"
+rust-version.workspace = true
+
+[[bin]]
+name = "rivora-workspace"
+path = "src/main.rs"
+
+[dependencies]
+rivora = { workspace = true }
+rivora-connectors = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+console = { workspace = true }
+dialoguer = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+

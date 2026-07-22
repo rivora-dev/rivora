@@ -1,0 +1,18 @@
+[package]
+name = "rivora-connectors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rivora observation connectors (local + GitHub)"
+rust-version.workspace = true
+
+[dependencies]
+rivora = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

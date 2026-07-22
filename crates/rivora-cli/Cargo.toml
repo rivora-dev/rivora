@@ -1,0 +1,23 @@
+[package]
+name = "rivora-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rivora CLI — thin one-shot access to Capabilities"
+rust-version.workspace = true
+
+[[bin]]
+name = "rivora"
+path = "src/main.rs"
+
+[dependencies]
+rivora = { workspace = true }
+rivora-connectors = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+serde_json = { workspace = true }

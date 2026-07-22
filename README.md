@@ -1,220 +1,282 @@
 # Rivora
 
-> **Rivora doesn't replace your engineering tools. It helps them work together as one engineering system.**
+> **Engineering understanding, not engineering automation.**
 
-Rivora is an open source runtime that continuously builds understanding across your engineering stack.
+Rivora is an open-source **Engineering Understanding Platform** built around:
+
+1. An exceptional **Runtime**
+2. A thoughtful **Workspace**
+3. An extensible **ecosystem** of connectors and capabilities
 
 Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or coding agents, Rivora helps them work together by building durable engineering memory, shared context, and evidence-backed understanding.
 
-The result is a continuously improving engineering system—not another disconnected tool.
-
 ---
 
-## Why Rivora?
+## Current Release: v0.1 — Runtime Foundation
 
-Modern engineering teams already have great tools.
+Rivora v0.1 proves one coherent Runtime can execute the complete engineering understanding lifecycle:
 
-- GitHub manages source code.
-- CI/CD builds and deploys software.
-- Cloud providers run infrastructure.
-- Observability platforms surface incidents.
-- Coding agents generate code.
-- Documentation captures knowledge.
-
-The problem isn't that we're missing another tool.
-
-The problem is that **those tools don't understand each other.**
-
-Engineers become the integration layer.
-
-They connect the dots between:
-
-- a pull request,
-- a deployment,
-- an incident,
-- a rollback,
-- an AI-generated change,
-- and the lessons learned afterwards.
-
-Rivora exists to build that shared understanding.
-
----
-
-## How Rivora Works
-
-Every engineering activity follows the same lifecycle.
-
-```
-Observe
-    ↓
-Memory
-    ↓
-Knowledge
-    ↓
-Evaluation
-    ↓
-Verification
-    ↓
-Improvement
-    ↓
-Learning
+```text
+Observation
+→ Memory
+→ Knowledge
+→ Evaluation
+→ Verification
+→ Recommendation
+→ Learning
 ```
 
-Instead of immediately trying to automate engineering work, Rivora first builds understanding.
-
-Everything else grows from that foundation.
-
----
-
-## What Rivora Is
-
-Rivora is a user-owned runtime that continuously understands your engineering system.
-
-It:
-
-- observes engineering activity
-- builds durable engineering memory
-- connects engineering context
-- evaluates engineering outcomes
-- verifies proposed improvements
-- learns over time
-
----
-
-## What Rivora Is Not
-
-Rivora is **not**:
-
-- another GitHub replacement
-- another observability platform
-- another CI/CD system
-- another deployment tool
-- another coding agent
-
-Those tools remain the systems of record.
-
-Rivora helps them work together.
+Interfaces (Workspace and CLI) invoke the same Capability layer over the same Runtime.
 
 ---
 
 ## Architecture
 
+```text
+Workspace / CLI
+      │
+      ▼
+Capabilities  (engineering intent)
+      │
+      ▼
+Runtime       (single source of reasoning)
+      │
+      ├── Investigation Manager
+      ├── Memory Engine
+      ├── Knowledge Engine
+      ├── Evaluation Engine
+      ├── Verification Engine
+      ├── Recommendation Engine
+      └── Learning Engine
+      │
+      ▼
+Local Store   (.rivora/data)
+
+Connectors ──► Observations only ──► Runtime
+  (local, GitHub)
 ```
-                    Rivora Runtime
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-   Ingestion          Memory Engine     Improvement
-        │                  │                  │
-        └──────────────────┼──────────────────┘
-                           │
-                 Knowledge + Evaluation
-                           │
-                  Verification + Learning
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                                     │
-   Workspace                          CLI
+
+### Architectural invariants
+
+- The Runtime is the single source of engineering reasoning.
+- Memory is append-only; history is never rewritten.
+- Knowledge is derived from Memory.
+- Evaluations are explainable and evidence-backed.
+- Verification produces durable receipts (pass / fail / inconclusive).
+- Recommendations are proposals, never auto-applied.
+- Learning records outcomes without rewriting history.
+- Connectors only observe and normalize.
+- Workspace and CLI share the same Capabilities and Runtime.
+
+See `docs/internal/ARCHITECTURAL_INVARIANTS.md` and `docs/rfc/`.
+
+---
+
+## Install / Build
+
+Requirements: Rust 1.75+ (edition 2021).
+
+```sh
+git clone <repo>
+cd rivora
+cargo build --workspace --release
+```
+
+Binaries:
+
+- `target/release/rivora` — CLI
+- `target/release/rivora-workspace` — interactive Workspace
+
+---
+
+## Quick start (CLI)
+
+```sh
+# Create an Investigation
+./target/release/rivora investigation create "CI failure on main" \
+  --description "Investigate recent pipeline failures"
+
+# Copy the printed investigation id, then observe
+./target/release/rivora observe \
+  --investigation <ID> \
+  --summary "CI check failed" \
+  --kind check_result \
+  --payload '{"status":"failure","error":"assertion failed"}' \
+  --idempotency-key ci-1
+
+# Or observe a local project
+./target/release/rivora observe --investigation <ID> --local .
+
+# Or observe GitHub (read-only; set GITHUB_TOKEN for private repos)
+./target/release/rivora observe --investigation <ID> --github owner/repo --pr 42
+
+# Full reasoning pipeline
+./target/release/rivora knowledge --investigation <ID>
+./target/release/rivora evaluate --investigation <ID>
+./target/release/rivora verify --investigation <ID>
+./target/release/rivora recommend --investigation <ID>
+
+# Record outcome and complete
+./target/release/rivora learn --investigation <ID> \
+  --disposition accepted --notes "Engineer accepted remediation plan"
+./target/release/rivora investigation complete <ID>
+
+# Reopen when new observations arrive
+./target/release/rivora investigation reopen <ID>
+```
+
+Global flags:
+
+- `--data-dir PATH` — local Runtime store (default `.rivora/data`)
+- `--json` — structured JSON output
+
+### CLI commands
+
+| Command | Purpose |
+| --- | --- |
+| `investigation create` | Create Investigation |
+| `investigation show` | Show status and object counts |
+| `investigation list` | List Investigations |
+| `investigation complete` | Complete (must be in Learning) |
+| `investigation reopen` | Reopen Completed → Collecting |
+| `observe` | Ingest Observations (manual / local / GitHub) |
+| `recall` | Recall Investigation Memory |
+| `timeline` | Chronological Memory timeline |
+| `knowledge` | Derive Knowledge from Memory |
+| `evaluate` | Produce explainable Evaluations |
+| `verify` | Produce Verification Receipts |
+| `recommend` | Generate evidence-backed Recommendations |
+| `learn` | Record Learning outcomes |
+| `pipeline` | Run knowledge → evaluate → verify → recommend |
+
+---
+
+## Workspace
+
+Primary interactive experience:
+
+```sh
+./target/release/rivora-workspace
+# or with custom store
+./target/release/rivora-workspace --data-dir .rivora/data
+```
+
+The Workspace lets you:
+
+- create or open an Investigation
+- review status, Observations, Memory, Knowledge
+- evaluate, verify, recommend
+- record outcomes
+- complete or reopen
+
+Non-interactive smoke mode (CI):
+
+```sh
+./target/release/rivora-workspace --smoke
 ```
 
 ---
 
-## Roadmap
+## Connectors
 
-### Foundation
+### Local (production-ready for MVP)
 
-- Vision
-- Principles
-- Architecture
-- Runtime
-- Engineering Object Model
+Read-only observation of a project directory:
 
-### v0.1
+- repository metadata
+- git branch / status
+- recent commits
+- changed files
+- optional `test-output.txt` / `.rivora/test-output.txt`
+- structured event files under `.rivora/events/*.json`
 
-**Memory**
+```sh
+rivora observe --investigation <ID> --local /path/to/project
+```
 
-Build durable engineering memory.
+### GitHub (narrow, read-only)
 
-### v0.2
+- repository metadata
+- pull request metadata (`--pr`)
+- commits
+- check runs
+- linked issue references from PR body
 
-**Knowledge**
+```sh
+export GITHUB_TOKEN=...   # optional for public data; recommended for rate limits
+rivora observe --investigation <ID> --github owner/repo --pr 12
+```
 
-Build shared engineering understanding.
+Offline fixture mode for tests/demos:
 
-### v0.3
+```sh
+rivora observe --investigation <ID> --github-fixture path/to/fixture.json
+```
 
-**Evaluation**
-
-Measure engineering outcomes.
-
-### v0.4
-
-**Verification**
-
-Prove proposed improvements.
-
-### v0.5
-
-**Improvement**
-
-Generate evidence-backed proposals.
-
-### v0.6
-
-**Learning**
-
-Measure what actually improved.
-
-### v0.7
-
-**Capabilities**
-
-Begin shipping capabilities including:
-
-- Adaptive Reliability
-- GitHub
-- Kubernetes
-- Cloud Providers
-- Observability
-- Coding Agents
-- IDEs
+Connectors **only** observe → normalize → produce Observations. They never evaluate, verify, recommend, or learn.
 
 ---
 
-## Philosophy
+## Storage
 
-Rivora follows a few simple principles.
+Local filesystem store under `--data-dir` (default `.rivora/data`):
 
-- Memory is append-only.
-- Knowledge comes from relationships.
-- Evaluation precedes optimization.
-- Verification precedes trust.
-- Humans approve.
-- AI assists.
-- Engineering memory belongs to the user.
+```text
+.rivora/data/investigations/{id}/
+  investigation.json
+  observations/
+  memory/
+  knowledge/
+  evaluations/
+  verifications/
+  recommendations/
+  learning/
+```
 
----
-
-## Current Status
-
-Rivora is currently being rebuilt from first principles.
-
-The project is defining its architecture before implementation.
-
-Current focus:
-
-- RFC-000 Vision
-- RFC-001 Principles
-- RFC-002 Architecture
-- RFC-003 Interaction Model
-- RFC-004 Engineering Object Model
+Memory is append-only. Corrections create new records.
 
 ---
 
-## Contributing
+## Development
 
-We believe good architecture compounds.
+```sh
+cargo fmt --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets --all-features
+cargo build --workspace --release
+```
 
-Before implementing new functionality, we write RFCs, discuss trade-offs, and establish architectural decisions first.
+Follow Red → Green → Refactor. See `.agents/skills/build-rivora/SKILL.md`.
 
-Contributions are welcome.
+### Crate layout
+
+| Crate | Role |
+| --- | --- |
+| `rivora` | Domain, Runtime, Capabilities, local store |
+| `rivora-connectors` | Local + GitHub observation connectors |
+| `rivora-cli` | Thin CLI over Capabilities |
+| `rivora-workspace` | Interactive Workspace over Capabilities |
+
+---
+
+## Documentation
+
+| Document | Purpose |
+| --- | --- |
+| `docs/internal/VISION.md` | Product vision |
+| `docs/internal/PRINCIPLES.md` | Engineering principles |
+| `docs/internal/ARCHITECTURAL_INVARIANTS.md` | Non-negotiable invariants |
+| `docs/internal/IMPLEMENTATION_PLAN.md` | v0.1 implementation plan |
+| `docs/rfc/RFC-000` … `RFC-014` | Foundational RFCs |
+
+---
+
+## Roadmap (post v0.1)
+
+Later versions may add Investigation Graphs, cross-investigation knowledge, collaboration, automation, connector SDKs, and enterprise features. These are **out of scope** for v0.1.
+
+---
+
+## License
+
+Apache-2.0 — see `LICENSE`.

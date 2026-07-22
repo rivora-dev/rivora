@@ -1,0 +1,18 @@
+[package]
+name = "rivora"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rivora Runtime — engineering understanding platform core"
+rust-version.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rivora-connectors = { workspace = true }

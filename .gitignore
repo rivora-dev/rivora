@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+.DS_Store
+.rivora/data/
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Internal working docs (local only; not tracked)
+docs/internal/
