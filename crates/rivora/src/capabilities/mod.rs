@@ -7,17 +7,19 @@ use std::sync::Arc;
 
 use crate::domain::{
     AssistedWorkflow, CompositeCapabilityDefinition, DeploymentReadiness, EngineeringReport,
-    Evaluation, Hypothesis, Investigation, InvestigationId, InvestigationRelationship,
-    InvestigationSummary, KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation,
-    ObservationKind, OutcomeDisposition, PrioritizedRecommendation, RecalledContext,
-    Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
-    VerificationSuggestion,
+    Evaluation, Hypothesis, ImprovementProposal, Investigation, InvestigationId,
+    InvestigationRelationship, InvestigationSummary, KnowledgeObject, LearningOutcome,
+    MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
+    PrioritizedRecommendation, ProposalFeedbackCategory, ProposalListing, ProposalStatus,
+    ProposalTransitionAuthority, RecalledContext, Recommendation, RiskForecast, RootCauseGuidance,
+    TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 use crate::runtime::context::{DetectedPattern, HistoricalTrend};
 use crate::runtime::graph::{RelatedInvestigation, RelationshipExplanation};
 use crate::runtime::learning::RecordOutcomeRequest;
 use crate::runtime::observation::IngestObservationRequest;
+use crate::runtime::proposal::{CreateProposalRequest, RefineProposalRequest};
 use crate::runtime::search::{
     OutcomeFilter, PriorOutcome, RecalledEvidence, SearchQuery, SearchResult,
 };
@@ -622,6 +624,110 @@ impl CapabilityService {
         self.runtime
             .store()
             .list_engineering_reports(&investigation_id)
+    }
+
+    /// Create an explicit concrete Improvement Proposal.
+    pub fn create_improvement_proposal(
+        &self,
+        id: InvestigationId,
+        request: CreateProposalRequest,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ImprovementProposal> {
+        self.runtime.create_improvement_proposal(id, request, actor)
+    }
+
+    /// Get one Proposal snapshot.
+    pub fn get_improvement_proposal(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<ImprovementProposal> {
+        self.runtime.get_improvement_proposal(id, proposal_id)
+    }
+
+    /// List latest Proposals for an Investigation.
+    pub fn list_improvement_proposals(&self, id: InvestigationId) -> RivoraResult<ProposalListing> {
+        self.runtime.list_improvement_proposals(id)
+    }
+
+    /// Explain one Proposal.
+    pub fn explain_improvement_proposal(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime.explain_improvement_proposal(id, proposal_id)
+    }
+
+    /// Transition Proposal status with explicit provenance.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_improvement_proposal_status(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        status: ProposalStatus,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+        authority: ProposalTransitionAuthority,
+    ) -> RivoraResult<ImprovementProposal> {
+        self.runtime.update_improvement_proposal_status(
+            id,
+            proposal_id,
+            status,
+            actor,
+            reason,
+            authority,
+        )
+    }
+
+    /// Attach explicit Proposal feedback as a preserved revision.
+    pub fn add_improvement_proposal_feedback(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        category: ProposalFeedbackCategory,
+        comment: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ImprovementProposal> {
+        self.runtime
+            .add_improvement_proposal_feedback(id, proposal_id, category, comment, actor)
+    }
+
+    /// Refine a Proposal into a new immutable revision.
+    #[allow(clippy::too_many_arguments)]
+    pub fn refine_improvement_proposal(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        request: RefineProposalRequest,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ImprovementProposal> {
+        self.runtime
+            .refine_improvement_proposal(id, proposal_id, request, actor, reason)
+    }
+
+    /// Supersede a Proposal with an explicit replacement.
+    pub fn supersede_improvement_proposal(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        replacement_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ImprovementProposal> {
+        self.runtime
+            .supersede_improvement_proposal(id, proposal_id, replacement_id, actor, reason)
+    }
+
+    /// List every Proposal revision.
+    pub fn list_improvement_proposal_revisions(
+        &self,
+        id: InvestigationId,
+        lineage_id: ObjectId,
+    ) -> RivoraResult<ProposalListing> {
+        self.runtime
+            .list_improvement_proposal_revisions(id, lineage_id)
     }
 }
 

@@ -54,6 +54,10 @@ fn connectors_crate_does_not_import_reasoning_modules() {
                     "generate_recommendation",
                     "verify_conclusion",
                     "record_outcome",
+                    "generate_improvement_proposals",
+                    "compare_improvement_proposals",
+                    "update_improvement_proposal_status",
+                    "apply_improvement_proposal",
                 ] {
                     assert!(
                         !content.contains(forbidden),
@@ -92,6 +96,10 @@ fn cli_and_workspace_remain_thin() {
                     for forbidden in [
                         "fn derive_knowledge",
                         "fn evaluate_investigation",
+                        "fn generate_improvement_proposals",
+                        "fn compare_improvement_proposals",
+                        "fn update_improvement_proposal_status",
+                        "append_proposal(",
                         "append_only",
                         "Memory is append-only",
                     ] {

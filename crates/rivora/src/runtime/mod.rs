@@ -16,6 +16,8 @@ pub mod learning;
 mod memory;
 /// Observation ingestion request types and Runtime methods.
 pub mod observation;
+/// Improvement Proposal lifecycle and reasoning (RFC-020/RFC-021).
+pub mod proposal;
 mod recommendation;
 /// Search and Recall subsystem (RFC-016).
 pub mod search;

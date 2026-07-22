@@ -6,9 +6,10 @@ pub use local::LocalStore;
 
 use crate::domain::{
     AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
-    Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome,
-    MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation, RiskForecast,
-    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
+    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalListing,
+    RecalledContext, Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry,
+    VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 
@@ -177,4 +178,24 @@ pub trait Store: Send + Sync {
         &self,
         id: &InvestigationId,
     ) -> RivoraResult<Vec<EngineeringReport>>;
+
+    /// Append one immutable Improvement Proposal snapshot.
+    fn append_proposal(&self, proposal: &ImprovementProposal) -> RivoraResult<()>;
+
+    /// Load one Proposal snapshot owned by an Investigation.
+    fn load_proposal(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ImprovementProposal>;
+
+    /// List valid Proposal snapshots and isolated corruption diagnostics.
+    fn list_proposals(&self, id: &InvestigationId) -> RivoraResult<ProposalListing>;
+
+    /// List all immutable snapshots in one Proposal lineage.
+    fn list_proposal_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<ProposalListing>;
 }

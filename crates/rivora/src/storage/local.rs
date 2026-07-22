@@ -34,9 +34,10 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::{
     AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
-    Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome,
-    MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation, RiskForecast,
-    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
+    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalListing,
+    RecalledContext, Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry,
+    VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -158,6 +159,57 @@ impl LocalStore {
 
     fn relationship_path(&self, id: &ObjectId) -> PathBuf {
         self.graph_relationships_dir().join(format!("{id}.json"))
+    }
+
+    fn proposals_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("proposals")
+    }
+
+    fn proposal_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
+        self.proposals_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn list_proposals_isolated(&self, id: &InvestigationId) -> RivoraResult<ProposalListing> {
+        use crate::domain::ProposalStorageDiagnostic;
+
+        let dir = self.proposals_dir(id);
+        if !dir.exists() {
+            return Ok(ProposalListing::default());
+        }
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        let mut listing = ProposalListing::default();
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<ImprovementProposal>(&path) {
+                Ok(proposal) if proposal.investigation_id == *id => {
+                    listing.proposals.push(proposal)
+                }
+                Ok(_) => listing.diagnostics.push(ProposalStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "proposal investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(ProposalStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.proposals.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.revision_number.cmp(&b.revision_number))
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(listing)
     }
 }
 
@@ -644,6 +696,54 @@ impl Store for LocalStore {
             self.list_json_dir(&self.inv_dir(id).join("assistance/reports"))?;
         items.sort_by_key(|r| r.generated_at);
         Ok(items)
+    }
+
+    fn append_proposal(&self, proposal: &ImprovementProposal) -> RivoraResult<()> {
+        let path = self.proposal_path(&proposal.investigation_id, &proposal.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "proposal snapshot {} already exists (immutable)",
+                proposal.id
+            )));
+        }
+        self.write_json(&path, proposal)
+    }
+
+    fn load_proposal(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ImprovementProposal> {
+        let path = self.proposal_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let proposal: ImprovementProposal = self.read_json(&path)?;
+        if proposal.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "proposal investigation ownership mismatch",
+            ));
+        }
+        Ok(proposal)
+    }
+
+    fn list_proposals(&self, id: &InvestigationId) -> RivoraResult<ProposalListing> {
+        self.list_proposals_isolated(id)
+    }
+
+    fn list_proposal_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<ProposalListing> {
+        let mut listing = self.list_proposals_isolated(id)?;
+        listing.proposals.retain(|p| p.lineage_id == *lineage_id);
+        listing.proposals.sort_by(|a, b| {
+            a.revision_number
+                .cmp(&b.revision_number)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(listing)
     }
 }
 

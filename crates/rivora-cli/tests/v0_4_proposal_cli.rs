@@ -1,0 +1,368 @@
+//! v0.4 Phase 1 Proposal CLI flows through the shared CapabilityService.
+
+use std::process::{Command, Output};
+
+use tempfile::tempdir;
+
+fn rivora_bin() -> String {
+    env!("CARGO_BIN_EXE_rivora").to_string()
+}
+
+fn run(bin: &str, args: &[&str]) -> Output {
+    Command::new(bin).args(args).output().unwrap()
+}
+
+fn run_ok(bin: &str, args: &[&str]) -> Output {
+    let output = run(bin, args);
+    assert!(
+        output.status.success(),
+        "rivora {} failed: stdout={} stderr={}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    output
+}
+
+fn create_investigation(bin: &str, data: &std::path::Path) -> String {
+    let output = run_ok(
+        bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "investigation",
+            "create",
+            "Proposal CLI",
+        ],
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    value["id"].as_str().unwrap().to_string()
+}
+
+fn create_proposal(
+    bin: &str,
+    data: &std::path::Path,
+    investigation: &str,
+    title: &str,
+) -> serde_json::Value {
+    let output = run_ok(
+        bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "create",
+            "--investigation",
+            investigation,
+            "--title",
+            title,
+            "--summary",
+            "Add deterministic validation",
+            "--rationale",
+            "Verified failures require a bounded validation change",
+            "--category",
+            "reliability",
+            "--priority",
+            "high",
+            "--confidence",
+            "0.8",
+        ],
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn proposal_cli_preserves_lifecycle_feedback_and_revisions() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+    let investigation = create_investigation(&bin, &data);
+
+    let created = create_proposal(
+        &bin,
+        &data,
+        &investigation,
+        "Validate deployment configuration",
+    );
+    let proposal_id = created["id"].as_str().unwrap().to_string();
+    let lineage_id = created["lineage_id"].as_str().unwrap().to_string();
+    assert_eq!(created["status"], "proposed");
+    assert_eq!(
+        created["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let listed = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "list",
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(listed["proposals"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        listed["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let shown = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "proposal",
+            "show",
+            &proposal_id,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let shown = String::from_utf8_lossy(&shown.stdout);
+    assert!(shown.contains("Proposal only — not applied, not implemented, not verified."));
+    assert!(shown.contains("Validate deployment configuration"));
+
+    let explained = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "proposal",
+            "explain",
+            &proposal_id,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    assert!(String::from_utf8_lossy(&explained.stdout)
+        .contains("Proposal only — not applied, not implemented, not verified."));
+
+    let feedback = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "feedback",
+            &proposal_id,
+            "--investigation",
+            &investigation,
+            "--category",
+            "too-broad",
+            "--comment",
+            "Limit this to deployment configuration",
+        ],
+    );
+    let feedback: serde_json::Value = serde_json::from_slice(&feedback.stdout).unwrap();
+    let feedback_id = feedback["id"].as_str().unwrap().to_string();
+    assert_eq!(feedback["feedback"][0]["actor"], "cli");
+
+    let refined = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "refine",
+            &feedback_id,
+            "--investigation",
+            &investigation,
+            "--summary",
+            "Validate deployment configuration only",
+            "--affected-component",
+            "deployment-config",
+            "--test",
+            "Add malformed configuration fixtures",
+            "--reason",
+            "Address explicit scope feedback",
+        ],
+    );
+    let refined: serde_json::Value = serde_json::from_slice(&refined.stdout).unwrap();
+    assert_eq!(refined["summary"], "Validate deployment configuration only");
+    assert_eq!(refined["parent_proposal_id"], feedback_id);
+    assert!(refined["revision_number"].as_u64().unwrap() >= 3);
+
+    let revisions = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "revisions",
+            &lineage_id,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let revisions: serde_json::Value = serde_json::from_slice(&revisions.stdout).unwrap();
+    assert_eq!(revisions["proposals"].as_array().unwrap().len(), 3);
+
+    let rejected = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "reject",
+            refined["id"].as_str().unwrap(),
+            "--investigation",
+            &investigation,
+            "--reason",
+            "Alternative has lower risk",
+        ],
+    );
+    let rejected: serde_json::Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert_eq!(rejected["status"], "rejected");
+    assert_eq!(rejected["transitions"][0]["actor"], "cli");
+    assert_eq!(
+        rejected["transitions"][0]["reason"],
+        "Alternative has lower risk"
+    );
+}
+
+#[test]
+fn proposal_acceptance_is_explicit_and_reason_is_required() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+    let investigation = create_investigation(&bin, &data);
+    let created = create_proposal(&bin, &data, &investigation, "Bounded candidate");
+    let proposal_id = created["id"].as_str().unwrap();
+
+    let missing_reason = run(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "proposal",
+            "accept",
+            proposal_id,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    assert!(!missing_reason.status.success());
+
+    let review = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "status",
+            proposal_id,
+            "--investigation",
+            &investigation,
+            "--status",
+            "under-review",
+            "--reason",
+            "Human review started",
+        ],
+    );
+    let review: serde_json::Value = serde_json::from_slice(&review.stdout).unwrap();
+    let review_id = review["id"].as_str().unwrap();
+
+    let accepted = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "accept",
+            review_id,
+            "--investigation",
+            &investigation,
+            "--reason",
+            "Approved for possible later implementation",
+        ],
+    );
+    let accepted: serde_json::Value = serde_json::from_slice(&accepted.stdout).unwrap();
+    assert_eq!(accepted["status"], "accepted");
+    assert_eq!(accepted["transitions"][1]["actor"], "cli");
+    assert!(accepted.get("implemented").is_none());
+}
+
+#[test]
+fn proposal_cli_exposes_durable_defer_withdraw_and_supersede_actions() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+    let investigation = create_investigation(&bin, &data);
+
+    let deferred = create_proposal(&bin, &data, &investigation, "Deferred candidate");
+    let deferred = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "defer",
+            deferred["id"].as_str().unwrap(),
+            "--investigation",
+            &investigation,
+            "--reason",
+            "Wait for stronger evidence",
+        ],
+    );
+    let deferred: serde_json::Value = serde_json::from_slice(&deferred.stdout).unwrap();
+    assert_eq!(deferred["status"], "deferred");
+
+    let withdrawn = create_proposal(&bin, &data, &investigation, "Withdrawn candidate");
+    let withdrawn = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "withdraw",
+            withdrawn["id"].as_str().unwrap(),
+            "--investigation",
+            &investigation,
+            "--reason",
+            "Owner withdrew the candidate",
+        ],
+    );
+    let withdrawn: serde_json::Value = serde_json::from_slice(&withdrawn.stdout).unwrap();
+    assert_eq!(withdrawn["status"], "withdrawn");
+
+    let original = create_proposal(&bin, &data, &investigation, "Original candidate");
+    let replacement = create_proposal(&bin, &data, &investigation, "Replacement candidate");
+    let superseded = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "supersede",
+            original["id"].as_str().unwrap(),
+            "--investigation",
+            &investigation,
+            "--replacement",
+            replacement["id"].as_str().unwrap(),
+            "--reason",
+            "Replacement has a smaller scope",
+        ],
+    );
+    let superseded: serde_json::Value = serde_json::from_slice(&superseded.stdout).unwrap();
+    assert_eq!(superseded["status"], "superseded");
+    assert_eq!(superseded["superseding_proposal_id"], replacement["id"]);
+
+    let help = run_ok(&bin, &["proposal", "--help"]);
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("apply"));
+}

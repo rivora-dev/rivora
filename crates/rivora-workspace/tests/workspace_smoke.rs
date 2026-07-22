@@ -20,4 +20,7 @@ fn workspace_smoke_completes_investigation() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("workspace smoke ok"));
+    assert!(stdout.contains("Proposal only — not applied, not implemented, not verified."));
+    assert!(stdout.contains("Workspace Proposal"));
+    assert!(!stdout.contains("Apply Proposal"));
 }

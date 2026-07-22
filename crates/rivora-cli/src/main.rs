@@ -10,9 +10,12 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
 use rivora::domain::{
-    InvestigationId, InvestigationStatus, ObjectId, ObservationKind, OutcomeDisposition,
-    RelationshipKind, VerificationResult,
+    Confidence, ImprovementProposal, InvestigationId, InvestigationStatus, ObjectId,
+    ObservationKind, OutcomeDisposition, ProposalCategory, ProposalFeedbackCategory,
+    ProposalPriority, ProposalStatus, ProposalTransitionAuthority, RelationshipKind,
+    VerificationResult,
 };
+use rivora::runtime::proposal::{CreateProposalRequest, RefineProposalRequest};
 use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
 use rivora::storage::LocalStore;
 use rivora::{CapabilityService, Runtime};
@@ -22,6 +25,8 @@ use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
 use rivora_connectors::sentry::SentryConnector;
 use rivora_connectors::NormalizedObservation;
+
+const PROPOSAL_BOUNDARY: &str = "Proposal only — not applied, not implemented, not verified.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -204,6 +209,135 @@ enum Commands {
     },
     /// Generate an engineering report for an Investigation.
     Report {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Durable Improvement Proposal operations (proposal only; never applied).
+    Proposal {
+        #[command(subcommand)]
+        action: ProposalCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProposalCmd {
+    /// Create an explicit concrete Proposal in Proposed state.
+    Create {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        rationale: String,
+        #[arg(long, value_enum)]
+        category: ProposalCategoryArg,
+        #[arg(long, value_enum, default_value = "medium")]
+        priority: ProposalPriorityArg,
+        #[arg(long, default_value_t = 0.5)]
+        confidence: f64,
+    },
+    /// List the latest Proposal revision in each lineage.
+    List {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show one Proposal snapshot.
+    Show {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Explain one Proposal and its no-application boundary.
+    Explain {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Request an explicit Proposal lifecycle transition.
+    Status {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long, value_enum)]
+        status: ProposalStatusArg,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Explicitly accept a Proposal for possible later implementation.
+    Accept {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Explicitly reject a Proposal while preserving it.
+    Reject {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Explicitly defer a Proposal while preserving it.
+    Defer {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Explicitly withdraw a Proposal while preserving it.
+    Withdraw {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Supersede a Proposal with another Proposal in the same Investigation.
+    Supersede {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        replacement: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Refine Proposal content into a preserved successor revision.
+    Refine {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        rationale: Option<String>,
+        #[arg(long = "affected-component")]
+        affected_components: Vec<String>,
+        #[arg(long = "test")]
+        tests: Vec<String>,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Attach explicit feedback as a preserved Proposal revision.
+    Feedback {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long, value_enum)]
+        category: ProposalFeedbackCategoryArg,
+        #[arg(long)]
+        comment: String,
+    },
+    /// List all immutable revisions in a Proposal lineage.
+    Revisions {
+        lineage: String,
         #[arg(long)]
         investigation: String,
     },
@@ -432,6 +566,110 @@ impl From<DispositionArg> for OutcomeDisposition {
             DispositionArg::Ignored => Self::Ignored,
             DispositionArg::Successful => Self::Successful,
             DispositionArg::Unsuccessful => Self::Unsuccessful,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ProposalCategoryArg {
+    Code,
+    Configuration,
+    Testing,
+    Reliability,
+    Performance,
+    Security,
+    Observability,
+    Infrastructure,
+    DeveloperExperience,
+    Process,
+    Documentation,
+}
+
+impl From<ProposalCategoryArg> for ProposalCategory {
+    fn from(value: ProposalCategoryArg) -> Self {
+        match value {
+            ProposalCategoryArg::Code => Self::Code,
+            ProposalCategoryArg::Configuration => Self::Configuration,
+            ProposalCategoryArg::Testing => Self::Testing,
+            ProposalCategoryArg::Reliability => Self::Reliability,
+            ProposalCategoryArg::Performance => Self::Performance,
+            ProposalCategoryArg::Security => Self::Security,
+            ProposalCategoryArg::Observability => Self::Observability,
+            ProposalCategoryArg::Infrastructure => Self::Infrastructure,
+            ProposalCategoryArg::DeveloperExperience => Self::DeveloperExperience,
+            ProposalCategoryArg::Process => Self::Process,
+            ProposalCategoryArg::Documentation => Self::Documentation,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ProposalPriorityArg {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Exploratory,
+}
+
+impl From<ProposalPriorityArg> for ProposalPriority {
+    fn from(value: ProposalPriorityArg) -> Self {
+        match value {
+            ProposalPriorityArg::Critical => Self::Critical,
+            ProposalPriorityArg::High => Self::High,
+            ProposalPriorityArg::Medium => Self::Medium,
+            ProposalPriorityArg::Low => Self::Low,
+            ProposalPriorityArg::Exploratory => Self::Exploratory,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ProposalStatusArg {
+    Proposed,
+    UnderReview,
+}
+
+impl From<ProposalStatusArg> for ProposalStatus {
+    fn from(value: ProposalStatusArg) -> Self {
+        match value {
+            ProposalStatusArg::Proposed => Self::Proposed,
+            ProposalStatusArg::UnderReview => Self::UnderReview,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ProposalFeedbackCategoryArg {
+    TooBroad,
+    TooRisky,
+    TooExpensive,
+    InsufficientEvidence,
+    WrongComponent,
+    MissingAlternative,
+    MissingTest,
+    ViolatesArchitecture,
+    ShouldSplit,
+    ShouldCombine,
+    NeedsVerification,
+    Other,
+}
+
+impl From<ProposalFeedbackCategoryArg> for ProposalFeedbackCategory {
+    fn from(value: ProposalFeedbackCategoryArg) -> Self {
+        match value {
+            ProposalFeedbackCategoryArg::TooBroad => Self::TooBroad,
+            ProposalFeedbackCategoryArg::TooRisky => Self::TooRisky,
+            ProposalFeedbackCategoryArg::TooExpensive => Self::TooExpensive,
+            ProposalFeedbackCategoryArg::InsufficientEvidence => Self::InsufficientEvidence,
+            ProposalFeedbackCategoryArg::WrongComponent => Self::WrongComponent,
+            ProposalFeedbackCategoryArg::MissingAlternative => Self::MissingAlternative,
+            ProposalFeedbackCategoryArg::MissingTest => Self::MissingTest,
+            ProposalFeedbackCategoryArg::ViolatesArchitecture => Self::ViolatesArchitecture,
+            ProposalFeedbackCategoryArg::ShouldSplit => Self::ShouldSplit,
+            ProposalFeedbackCategoryArg::ShouldCombine => Self::ShouldCombine,
+            ProposalFeedbackCategoryArg::NeedsVerification => Self::NeedsVerification,
+            ProposalFeedbackCategoryArg::Other => Self::Other,
         }
     }
 }
@@ -1556,9 +1794,308 @@ fn run() -> Result<(), String> {
                 println!("{}", report.markdown);
             }
         }
+        Commands::Proposal { action } => match action {
+            ProposalCmd::Create {
+                investigation,
+                title,
+                summary,
+                rationale,
+                category,
+                priority,
+                confidence,
+            } => {
+                if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+                    return Err("proposal confidence must be between 0.0 and 1.0".into());
+                }
+                let proposal = caps
+                    .create_improvement_proposal(
+                        parse_inv(&investigation)?,
+                        CreateProposalRequest {
+                            title,
+                            summary,
+                            rationale,
+                            category: category.into(),
+                            priority: priority.into(),
+                            confidence: Confidence::new(confidence),
+                        },
+                        "cli",
+                    )
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::List { investigation } => {
+                let listing = caps
+                    .list_improvement_proposals(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &listing, || {
+                    let mut output = if listing.proposals.is_empty() {
+                        "No Improvement Proposals.".into()
+                    } else {
+                        listing
+                            .proposals
+                            .iter()
+                            .map(|proposal| {
+                                format!(
+                                    "{}  [{} / {}]  {}  (revision {})",
+                                    proposal.id,
+                                    proposal.status.as_str(),
+                                    proposal.priority.as_str(),
+                                    proposal.title,
+                                    proposal.revision_number,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    if !listing.diagnostics.is_empty() {
+                        output.push_str(&format!(
+                            "\nWarning: {} corrupted Proposal record(s) isolated.",
+                            listing.diagnostics.len()
+                        ));
+                    }
+                    output.push('\n');
+                    output.push_str(PROPOSAL_BOUNDARY);
+                    output
+                });
+            }
+            ProposalCmd::Show {
+                proposal,
+                investigation,
+            } => {
+                let proposal = caps
+                    .get_improvement_proposal(parse_inv(&investigation)?, parse_obj(&proposal)?)
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Explain {
+                proposal,
+                investigation,
+            } => {
+                let explanation = caps
+                    .explain_improvement_proposal(parse_inv(&investigation)?, parse_obj(&proposal)?)
+                    .map_err(err)?;
+                print_value(cli.json, &explanation, || explanation.clone());
+            }
+            ProposalCmd::Status {
+                proposal,
+                investigation,
+                status,
+                reason,
+            } => {
+                let proposal =
+                    transition_proposal(&caps, &investigation, &proposal, status.into(), reason)?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Accept {
+                proposal,
+                investigation,
+                reason,
+            } => {
+                let proposal = transition_proposal(
+                    &caps,
+                    &investigation,
+                    &proposal,
+                    ProposalStatus::Accepted,
+                    reason,
+                )?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Reject {
+                proposal,
+                investigation,
+                reason,
+            } => {
+                let proposal = transition_proposal(
+                    &caps,
+                    &investigation,
+                    &proposal,
+                    ProposalStatus::Rejected,
+                    reason,
+                )?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Defer {
+                proposal,
+                investigation,
+                reason,
+            } => {
+                let proposal = transition_proposal(
+                    &caps,
+                    &investigation,
+                    &proposal,
+                    ProposalStatus::Deferred,
+                    reason,
+                )?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Withdraw {
+                proposal,
+                investigation,
+                reason,
+            } => {
+                let proposal = transition_proposal(
+                    &caps,
+                    &investigation,
+                    &proposal,
+                    ProposalStatus::Withdrawn,
+                    reason,
+                )?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Supersede {
+                proposal,
+                investigation,
+                replacement,
+                reason,
+            } => {
+                let proposal = caps
+                    .supersede_improvement_proposal(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                        parse_obj(&replacement)?,
+                        "cli",
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Refine {
+                proposal,
+                investigation,
+                title,
+                summary,
+                rationale,
+                affected_components,
+                tests,
+                reason,
+            } => {
+                let request = RefineProposalRequest {
+                    title,
+                    summary,
+                    rationale,
+                    affected_components: (!affected_components.is_empty())
+                        .then_some(affected_components),
+                    test_strategy: (!tests.is_empty()).then_some(tests),
+                };
+                let proposal = caps
+                    .refine_improvement_proposal(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                        request,
+                        "cli",
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Feedback {
+                proposal,
+                investigation,
+                category,
+                comment,
+            } => {
+                let proposal = caps
+                    .add_improvement_proposal_feedback(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                        category.into(),
+                        comment,
+                        "cli",
+                    )
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &proposal, || print_proposal(&proposal));
+            }
+            ProposalCmd::Revisions {
+                lineage,
+                investigation,
+            } => {
+                let listing = caps
+                    .list_improvement_proposal_revisions(
+                        parse_inv(&investigation)?,
+                        parse_obj(&lineage)?,
+                    )
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &listing, || {
+                    let mut output = listing
+                        .proposals
+                        .iter()
+                        .map(|proposal| {
+                            format!(
+                                "revision {}  {}  [{}]  {}",
+                                proposal.revision_number,
+                                proposal.id,
+                                proposal.status.as_str(),
+                                proposal.title,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    output.push('\n');
+                    output.push_str(PROPOSAL_BOUNDARY);
+                    output
+                });
+            }
+        },
     }
 
     Ok(())
+}
+
+fn transition_proposal(
+    caps: &CapabilityService,
+    investigation: &str,
+    proposal: &str,
+    status: ProposalStatus,
+    reason: String,
+) -> Result<ImprovementProposal, String> {
+    caps.update_improvement_proposal_status(
+        parse_inv(investigation)?,
+        parse_obj(proposal)?,
+        status,
+        "cli",
+        reason,
+        ProposalTransitionAuthority::ExternalCaller,
+    )
+    .map_err(err)
+}
+
+fn print_proposal_value<T: serde::Serialize>(
+    json: bool,
+    value: &T,
+    human: impl FnOnce() -> String,
+) {
+    if !json {
+        println!("{}", human());
+        return;
+    }
+    match serde_json::to_value(value) {
+        Ok(mut structured) => {
+            if let Some(object) = structured.as_object_mut() {
+                object.insert(
+                    "boundary".into(),
+                    serde_json::Value::String(PROPOSAL_BOUNDARY.into()),
+                );
+            }
+            print_value(true, &structured, String::new);
+        }
+        Err(error) => eprintln!("error encoding json: {error}"),
+    }
+}
+
+fn print_proposal(proposal: &ImprovementProposal) -> String {
+    format!(
+        "Proposal {} revision {} [{} / {}]\n  {}\n  summary: {}\n  rationale: {}\n  supporting evidence: {}\n  contradicting evidence: {}\n{}",
+        proposal.id,
+        proposal.revision_number,
+        proposal.status.as_str(),
+        proposal.priority.as_str(),
+        proposal.title,
+        proposal.summary,
+        proposal.rationale,
+        proposal.supporting_evidence.len(),
+        proposal.contradicting_evidence.len(),
+        PROPOSAL_BOUNDARY,
+    )
 }
 
 fn connector_status(name: &str) -> Result<ConnectorStatusReport, String> {

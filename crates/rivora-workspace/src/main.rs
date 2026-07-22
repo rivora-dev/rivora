@@ -11,8 +11,11 @@ use clap::Parser;
 use console::style;
 use dialoguer::{Confirm, Input, Select};
 use rivora::domain::{
-    Investigation, InvestigationId, ObservationKind, OutcomeDisposition, RecommendationStatus,
+    Confidence, ImprovementProposal, Investigation, InvestigationId, ObjectId, ObservationKind,
+    OutcomeDisposition, ProposalCategory, ProposalFeedbackCategory, ProposalPriority,
+    ProposalStatus, ProposalTransitionAuthority, RecommendationStatus,
 };
+use rivora::runtime::proposal::{CreateProposalRequest, RefineProposalRequest};
 use rivora::storage::LocalStore;
 use rivora::{CapabilityService, Runtime};
 use rivora_connectors::github_actions::GitHubActionsConnector;
@@ -264,6 +267,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Recall Related Evidence",
             "Recalled Context",
             "Assistance (composites & reports)",
+            "Improvement Proposals",
             "Back",
         ];
         let choice = Select::new()
@@ -487,6 +491,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             }
             19 => context_session(caps, inv.id)?,
             20 => assistance_session(caps, inv.id)?,
+            21 => proposal_session(caps, inv.id)?,
             _ => break,
         }
     }
@@ -633,6 +638,391 @@ fn assistance_session(caps: &CapabilityService, id: InvestigationId) -> Result<(
         }
     }
     Ok(())
+}
+
+/// Focused Improvement Proposal experience (RFC-020).
+fn proposal_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
+    loop {
+        println!("\n{}", style("Workspace Proposals").bold());
+        println!("Proposal only — not applied, not implemented, not verified.");
+        let actions = vec![
+            "List Proposals",
+            "Create explicit Proposal",
+            "Inspect Proposal",
+            "Mark under review",
+            "Accept Proposal",
+            "Reject Proposal",
+            "Defer Proposal",
+            "Withdraw Proposal",
+            "Add feedback",
+            "Refine Proposal",
+            "Revision history",
+            "Supersede Proposal",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Proposals")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+        match choice {
+            0 => {
+                let listing = caps.list_improvement_proposals(id).map_err(err)?;
+                if listing.proposals.is_empty() {
+                    println!("No Improvement Proposals.");
+                } else {
+                    for proposal in &listing.proposals {
+                        println!(
+                            "  {}  [{} / {}]  {}  (revision {})",
+                            proposal.id,
+                            proposal.status.as_str(),
+                            proposal.priority.as_str(),
+                            proposal.title,
+                            proposal.revision_number,
+                        );
+                    }
+                }
+                if !listing.diagnostics.is_empty() {
+                    println!(
+                        "{} {} corrupted Proposal record(s) were isolated.",
+                        style("Warning:").yellow(),
+                        listing.diagnostics.len()
+                    );
+                }
+            }
+            1 => {
+                let title: String = Input::new()
+                    .with_prompt("Title")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let summary: String = Input::new()
+                    .with_prompt("Concise summary")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let rationale: String = Input::new()
+                    .with_prompt("Evidence-backed rationale")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let categories = [
+                    ProposalCategory::Code,
+                    ProposalCategory::Configuration,
+                    ProposalCategory::Testing,
+                    ProposalCategory::Reliability,
+                    ProposalCategory::Performance,
+                    ProposalCategory::Security,
+                    ProposalCategory::Observability,
+                    ProposalCategory::Infrastructure,
+                    ProposalCategory::DeveloperExperience,
+                    ProposalCategory::Process,
+                    ProposalCategory::Documentation,
+                ];
+                let category_labels: Vec<_> =
+                    categories.iter().map(|value| value.as_str()).collect();
+                let category = Select::new()
+                    .with_prompt("Category")
+                    .items(&category_labels)
+                    .default(0)
+                    .interact()
+                    .map_err(|e| e.to_string())?;
+                let priorities = [
+                    ProposalPriority::Critical,
+                    ProposalPriority::High,
+                    ProposalPriority::Medium,
+                    ProposalPriority::Low,
+                    ProposalPriority::Exploratory,
+                ];
+                let priority_labels: Vec<_> =
+                    priorities.iter().map(|value| value.as_str()).collect();
+                let priority = Select::new()
+                    .with_prompt("Priority")
+                    .items(&priority_labels)
+                    .default(2)
+                    .interact()
+                    .map_err(|e| e.to_string())?;
+                let proposal = caps
+                    .create_improvement_proposal(
+                        id,
+                        CreateProposalRequest {
+                            title,
+                            summary,
+                            rationale,
+                            category: categories[category],
+                            priority: priorities[priority],
+                            confidence: Confidence::neutral(),
+                        },
+                        "workspace",
+                    )
+                    .map_err(err)?;
+                println!("{}", proposal_details(&proposal));
+            }
+            2 => {
+                let proposal = get_workspace_proposal(caps, id)?;
+                println!("{}", proposal_details(&proposal));
+                println!("Supporting evidence:");
+                if proposal.supporting_evidence.is_empty() {
+                    println!("  none recorded");
+                } else {
+                    for evidence in &proposal.supporting_evidence {
+                        println!("  • {} [{}]", evidence.object_id, evidence.scope.as_str());
+                    }
+                }
+                println!("Contradicting evidence:");
+                if proposal.contradicting_evidence.is_empty() {
+                    println!("  none recorded");
+                } else {
+                    for evidence in &proposal.contradicting_evidence {
+                        println!("  • {} [{}]", evidence.object_id, evidence.scope.as_str());
+                    }
+                }
+                println!("Assumptions: {}", proposal.assumptions.join("; "));
+                println!("Risks:");
+                for risk in &proposal.risks {
+                    println!(
+                        "  • [{}] {} — {}",
+                        risk.severity.as_str(),
+                        risk.description,
+                        risk.mitigation
+                    );
+                }
+                println!("Implementation outline:");
+                for step in &proposal.implementation_outline {
+                    println!("  • {step}");
+                }
+                println!("Test strategy:");
+                for test in &proposal.test_strategy {
+                    println!("  • {test}");
+                }
+                println!("Verification claims:");
+                for claim in &proposal.verification_plan.claims {
+                    println!("  • {claim}");
+                }
+            }
+            3 => transition_workspace_proposal(
+                caps,
+                id,
+                ProposalStatus::UnderReview,
+                "Reason for starting review",
+                false,
+            )?,
+            4 => transition_workspace_proposal(
+                caps,
+                id,
+                ProposalStatus::Accepted,
+                "Reason for acceptance",
+                true,
+            )?,
+            5 => transition_workspace_proposal(
+                caps,
+                id,
+                ProposalStatus::Rejected,
+                "Reason for rejection",
+                false,
+            )?,
+            6 => transition_workspace_proposal(
+                caps,
+                id,
+                ProposalStatus::Deferred,
+                "Reason for deferral",
+                false,
+            )?,
+            7 => transition_workspace_proposal(
+                caps,
+                id,
+                ProposalStatus::Withdrawn,
+                "Reason for withdrawal",
+                false,
+            )?,
+            8 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let categories = [
+                    ProposalFeedbackCategory::TooBroad,
+                    ProposalFeedbackCategory::TooRisky,
+                    ProposalFeedbackCategory::TooExpensive,
+                    ProposalFeedbackCategory::InsufficientEvidence,
+                    ProposalFeedbackCategory::WrongComponent,
+                    ProposalFeedbackCategory::MissingAlternative,
+                    ProposalFeedbackCategory::MissingTest,
+                    ProposalFeedbackCategory::ViolatesArchitecture,
+                    ProposalFeedbackCategory::ShouldSplit,
+                    ProposalFeedbackCategory::ShouldCombine,
+                    ProposalFeedbackCategory::NeedsVerification,
+                    ProposalFeedbackCategory::Other,
+                ];
+                let labels: Vec<_> = categories.iter().map(|value| value.as_str()).collect();
+                let category = Select::new()
+                    .with_prompt("Feedback category")
+                    .items(&labels)
+                    .default(0)
+                    .interact()
+                    .map_err(|e| e.to_string())?;
+                let comment: String = Input::new()
+                    .with_prompt("Feedback")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let proposal = caps
+                    .add_improvement_proposal_feedback(
+                        id,
+                        proposal_id,
+                        categories[category],
+                        comment,
+                        "workspace",
+                    )
+                    .map_err(err)?;
+                println!("{}", proposal_details(&proposal));
+            }
+            9 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let title = optional_input("Replacement title (optional)")?;
+                let summary = optional_input("Replacement summary (optional)")?;
+                let rationale = optional_input("Replacement rationale (optional)")?;
+                let components = optional_csv_input("Affected components (comma-separated)")?;
+                let tests = optional_csv_input("Test strategy (comma-separated)")?;
+                let reason: String = Input::new()
+                    .with_prompt("Reason for refinement")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let proposal = caps
+                    .refine_improvement_proposal(
+                        id,
+                        proposal_id,
+                        RefineProposalRequest {
+                            title,
+                            summary,
+                            rationale,
+                            affected_components: components,
+                            test_strategy: tests,
+                        },
+                        "workspace",
+                        reason,
+                    )
+                    .map_err(err)?;
+                println!("{}", proposal_details(&proposal));
+            }
+            10 => {
+                let lineage_id = input_object_id("Proposal lineage id")?;
+                let listing = caps
+                    .list_improvement_proposal_revisions(id, lineage_id)
+                    .map_err(err)?;
+                for proposal in listing.proposals {
+                    println!(
+                        "  revision {}  {}  [{}]  {}",
+                        proposal.revision_number,
+                        proposal.id,
+                        proposal.status.as_str(),
+                        proposal.title,
+                    );
+                }
+            }
+            11 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let replacement_id = input_object_id("Replacement Proposal id")?;
+                let reason: String = Input::new()
+                    .with_prompt("Reason for supersession")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let proposal = caps
+                    .supersede_improvement_proposal(
+                        id,
+                        proposal_id,
+                        replacement_id,
+                        "workspace",
+                        reason,
+                    )
+                    .map_err(err)?;
+                println!("{}", proposal_details(&proposal));
+            }
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+fn input_object_id(prompt: &str) -> Result<ObjectId, String> {
+    let value: String = Input::new()
+        .with_prompt(prompt)
+        .interact_text()
+        .map_err(|e| e.to_string())?;
+    value.parse().map_err(err)
+}
+
+fn get_workspace_proposal(
+    caps: &CapabilityService,
+    investigation_id: InvestigationId,
+) -> Result<ImprovementProposal, String> {
+    let proposal_id = input_object_id("Proposal id")?;
+    caps.get_improvement_proposal(investigation_id, proposal_id)
+        .map_err(err)
+}
+
+fn transition_workspace_proposal(
+    caps: &CapabilityService,
+    investigation_id: InvestigationId,
+    status: ProposalStatus,
+    prompt: &str,
+    confirm_acceptance: bool,
+) -> Result<(), String> {
+    let proposal_id = input_object_id("Proposal id")?;
+    if confirm_acceptance
+        && !Confirm::new()
+            .with_prompt(
+                "Accept this Proposal for possible later implementation? This does not apply it.",
+            )
+            .default(false)
+            .interact()
+            .map_err(|e| e.to_string())?
+    {
+        println!("Acceptance cancelled.");
+        return Ok(());
+    }
+    let reason: String = Input::new()
+        .with_prompt(prompt)
+        .interact_text()
+        .map_err(|e| e.to_string())?;
+    let proposal = caps
+        .update_improvement_proposal_status(
+            investigation_id,
+            proposal_id,
+            status,
+            "workspace",
+            reason,
+            ProposalTransitionAuthority::ExternalCaller,
+        )
+        .map_err(err)?;
+    println!("{}", proposal_details(&proposal));
+    Ok(())
+}
+
+fn optional_input(prompt: &str) -> Result<Option<String>, String> {
+    let value: String = Input::new()
+        .with_prompt(prompt)
+        .allow_empty(true)
+        .interact_text()
+        .map_err(|e| e.to_string())?;
+    Ok((!value.trim().is_empty()).then_some(value))
+}
+
+fn optional_csv_input(prompt: &str) -> Result<Option<Vec<String>>, String> {
+    Ok(optional_input(prompt)?.map(|value| {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect()
+    }))
+}
+
+fn proposal_details(proposal: &ImprovementProposal) -> String {
+    format!(
+        "Workspace Proposal {} revision {} [{} / {}]\n  {}\n  {}\nProposal only — not applied, not implemented, not verified.",
+        proposal.id,
+        proposal.revision_number,
+        proposal.status.as_str(),
+        proposal.priority.as_str(),
+        proposal.title,
+        proposal.summary,
+    )
 }
 
 /// Connector status and fixture ingest (read-only).
@@ -1121,6 +1511,84 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
         .generate_engineering_report(assist_inv.id, "workspace")
         .map_err(err)?;
     assert!(!report.markdown.is_empty());
+
+    // v0.4 Improvement Proposals: Workspace uses the same Capabilities and
+    // preserves feedback, refinement, lifecycle provenance, and boundaries.
+    let proposal = caps
+        .create_improvement_proposal(
+            assist_inv.id,
+            CreateProposalRequest {
+                title: "Validate workflow fixtures".into(),
+                summary: "Add deterministic validation for malformed workflow fixtures".into(),
+                rationale: "The current Investigation contains a failed workflow observation"
+                    .into(),
+                category: ProposalCategory::Reliability,
+                priority: ProposalPriority::High,
+                confidence: Confidence::new(0.8),
+            },
+            "workspace",
+        )
+        .map_err(err)?;
+    assert_eq!(proposal.status, ProposalStatus::Proposed);
+    let feedback = caps
+        .add_improvement_proposal_feedback(
+            assist_inv.id,
+            proposal.id,
+            ProposalFeedbackCategory::TooBroad,
+            "Limit the first revision to workflow fixtures",
+            "workspace",
+        )
+        .map_err(err)?;
+    let refined = caps
+        .refine_improvement_proposal(
+            assist_inv.id,
+            feedback.id,
+            RefineProposalRequest {
+                summary: Some("Validate malformed workflow fixtures".into()),
+                affected_components: Some(vec!["workflow fixtures".into()]),
+                test_strategy: Some(vec!["Add malformed fixture cases".into()]),
+                ..RefineProposalRequest::default()
+            },
+            "workspace",
+            "address explicit scope feedback",
+        )
+        .map_err(err)?;
+    let under_review = caps
+        .update_improvement_proposal_status(
+            assist_inv.id,
+            refined.id,
+            ProposalStatus::UnderReview,
+            "workspace",
+            "explicit smoke review",
+            ProposalTransitionAuthority::ExternalCaller,
+        )
+        .map_err(err)?;
+    let accepted = caps
+        .update_improvement_proposal_status(
+            assist_inv.id,
+            under_review.id,
+            ProposalStatus::Accepted,
+            "workspace",
+            "explicit smoke acceptance for possible later implementation",
+            ProposalTransitionAuthority::ExternalCaller,
+        )
+        .map_err(err)?;
+    assert_eq!(accepted.status, ProposalStatus::Accepted);
+    assert_eq!(
+        caps.list_improvement_proposal_revisions(assist_inv.id, proposal.lineage_id)
+            .map_err(err)?
+            .proposals
+            .len(),
+        5
+    );
+    assert_eq!(
+        caps.list_improvement_proposals(assist_inv.id)
+            .map_err(err)?
+            .proposals[0]
+            .id,
+        accepted.id
+    );
+    println!("{}", proposal_details(&accepted));
     let _ = GitHubActionsConnector::new("owner/repo").status();
     let _ = KubernetesConnector::new("default").status();
     let _ = SentryConnector::new("org", "project").status();
