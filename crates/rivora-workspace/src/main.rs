@@ -133,6 +133,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
 
         let actions = vec![
             "Status overview",
+            "Related Investigations",
             "Observe (manual)",
             "Observe local project",
             "Review Observations / Memory",
@@ -159,7 +160,8 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
 
         match choice {
             0 => show_status(caps, inv.id)?,
-            1 => {
+            1 => relationship_session(caps, inv.id)?,
+            2 => {
                 let summary: String = Input::new()
                     .with_prompt("Summary")
                     .interact_text()
@@ -178,7 +180,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     .map_err(err)?;
                 println!("{} Ingested observation {}", style("✓").green(), obs.id);
             }
-            2 => {
+            3 => {
                 let path: String = Input::new()
                     .with_prompt("Project path")
                     .default(".".into())
@@ -202,7 +204,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                 }
                 println!("{} Local observations ingested", style("✓").green());
             }
-            3 => {
+            4 => {
                 let memory = caps.recall_memory(inv.id).map_err(err)?;
                 if memory.is_empty() {
                     println!("No memory yet.");
@@ -212,13 +214,13 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     }
                 }
             }
-            4 => {
+            5 => {
                 let timeline = caps.generate_timeline(inv.id).map_err(err)?;
                 for e in timeline {
                     println!("  {}  [{}]  {}", e.at.to_rfc3339(), e.source, e.summary);
                 }
             }
-            5 => {
+            6 => {
                 let knowledge = caps.derive_knowledge(inv.id, "workspace").map_err(err)?;
                 println!(
                     "{} Derived {} knowledge object(s)",
@@ -226,12 +228,12 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     knowledge.len()
                 );
             }
-            6 => {
+            7 => {
                 for k in caps.list_knowledge(inv.id).map_err(err)? {
                     println!("  • {:?}  {}", k.kind, k.summary);
                 }
             }
-            7 => {
+            8 => {
                 let evaluations = caps
                     .evaluate_investigation(inv.id, "workspace")
                     .map_err(err)?;
@@ -241,7 +243,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     evaluations.len()
                 );
             }
-            8 => {
+            9 => {
                 for e in caps.list_evaluations(inv.id).map_err(err)? {
                     println!(
                         "  • [{:?}/{}] {} — {}",
@@ -252,7 +254,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     );
                 }
             }
-            9 => {
+            10 => {
                 let receipts = caps.verify_all(inv.id, "workspace").map_err(err)?;
                 println!(
                     "{} Produced {} verification receipt(s)",
@@ -260,12 +262,12 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     receipts.len()
                 );
             }
-            10 => {
+            11 => {
                 for r in caps.list_verifications(inv.id).map_err(err)? {
                     println!("  • [{}] {} — {}", r.result.as_str(), r.subject, r.reason);
                 }
             }
-            11 => {
+            12 => {
                 let recs = caps
                     .generate_recommendation(inv.id, "workspace")
                     .map_err(err)?;
@@ -279,7 +281,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     println!("    {}", r.rationale);
                 }
             }
-            12 => {
+            13 => {
                 for r in caps.list_recommendations(inv.id).map_err(err)? {
                     println!(
                         "  • [{}] {} (confidence {:.0}%)",
@@ -289,7 +291,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     );
                 }
             }
-            13 => {
+            14 => {
                 let recs = caps.list_recommendations(inv.id).map_err(err)?;
                 let rec_id = recs.first().map(|r| r.id);
                 let dispositions = [
@@ -316,7 +318,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     .map_err(err)?;
                 println!("{} Recorded learning {}", style("✓").green(), outcome.id);
             }
-            14 => {
+            15 => {
                 if Confirm::new()
                     .with_prompt("Complete this Investigation?")
                     .default(false)
@@ -329,11 +331,135 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     println!("{} Completed", style("✓").green());
                 }
             }
-            15 => {
+            16 => {
                 inv = caps
                     .reopen_investigation(inv.id, Some("reopened in workspace".into()))
                     .map_err(err)?;
                 println!("{} Reopened ({})", style("✓").green(), inv.status);
+            }
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+/// Related-Investigations sub-loop: list, explain, link, and curate
+/// relationships for the current Investigation (RFC-015).
+fn relationship_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
+    loop {
+        let related = caps.list_related_investigations(id).map_err(err)?;
+        println!("\n{}", style("Related Investigations").bold());
+        if related.is_empty() {
+            println!("  No related Investigations.");
+        } else {
+            for r in &related {
+                println!(
+                    "  • [{}]  {}  [{}]  {}  ({:.0}%, {})",
+                    r.relationship.kind.as_str(),
+                    r.related.id,
+                    r.related.status,
+                    r.related.title,
+                    r.relationship.confidence.value() * 100.0,
+                    r.relationship.confirmation.state.as_str()
+                );
+                println!("      relationship {}", r.relationship.id);
+            }
+        }
+
+        let actions = vec![
+            "Refresh relationships",
+            "Link Investigation",
+            "Explain relationship",
+            "Confirm relationship",
+            "Dismiss relationship",
+            "Unlink explicit link",
+            "Open related Investigation",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Relationships")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+
+        match choice {
+            0 => {
+                let relationships = caps.refresh_relationships(id, "workspace").map_err(err)?;
+                println!(
+                    "{} {} relationship(s)",
+                    style("✓").green(),
+                    relationships.len()
+                );
+            }
+            1 => {
+                let target: String = Input::new()
+                    .with_prompt("Target Investigation id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason: String = Input::new()
+                    .with_prompt("Reason (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason = if reason.trim().is_empty() {
+                    None
+                } else {
+                    Some(reason)
+                };
+                let relationship = caps
+                    .link_investigations(id, target.parse().map_err(err)?, reason, "workspace")
+                    .map_err(err)?;
+                println!("{} Linked ({})", style("✓").green(), relationship.id);
+            }
+            2 => {
+                let rel: String = Input::new()
+                    .with_prompt("Relationship id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let explanation = caps
+                    .explain_relationship(rel.parse().map_err(err)?)
+                    .map_err(err)?;
+                println!("{}", explanation.explanation);
+            }
+            3 => {
+                let rel: String = Input::new()
+                    .with_prompt("Relationship id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let relationship = caps
+                    .confirm_relationship(rel.parse().map_err(err)?, "workspace")
+                    .map_err(err)?;
+                println!("{} Confirmed {}", style("✓").green(), relationship.id);
+            }
+            4 => {
+                let rel: String = Input::new()
+                    .with_prompt("Relationship id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let relationship = caps
+                    .dismiss_relationship(rel.parse().map_err(err)?, "workspace")
+                    .map_err(err)?;
+                println!("{} Dismissed {}", style("✓").green(), relationship.id);
+            }
+            5 => {
+                let rel: String = Input::new()
+                    .with_prompt("Relationship id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                caps.unlink_investigation(rel.parse().map_err(err)?, "workspace")
+                    .map_err(err)?;
+                println!("{} Unlinked", style("✓").green());
+            }
+            6 => {
+                let target: String = Input::new()
+                    .with_prompt("Investigation id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let inv = caps
+                    .open_investigation(target.parse().map_err(err)?)
+                    .map_err(err)?;
+                investigation_session(caps, inv)?;
             }
             _ => break,
         }
@@ -379,6 +505,18 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
             "workspace",
         )
         .map_err(err)?;
+    let _ = caps
+        .ingest_observation(
+            inv.id,
+            ObservationKind::Repository,
+            "Local repository `smoke`",
+            serde_json::json!({"name": "smoke"}),
+            "workspace",
+            Utc::now(),
+            Some("workspace-smoke-repo-1".into()),
+            "workspace",
+        )
+        .map_err(err)?;
     let pipeline = caps.run_full_pipeline(inv.id, "workspace").map_err(err)?;
     assert!(!pipeline.recommendations.is_empty());
     assert_eq!(
@@ -398,6 +536,42 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
     let done = caps
         .complete_investigation(inv.id, Some("smoke complete".into()))
         .map_err(err)?;
+
+    // Investigation Graph: a second investigation over the same
+    // repository must be discoverable as related (RFC-015).
+    let other = caps
+        .create_investigation(
+            "Workspace smoke related",
+            Some("automated".into()),
+            "workspace",
+        )
+        .map_err(err)?;
+    let _ = caps
+        .ingest_observation(
+            other.id,
+            ObservationKind::Repository,
+            "Local repository `smoke`",
+            serde_json::json!({"name": "smoke"}),
+            "workspace",
+            Utc::now(),
+            Some("workspace-smoke-repo-2".into()),
+            "workspace",
+        )
+        .map_err(err)?;
+    let relationships = caps
+        .refresh_relationships(done.id, "workspace")
+        .map_err(err)?;
+    assert!(!relationships.is_empty());
+    let related = caps.list_related_investigations(done.id).map_err(err)?;
+    assert!(
+        related.iter().any(|r| r.related.id == other.id),
+        "expected related investigation in workspace smoke"
+    );
+    let explanation = caps
+        .explain_relationship(related[0].relationship.id)
+        .map_err(err)?;
+    assert!(!explanation.explanation.is_empty());
+
     println!(
         "workspace smoke ok: investigation {} status {}",
         done.id, done.status

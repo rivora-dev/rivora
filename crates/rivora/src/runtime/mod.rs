@@ -1,6 +1,8 @@
 //! Rivora Runtime — single source of engineering reasoning (RFC-005, RFC-014).
 
 mod evaluation;
+/// Investigation Graph subsystem (RFC-015).
+pub mod graph;
 mod investigation;
 mod knowledge;
 /// Learning subsystem request types and Runtime methods.

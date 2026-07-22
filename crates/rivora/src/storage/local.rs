@@ -12,14 +12,21 @@
 //!     verifications/{object_id}.json
 //!     recommendations/{object_id}.json
 //!     learning/{object_id}.json
+//!   graph/
+//!     relationships/{object_id}.json
 //! ```
+//!
+//! The `graph` area (RFC-015) is separate from per-Investigation
+//! directories. It is created lazily on first relationship write, so
+//! stores containing only v0.1 data keep working unchanged.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
-    Evaluation, Investigation, InvestigationId, KnowledgeObject, LearningOutcome, MemoryRecord,
-    ObjectId, Observation, Recommendation, TimelineEntry, VerificationReceipt,
+    Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
+    LearningOutcome, MemoryRecord, ObjectId, Observation, Recommendation, TimelineEntry,
+    VerificationReceipt,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -115,6 +122,25 @@ impl LocalStore {
         self.inv_dir(investigation_id)
             .join(kind)
             .join(format!("{id}.json"))
+    }
+
+    fn graph_relationships_dir(&self) -> PathBuf {
+        self.root.join("graph").join("relationships")
+    }
+
+    /// Create the graph relationship directory on first use.
+    ///
+    /// `open` deliberately does not require this directory so stores
+    /// holding only v0.1 data remain valid.
+    fn ensure_graph_relationships_dir(&self) -> RivoraResult<PathBuf> {
+        let dir = self.graph_relationships_dir();
+        fs::create_dir_all(&dir)
+            .map_err(|e| RivoraError::storage(format!("failed to create graph dir: {e}")))?;
+        Ok(dir)
+    }
+
+    fn relationship_path(&self, id: &ObjectId) -> PathBuf {
+        self.graph_relationships_dir().join(format!("{id}.json"))
     }
 }
 
@@ -370,6 +396,39 @@ impl Store for LocalStore {
         entries.sort_by_key(|e| e.at);
         Ok(entries)
     }
+
+    fn save_relationship(&self, relationship: &InvestigationRelationship) -> RivoraResult<()> {
+        self.ensure_graph_relationships_dir()?;
+        self.write_json(&self.relationship_path(&relationship.id), relationship)
+    }
+
+    fn load_relationship(&self, id: &ObjectId) -> RivoraResult<InvestigationRelationship> {
+        let path = self.relationship_path(id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        self.read_json(&path)
+    }
+
+    fn list_relationships(&self) -> RivoraResult<Vec<InvestigationRelationship>> {
+        let mut items: Vec<InvestigationRelationship> =
+            self.list_json_dir(&self.graph_relationships_dir())?;
+        items.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(items)
+    }
+
+    fn delete_relationship(&self, id: &ObjectId) -> RivoraResult<()> {
+        let path = self.relationship_path(id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        fs::remove_file(&path)
+            .map_err(|e| RivoraError::storage(format!("failed to delete relationship: {e}")))
+    }
 }
 
 #[cfg(test)]
@@ -425,5 +484,79 @@ mod tests {
         let json = serde_json::to_string(&inv).unwrap();
         let back: Investigation = serde_json::from_str(&json).unwrap();
         assert_eq!(back.id, inv.id);
+    }
+
+    #[test]
+    fn relationship_round_trip() {
+        use crate::domain::{
+            Confidence, DerivationMetadata, InvestigationRelationship, RelationshipEvidence,
+            RelationshipKind,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::open(dir.path()).unwrap();
+        let inv_a = InvestigationId::new();
+        let inv_b = InvestigationId::new();
+
+        // v0.1-style store without a graph area lists no relationships.
+        assert!(!store.graph_relationships_dir().exists());
+        assert!(store.list_relationships().unwrap().is_empty());
+
+        let make = |kind: RelationshipKind, key: &str| {
+            InvestigationRelationship::derived(
+                kind,
+                inv_a,
+                inv_b,
+                Confidence::new(0.9),
+                vec![RelationshipEvidence::new("evidence", vec![ObjectId::new()])],
+                DerivationMetadata {
+                    method: "test_v1".into(),
+                    explanation: "test".into(),
+                },
+                Provenance::now("tester", "runtime"),
+                key,
+            )
+        };
+        let rel_a = make(
+            RelationshipKind::SharedRepository,
+            "shared_repository|acme/app",
+        );
+        let rel_b = make(RelationshipKind::SharedCommit, "shared_commit|abc123");
+        store.save_relationship(&rel_a).unwrap();
+        store.save_relationship(&rel_b).unwrap();
+        assert!(store.graph_relationships_dir().exists());
+
+        // Save is an upsert.
+        let mut updated = rel_a.clone();
+        updated.confirmation = crate::domain::RelationshipConfirmation::confirmed("reviewer");
+        store.save_relationship(&updated).unwrap();
+
+        let loaded = store.load_relationship(&rel_a.id).unwrap();
+        assert_eq!(
+            loaded.confirmation.state,
+            crate::domain::ConfirmationState::Confirmed
+        );
+
+        let all = store.list_relationships().unwrap();
+        assert_eq!(all.len(), 2);
+        let mut sorted = all.clone();
+        sorted.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        assert_eq!(all, sorted, "list order must be deterministic");
+
+        // Survives reopen.
+        let reopened = LocalStore::open(dir.path()).unwrap();
+        assert_eq!(reopened.list_relationships().unwrap().len(), 2);
+        assert_eq!(reopened.load_relationship(&rel_b.id).unwrap(), rel_b);
+
+        store.delete_relationship(&rel_a.id).unwrap();
+        let missing = store.load_relationship(&rel_a.id).unwrap_err();
+        assert!(matches!(missing, RivoraError::ObjectNotFound(_)));
+        let gone = store.delete_relationship(&rel_a.id).unwrap_err();
+        assert!(matches!(gone, RivoraError::ObjectNotFound(_)));
+        assert_eq!(store.list_relationships().unwrap().len(), 1);
     }
 }

@@ -10,6 +10,7 @@ mod memory;
 mod observation;
 mod provenance;
 mod recommendation;
+mod relationship;
 mod verification;
 
 pub use evaluation::*;
@@ -22,4 +23,5 @@ pub use memory::*;
 pub use observation::*;
 pub use provenance::*;
 pub use recommendation::*;
+pub use relationship::*;
 pub use verification::*;

@@ -6,11 +6,12 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    Evaluation, Investigation, InvestigationId, KnowledgeObject, LearningOutcome, MemoryRecord,
-    ObjectId, Observation, ObservationKind, OutcomeDisposition, Recommendation, TimelineEntry,
-    VerificationReceipt,
+    Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
+    LearningOutcome, MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
+    Recommendation, TimelineEntry, VerificationReceipt,
 };
 use crate::error::RivoraResult;
+use crate::runtime::graph::{RelatedInvestigation, RelationshipExplanation};
 use crate::runtime::learning::RecordOutcomeRequest;
 use crate::runtime::observation::IngestObservationRequest;
 use crate::runtime::Runtime;
@@ -180,6 +181,78 @@ impl CapabilityService {
     /// List Learning Outcomes.
     pub fn list_learning(&self, id: InvestigationId) -> RivoraResult<Vec<LearningOutcome>> {
         self.runtime.list_learning(id)
+    }
+
+    /// Link Investigations (explicit human-created relationship).
+    pub fn link_investigations(
+        &self,
+        source: InvestigationId,
+        target: InvestigationId,
+        reason: Option<String>,
+        actor: impl Into<String>,
+    ) -> RivoraResult<InvestigationRelationship> {
+        self.runtime
+            .link_investigations(source, target, reason, actor)
+    }
+
+    /// Unlink Investigations (explicit links only).
+    pub fn unlink_investigation(
+        &self,
+        relationship_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<()> {
+        self.runtime.unlink_investigation(relationship_id, actor)
+    }
+
+    /// List Relationships for an Investigation.
+    pub fn list_relationships(
+        &self,
+        id: InvestigationId,
+    ) -> RivoraResult<Vec<InvestigationRelationship>> {
+        self.runtime.list_relationships(id)
+    }
+
+    /// List Related Investigations (dismissed relationships excluded).
+    pub fn list_related_investigations(
+        &self,
+        id: InvestigationId,
+    ) -> RivoraResult<Vec<RelatedInvestigation>> {
+        self.runtime.list_related_investigations(id)
+    }
+
+    /// Explain Investigation Relationship.
+    pub fn explain_relationship(
+        &self,
+        relationship_id: ObjectId,
+    ) -> RivoraResult<RelationshipExplanation> {
+        self.runtime.explain_relationship(relationship_id)
+    }
+
+    /// Refresh Investigation Relationships (deterministic derivation).
+    pub fn refresh_relationships(
+        &self,
+        id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<InvestigationRelationship>> {
+        self.runtime.refresh_relationships(id, actor)
+    }
+
+    /// Confirm Investigation Relationship.
+    pub fn confirm_relationship(
+        &self,
+        relationship_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<InvestigationRelationship> {
+        self.runtime.confirm_relationship(relationship_id, actor)
+    }
+
+    /// Dismiss Investigation Relationship.
+    pub fn dismiss_relationship(
+        &self,
+        relationship_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<InvestigationRelationship> {
+        self.runtime.dismiss_relationship(relationship_id, actor)
     }
 
     /// Complete Investigation.

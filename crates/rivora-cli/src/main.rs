@@ -151,6 +151,25 @@ enum InvestigationCmd {
         #[arg(long)]
         reason: Option<String>,
     },
+    /// List Investigations related to this one (RFC-015).
+    Related { id: String },
+    /// Create an explicit link between two Investigations.
+    Link {
+        source: String,
+        target: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Remove an explicit link (derived relationships refresh instead).
+    Unlink { relationship_id: String },
+    /// Explain why two Investigations are related.
+    Relationship { relationship_id: String },
+    /// Re-derive relationships for an Investigation.
+    RefreshRelationships { id: String },
+    /// Confirm a relationship as relevant.
+    ConfirmRelationship { relationship_id: String },
+    /// Dismiss a relationship as irrelevant.
+    DismissRelationship { relationship_id: String },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -275,6 +294,104 @@ fn run() -> Result<(), String> {
                     .map_err(err)?;
                 print_value(cli.json, &inv, || {
                     format!("Reopened investigation {} ({})", inv.id, inv.status)
+                });
+            }
+            InvestigationCmd::Related { id } => {
+                let related = caps
+                    .list_related_investigations(parse_inv(&id)?)
+                    .map_err(err)?;
+                print_value(cli.json, &related, || {
+                    if related.is_empty() {
+                        "No related Investigations.".into()
+                    } else {
+                        related
+                            .iter()
+                            .map(|r| {
+                                format!(
+                                    "{}  [{}]  {}  [{}]  {}  (confidence {:.0}%, {})",
+                                    r.relationship.id,
+                                    r.relationship.kind.as_str(),
+                                    r.related.id,
+                                    r.related.status,
+                                    r.related.title,
+                                    r.relationship.confidence.value() * 100.0,
+                                    r.relationship.confirmation.state.as_str()
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                });
+            }
+            InvestigationCmd::Link {
+                source,
+                target,
+                reason,
+            } => {
+                let relationship = caps
+                    .link_investigations(parse_inv(&source)?, parse_inv(&target)?, reason, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &relationship, || {
+                    format!(
+                        "Linked {} ↔ {} ({})",
+                        relationship.source_investigation_id,
+                        relationship.target_investigation_id,
+                        relationship.id
+                    )
+                });
+            }
+            InvestigationCmd::Unlink { relationship_id } => {
+                let id = parse_obj(&relationship_id)?;
+                caps.unlink_investigation(id, "cli").map_err(err)?;
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({ "unlinked": id }))
+                            .map_err(|e| e.to_string())?
+                    );
+                } else {
+                    println!("Unlinked {id}");
+                }
+            }
+            InvestigationCmd::Relationship { relationship_id } => {
+                let explanation = caps
+                    .explain_relationship(parse_obj(&relationship_id)?)
+                    .map_err(err)?;
+                print_value(cli.json, &explanation, || explanation.explanation.clone());
+            }
+            InvestigationCmd::RefreshRelationships { id } => {
+                let relationships = caps
+                    .refresh_relationships(parse_inv(&id)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &relationships, || {
+                    let mut out = format!("{} relationship(s):", relationships.len());
+                    for r in &relationships {
+                        out.push_str(&format!(
+                            "\n  [{}]  {} ↔ {}  (confidence {:.0}%, {})",
+                            r.kind.as_str(),
+                            r.source_investigation_id,
+                            r.target_investigation_id,
+                            r.confidence.value() * 100.0,
+                            r.confirmation.state.as_str()
+                        ));
+                    }
+                    out
+                });
+            }
+            InvestigationCmd::ConfirmRelationship { relationship_id } => {
+                let relationship = caps
+                    .confirm_relationship(parse_obj(&relationship_id)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &relationship, || {
+                    format!("Confirmed relationship {}", relationship.id)
+                });
+            }
+            InvestigationCmd::DismissRelationship { relationship_id } => {
+                let relationship = caps
+                    .dismiss_relationship(parse_obj(&relationship_id)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &relationship, || {
+                    format!("Dismissed relationship {}", relationship.id)
                 });
             }
         },

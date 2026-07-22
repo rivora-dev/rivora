@@ -5,8 +5,9 @@ mod local;
 pub use local::LocalStore;
 
 use crate::domain::{
-    Evaluation, Investigation, InvestigationId, KnowledgeObject, LearningOutcome, MemoryRecord,
-    ObjectId, Observation, Recommendation, TimelineEntry, VerificationReceipt,
+    Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
+    LearningOutcome, MemoryRecord, ObjectId, Observation, Recommendation, TimelineEntry,
+    VerificationReceipt,
 };
 use crate::error::RivoraResult;
 
@@ -86,4 +87,16 @@ pub trait Store: Send + Sync {
 
     /// Build a chronological timeline from Memory.
     fn timeline(&self, id: &InvestigationId) -> RivoraResult<Vec<TimelineEntry>>;
+
+    /// Persist a new or updated Investigation Relationship (upsert).
+    fn save_relationship(&self, relationship: &InvestigationRelationship) -> RivoraResult<()>;
+
+    /// Load an Investigation Relationship by id.
+    fn load_relationship(&self, id: &ObjectId) -> RivoraResult<InvestigationRelationship>;
+
+    /// List all Investigation Relationships, ordered deterministically.
+    fn list_relationships(&self) -> RivoraResult<Vec<InvestigationRelationship>>;
+
+    /// Delete an Investigation Relationship by id.
+    fn delete_relationship(&self, id: &ObjectId) -> RivoraResult<()>;
 }
