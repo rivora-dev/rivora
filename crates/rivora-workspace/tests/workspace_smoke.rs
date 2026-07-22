@@ -22,5 +22,8 @@ fn workspace_smoke_completes_investigation() {
     assert!(stdout.contains("workspace smoke ok"));
     assert!(stdout.contains("Proposal only — not applied, not implemented, not verified."));
     assert!(stdout.contains("Workspace Proposal"));
+    assert!(stdout.contains("Workspace Proposal alternatives: 2"));
+    assert!(stdout.contains("Ranking is guidance, not a guaranteed correct implementation."));
+    assert!(stdout.contains("Verification Plan is proposed work; it was not executed."));
     assert!(!stdout.contains("Apply Proposal"));
 }

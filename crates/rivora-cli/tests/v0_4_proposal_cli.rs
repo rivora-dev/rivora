@@ -366,3 +366,171 @@ fn proposal_cli_exposes_durable_defer_withdraw_and_supersede_actions() {
     let help = run_ok(&bin, &["proposal", "--help"]);
     assert!(!String::from_utf8_lossy(&help.stdout).contains("apply"));
 }
+
+#[test]
+fn proposal_cli_generates_compares_prioritizes_and_explains_plans() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+    let investigation = create_investigation(&bin, &data);
+
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "observe",
+            "--investigation",
+            &investigation,
+            "--summary",
+            "Deployment validation failed repeatedly",
+            "--kind",
+            "check_result",
+            "--payload",
+            r#"{"conclusion":"failure","component":"deployment-config"}"#,
+        ],
+    );
+
+    let generated = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "generate",
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let generated: serde_json::Value = serde_json::from_slice(&generated.stdout).unwrap();
+    assert_eq!(generated["proposals"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        generated["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+    let first = generated["proposals"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let second = generated["proposals"][1]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(generated["proposals"][0]["status"], "draft");
+    assert_eq!(
+        generated["proposals"][0]["generation_method"],
+        "deterministic"
+    );
+
+    let compared = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "compare",
+            "--investigation",
+            &investigation,
+            &first,
+            &second,
+        ],
+    );
+    let compared: serde_json::Value = serde_json::from_slice(&compared.stdout).unwrap();
+    assert_eq!(compared["ranked"].as_array().unwrap().len(), 2);
+    assert!(!compared["ranked"][0]["factors"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(compared["explanation"]
+        .as_str()
+        .unwrap()
+        .contains("not guaranteed correct"));
+    assert_eq!(
+        compared["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let prioritized = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "prioritize",
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let prioritized: serde_json::Value = serde_json::from_slice(&prioritized.stdout).unwrap();
+    assert_eq!(prioritized["ranked"].as_array().unwrap().len(), 2);
+
+    let verification = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "verification-plan",
+            &first,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let verification: serde_json::Value = serde_json::from_slice(&verification.stdout).unwrap();
+    assert!(!verification["claims"].as_array().unwrap().is_empty());
+    assert_eq!(
+        verification["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let implementation = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "implementation-plan",
+            &first,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let implementation: serde_json::Value = serde_json::from_slice(&implementation.stdout).unwrap();
+    assert!(!implementation["outline"].as_array().unwrap().is_empty());
+    assert_eq!(
+        implementation["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let provenance = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "provenance",
+            &first,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let provenance: serde_json::Value = serde_json::from_slice(&provenance.stdout).unwrap();
+    assert!(provenance["provenance"]
+        .as_str()
+        .unwrap()
+        .contains("current"));
+    assert!(provenance["provenance"]
+        .as_str()
+        .unwrap()
+        .contains("labeled historical"));
+    assert_eq!(
+        provenance["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+}

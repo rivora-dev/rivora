@@ -257,6 +257,49 @@ pub struct ProposalFeedback {
     pub at: DateTime<Utc>,
 }
 
+/// One inspectable factor used to compare Improvement Proposals.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposalComparisonFactor {
+    /// Stable factor name.
+    pub name: String,
+    /// Documented factor weight.
+    pub weight: f64,
+    /// Weighted contribution.
+    pub contribution: f64,
+    /// Human-readable explanation.
+    pub explanation: String,
+}
+
+/// Ranked comparison view for one Proposal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RankedProposal {
+    /// Proposal snapshot identifier.
+    pub proposal_id: ObjectId,
+    /// One-based rank.
+    pub rank: u32,
+    /// Aggregate presentation score.
+    pub score: f64,
+    /// Inspectable factors.
+    pub factors: Vec<ProposalComparisonFactor>,
+    /// Overall explanation.
+    pub explanation: String,
+}
+
+/// Explainable comparison between bounded Proposal alternatives.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposalComparison {
+    /// Owning Investigation.
+    pub investigation_id: InvestigationId,
+    /// Ranked Proposal views.
+    pub ranked: Vec<RankedProposal>,
+    /// Comparison timestamp.
+    pub compared_at: DateTime<Utc>,
+    /// Versioned deterministic method.
+    pub method: String,
+    /// Boundary-aware summary.
+    pub explanation: String,
+}
+
 /// Durable concrete candidate improvement, never an applied change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImprovementProposal {
@@ -266,6 +309,8 @@ pub struct ImprovementProposal {
     pub investigation_id: InvestigationId,
     /// Stable lineage identifier.
     pub lineage_id: ObjectId,
+    /// Shared opportunity grouping for alternative Proposal lineages.
+    pub alternative_group_id: Option<ObjectId>,
     /// One-based revision number.
     pub revision_number: u32,
     /// Prior immutable snapshot.
@@ -284,6 +329,8 @@ pub struct ImprovementProposal {
     pub status: ProposalStatus,
     /// Priority.
     pub priority: ProposalPriority,
+    /// Inspectable priority explanation.
+    pub priority_explanation: String,
     /// Confidence.
     pub confidence: Confidence,
     /// Expected impact.
@@ -296,6 +343,8 @@ pub struct ImprovementProposal {
     pub supporting_evidence: Vec<EvidenceReference>,
     /// Contradicting evidence.
     pub contradicting_evidence: Vec<EvidenceReference>,
+    /// Every durable input that influenced generation.
+    pub generation_inputs: Vec<EvidenceReference>,
     /// Related Hypotheses.
     pub hypothesis_ids: Vec<ObjectId>,
     /// Related Evaluations.
@@ -376,6 +425,7 @@ impl ImprovementProposal {
             id,
             investigation_id,
             lineage_id: id,
+            alternative_group_id: None,
             revision_number: 1,
             parent_proposal_id: None,
             superseding_proposal_id: None,
@@ -385,12 +435,14 @@ impl ImprovementProposal {
             category,
             status: ProposalStatus::Draft,
             priority,
+            priority_explanation: "Priority supplied by explicit caller.".into(),
             confidence,
             expected_impact: String::new(),
             affected_components: Vec::new(),
             affected_resources: Vec::new(),
             supporting_evidence: Vec::new(),
             contradicting_evidence: Vec::new(),
+            generation_inputs: Vec::new(),
             hypothesis_ids: Vec::new(),
             evaluation_ids: Vec::new(),
             verification_ids: Vec::new(),

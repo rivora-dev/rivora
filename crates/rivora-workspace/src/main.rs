@@ -658,6 +658,11 @@ fn proposal_session(caps: &CapabilityService, id: InvestigationId) -> Result<(),
             "Refine Proposal",
             "Revision history",
             "Supersede Proposal",
+            "Generate Proposal alternatives",
+            "Compare selected Proposals",
+            "Rank latest Proposals",
+            "Inspect implementation and Verification Plans",
+            "Explain generation provenance",
             "Back",
         ];
         let choice = Select::new()
@@ -932,10 +937,109 @@ fn proposal_session(caps: &CapabilityService, id: InvestigationId) -> Result<(),
                     .map_err(err)?;
                 println!("{}", proposal_details(&proposal));
             }
+            12 => {
+                let proposals = caps
+                    .generate_proposal_alternatives(id, "workspace")
+                    .map_err(err)?;
+                println!("Workspace Proposal alternatives: {}", proposals.len());
+                for proposal in proposals {
+                    println!(
+                        "  {}  [{} / {}]  {}\n    {}",
+                        proposal.id,
+                        proposal.status.as_str(),
+                        proposal.priority.as_str(),
+                        proposal.title,
+                        proposal.summary,
+                    );
+                }
+                println!(
+                    "Alternatives are uncertain candidates; none is guaranteed correct or selected for implementation."
+                );
+                println!("Proposal only — not applied, not implemented, not verified.");
+            }
+            13 => {
+                let proposal_ids: String = Input::new()
+                    .with_prompt("Proposal ids to compare (comma-separated, at least two)")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let proposal_ids = proposal_ids
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| value.parse().map_err(err))
+                    .collect::<Result<Vec<ObjectId>, String>>()?;
+                let comparison = caps
+                    .compare_improvement_proposals(id, proposal_ids)
+                    .map_err(err)?;
+                print_workspace_comparison(&comparison);
+            }
+            14 => {
+                let comparison = caps.prioritize_improvement_proposals(id).map_err(err)?;
+                print_workspace_comparison(&comparison);
+            }
+            15 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let outline = caps
+                    .generate_proposal_implementation_outline(id, proposal_id)
+                    .map_err(err)?;
+                let plan = caps
+                    .generate_proposal_verification_plan(id, proposal_id)
+                    .map_err(err)?;
+                println!("Expected implementation scope:");
+                print_workspace_lines(&outline);
+                println!("Verification claims:");
+                print_workspace_lines(&plan.claims);
+                println!("Verification tests and fixtures:");
+                print_workspace_lines(&plan.tests);
+                println!("Verification checks:");
+                print_workspace_lines(&plan.checks);
+                println!("Success criteria:");
+                print_workspace_lines(&plan.success_criteria);
+                println!("Failure criteria:");
+                print_workspace_lines(&plan.failure_criteria);
+                println!("Verification Plan is proposed work; it was not executed.");
+                println!("Proposal only — not applied, not implemented, not verified.");
+            }
+            16 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let explanation = caps
+                    .explain_improvement_proposal_provenance(id, proposal_id)
+                    .map_err(err)?;
+                println!("{explanation}");
+            }
             _ => break,
         }
     }
     Ok(())
+}
+
+fn print_workspace_comparison(comparison: &rivora::domain::ProposalComparison) {
+    for ranked in &comparison.ranked {
+        println!(
+            "{}. {} score={:.3}",
+            ranked.rank, ranked.proposal_id, ranked.score
+        );
+        for factor in &ranked.factors {
+            println!(
+                "    {} weight={:.2} contribution={:.3} — {}",
+                factor.name, factor.weight, factor.contribution, factor.explanation
+            );
+        }
+        println!("    {}", ranked.explanation);
+    }
+    println!("{}", comparison.explanation);
+    println!("Ranking is guidance, not a guaranteed correct implementation.");
+    println!("Proposal only — not applied, not implemented, not verified.");
+}
+
+fn print_workspace_lines(lines: &[String]) {
+    if lines.is_empty() {
+        println!("  none specified");
+    } else {
+        for line in lines {
+            println!("  • {line}");
+        }
+    }
 }
 
 fn input_object_id(prompt: &str) -> Result<ObjectId, String> {
@@ -1589,6 +1693,46 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
         accepted.id
     );
     println!("{}", proposal_details(&accepted));
+
+    let alternatives = caps
+        .generate_proposal_alternatives(assist_inv.id, "workspace")
+        .map_err(err)?;
+    assert_eq!(alternatives.len(), 2);
+    assert!(alternatives
+        .iter()
+        .all(|proposal| proposal.status == ProposalStatus::Draft));
+    println!("Workspace Proposal alternatives: {}", alternatives.len());
+    let comparison = caps
+        .compare_improvement_proposals(
+            assist_inv.id,
+            alternatives.iter().map(|proposal| proposal.id).collect(),
+        )
+        .map_err(err)?;
+    assert_eq!(comparison.ranked.len(), 2);
+    assert!(comparison
+        .ranked
+        .iter()
+        .all(|ranked| !ranked.factors.is_empty()));
+    print_workspace_comparison(&comparison);
+    let prioritized = caps
+        .prioritize_improvement_proposals(assist_inv.id)
+        .map_err(err)?;
+    assert!(prioritized.ranked.len() >= 2);
+    let plan = caps
+        .generate_proposal_verification_plan(assist_inv.id, alternatives[0].id)
+        .map_err(err)?;
+    assert!(!plan.claims.is_empty());
+    let outline = caps
+        .generate_proposal_implementation_outline(assist_inv.id, alternatives[0].id)
+        .map_err(err)?;
+    assert!(!outline.is_empty());
+    let provenance = caps
+        .explain_improvement_proposal_provenance(assist_inv.id, alternatives[0].id)
+        .map_err(err)?;
+    assert!(provenance.contains("current"));
+    assert!(provenance.contains("labeled historical"));
+    println!("Verification Plan is proposed work; it was not executed.");
+    println!("{provenance}");
     let _ = GitHubActionsConnector::new("owner/repo").status();
     let _ = KubernetesConnector::new("default").status();
     let _ = SentryConnector::new("org", "project").status();

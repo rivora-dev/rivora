@@ -221,6 +221,46 @@ enum Commands {
 
 #[derive(Debug, Subcommand)]
 enum ProposalCmd {
+    /// Generate deterministic, evidence-backed Proposal alternatives.
+    Generate {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Generate bounded alternatives for an improvement opportunity.
+    Alternatives {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Compare two or more Proposals with inspectable factors.
+    Compare {
+        #[arg(long)]
+        investigation: String,
+        #[arg(required = true, num_args = 2..)]
+        proposals: Vec<String>,
+    },
+    /// Prioritize the latest Proposals for an Investigation.
+    Prioritize {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show a Proposal's unexecuted Verification Plan.
+    VerificationPlan {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show a Proposal's bounded, unapplied implementation outline.
+    ImplementationPlan {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Explain Proposal generation inputs and temporal provenance.
+    Provenance {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+    },
     /// Create an explicit concrete Proposal in Proposed state.
     Create {
         #[arg(long)]
@@ -1795,6 +1835,118 @@ fn run() -> Result<(), String> {
             }
         }
         Commands::Proposal { action } => match action {
+            ProposalCmd::Generate { investigation } => {
+                let proposals = caps
+                    .generate_improvement_proposals(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_generated_proposals(cli.json, &proposals);
+            }
+            ProposalCmd::Alternatives { investigation } => {
+                let proposals = caps
+                    .generate_proposal_alternatives(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_generated_proposals(cli.json, &proposals);
+            }
+            ProposalCmd::Compare {
+                investigation,
+                proposals,
+            } => {
+                let proposal_ids = proposals
+                    .iter()
+                    .map(|proposal| parse_obj(proposal))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let comparison = caps
+                    .compare_improvement_proposals(parse_inv(&investigation)?, proposal_ids)
+                    .map_err(err)?;
+                print_proposal_comparison(cli.json, &comparison);
+            }
+            ProposalCmd::Prioritize { investigation } => {
+                let comparison = caps
+                    .prioritize_improvement_proposals(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_proposal_comparison(cli.json, &comparison);
+            }
+            ProposalCmd::VerificationPlan {
+                proposal,
+                investigation,
+            } => {
+                let plan = caps
+                    .generate_proposal_verification_plan(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                    )
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &plan, || {
+                    let mut sections = Vec::new();
+                    sections.push(format!("Claims:\n{}", print_lines(&plan.claims)));
+                    sections.push(format!(
+                        "Preconditions:\n{}",
+                        print_lines(&plan.preconditions)
+                    ));
+                    sections.push(format!("Tests:\n{}", print_lines(&plan.tests)));
+                    sections.push(format!("Checks:\n{}", print_lines(&plan.checks)));
+                    sections.push(format!(
+                        "Success criteria:\n{}",
+                        print_lines(&plan.success_criteria)
+                    ));
+                    sections.push(format!(
+                        "Failure criteria:\n{}",
+                        print_lines(&plan.failure_criteria)
+                    ));
+                    sections
+                        .push("Verification Plan is proposed work; it was not executed.".into());
+                    sections.push(PROPOSAL_BOUNDARY.into());
+                    sections.join("\n")
+                });
+            }
+            ProposalCmd::ImplementationPlan {
+                proposal,
+                investigation,
+            } => {
+                let outline = caps
+                    .generate_proposal_implementation_outline(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                    )
+                    .map_err(err)?;
+                if cli.json {
+                    print_value(
+                        true,
+                        &serde_json::json!({
+                            "outline": outline,
+                            "boundary": PROPOSAL_BOUNDARY,
+                        }),
+                        String::new,
+                    );
+                } else {
+                    println!("Implementation outline:\n{}", print_lines(&outline));
+                    println!("Expected scope only; no implementation was applied.");
+                    println!("{PROPOSAL_BOUNDARY}");
+                }
+            }
+            ProposalCmd::Provenance {
+                proposal,
+                investigation,
+            } => {
+                let explanation = caps
+                    .explain_improvement_proposal_provenance(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                    )
+                    .map_err(err)?;
+                if cli.json {
+                    print_value(
+                        true,
+                        &serde_json::json!({
+                            "provenance": explanation,
+                            "boundary": PROPOSAL_BOUNDARY,
+                        }),
+                        String::new,
+                    );
+                } else {
+                    println!("{explanation}");
+                }
+            }
             ProposalCmd::Create {
                 investigation,
                 title,
@@ -2057,6 +2209,68 @@ fn transition_proposal(
         ProposalTransitionAuthority::ExternalCaller,
     )
     .map_err(err)
+}
+
+fn print_generated_proposals(json: bool, proposals: &[ImprovementProposal]) {
+    if json {
+        print_value(
+            true,
+            &serde_json::json!({
+                "proposals": proposals,
+                "boundary": PROPOSAL_BOUNDARY,
+            }),
+            String::new,
+        );
+        return;
+    }
+    println!("Generated {} Proposal alternative(s):", proposals.len());
+    for proposal in proposals {
+        println!(
+            "  {}  [{} / {}]  {}\n    {}",
+            proposal.id,
+            proposal.status.as_str(),
+            proposal.priority.as_str(),
+            proposal.title,
+            proposal.summary,
+        );
+    }
+    println!("Alternatives are uncertain candidates and are not guaranteed correct.");
+    println!("{PROPOSAL_BOUNDARY}");
+}
+
+fn print_proposal_comparison(json: bool, comparison: &rivora::domain::ProposalComparison) {
+    if json {
+        print_proposal_value(true, comparison, String::new);
+        return;
+    }
+    for ranked in &comparison.ranked {
+        println!(
+            "{}. {} score={:.3}",
+            ranked.rank, ranked.proposal_id, ranked.score
+        );
+        for factor in &ranked.factors {
+            println!(
+                "    {} weight={:.2} contribution={:.3} — {}",
+                factor.name, factor.weight, factor.contribution, factor.explanation
+            );
+        }
+        println!("    {}", ranked.explanation);
+    }
+    println!("{}", comparison.explanation);
+    println!("Ranking is guidance, not a guaranteed correct implementation.");
+    println!("{PROPOSAL_BOUNDARY}");
+}
+
+fn print_lines(lines: &[String]) -> String {
+    if lines.is_empty() {
+        "  none specified".into()
+    } else {
+        lines
+            .iter()
+            .map(|line| format!("  • {line}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 fn print_proposal_value<T: serde::Serialize>(

@@ -10,9 +10,10 @@ use crate::domain::{
     Evaluation, Hypothesis, ImprovementProposal, Investigation, InvestigationId,
     InvestigationRelationship, InvestigationSummary, KnowledgeObject, LearningOutcome,
     MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
-    PrioritizedRecommendation, ProposalFeedbackCategory, ProposalListing, ProposalStatus,
-    ProposalTransitionAuthority, RecalledContext, Recommendation, RiskForecast, RootCauseGuidance,
-    TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    PrioritizedRecommendation, ProposalComparison, ProposalFeedbackCategory, ProposalListing,
+    ProposalStatus, ProposalTransitionAuthority, ProposalVerificationPlan, RecalledContext,
+    Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
+    VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 use crate::runtime::context::{DetectedPattern, HistoricalTrend};
@@ -728,6 +729,71 @@ impl CapabilityService {
     ) -> RivoraResult<ProposalListing> {
         self.runtime
             .list_improvement_proposal_revisions(id, lineage_id)
+    }
+
+    /// Generate deterministic bounded Improvement Proposal alternatives.
+    pub fn generate_improvement_proposals(
+        &self,
+        id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<ImprovementProposal>> {
+        self.runtime.generate_improvement_proposals(id, actor)
+    }
+
+    /// Generate alternatives for an improvement opportunity.
+    pub fn generate_proposal_alternatives(
+        &self,
+        id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<ImprovementProposal>> {
+        self.runtime.generate_proposal_alternatives(id, actor)
+    }
+
+    /// Compare Proposals with inspectable factors.
+    pub fn compare_improvement_proposals(
+        &self,
+        id: InvestigationId,
+        proposal_ids: Vec<ObjectId>,
+    ) -> RivoraResult<ProposalComparison> {
+        self.runtime.compare_improvement_proposals(id, proposal_ids)
+    }
+
+    /// Prioritize latest Proposals with inspectable factors.
+    pub fn prioritize_improvement_proposals(
+        &self,
+        id: InvestigationId,
+    ) -> RivoraResult<ProposalComparison> {
+        self.runtime.prioritize_improvement_proposals(id)
+    }
+
+    /// Generate a concrete proposed Verification Plan without execution.
+    pub fn generate_proposal_verification_plan(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<ProposalVerificationPlan> {
+        self.runtime
+            .generate_proposal_verification_plan(id, proposal_id)
+    }
+
+    /// Generate a bounded implementation outline without application.
+    pub fn generate_proposal_implementation_outline(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<Vec<String>> {
+        self.runtime
+            .generate_proposal_implementation_outline(id, proposal_id)
+    }
+
+    /// Explain Proposal input provenance.
+    pub fn explain_improvement_proposal_provenance(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime
+            .explain_improvement_proposal_provenance(id, proposal_id)
     }
 }
 

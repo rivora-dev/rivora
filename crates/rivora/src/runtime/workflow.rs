@@ -58,6 +58,17 @@ pub fn composite_definitions() -> Vec<CompositeCapabilityDefinition> {
                 "summarize_investigation_state".into(),
             ],
         },
+        CompositeCapabilityDefinition {
+            id: "propose_engineering_improvement".into(),
+            name: "Propose Engineering Improvement".into(),
+            description: "Read existing evidence, generate bounded alternatives, compare them, and summarize ranking without accepting or applying a Proposal.".into(),
+            core_capabilities: vec![
+                "recall_proposal_inputs".into(),
+                "generate_improvement_proposals".into(),
+                "compare_improvement_proposals".into(),
+                "summarize_proposal_ranking".into(),
+            ],
+        },
     ]
 }
 
@@ -91,6 +102,16 @@ fn plan_steps(def: &CompositeCapabilityDefinition) -> Vec<WorkflowStep> {
                 "generate_hypotheses" => "Generate ranked hypotheses",
                 "recommend_next_verification" => "Recommend next verification",
                 "generate_root_cause_guidance" => "Produce root-cause guidance",
+                "recall_proposal_inputs" => "Read existing durable Proposal inputs",
+                "generate_improvement_proposals" => {
+                    "Generate bounded Improvement Proposal alternatives"
+                }
+                "compare_improvement_proposals" => {
+                    "Compare Proposal alternatives with inspectable factors"
+                }
+                "summarize_proposal_ranking" => {
+                    "Summarize Proposal ranking without selecting or accepting"
+                }
                 other => other,
             };
             WorkflowStep::planned(
@@ -670,6 +691,107 @@ impl Runtime {
                     vec![guidance.id],
                     guidance.supporting_evidence.clone(),
                     guidance.guidance.clone(),
+                ))
+            }
+            "recall_proposal_inputs" => {
+                let mut ids = Vec::new();
+                ids.extend(
+                    self.store
+                        .list_observations(&investigation_id)?
+                        .iter()
+                        .map(|item| item.id),
+                );
+                ids.extend(
+                    self.store
+                        .list_memory(&investigation_id)?
+                        .iter()
+                        .map(|item| item.id),
+                );
+                ids.extend(
+                    self.store
+                        .list_knowledge(&investigation_id)?
+                        .iter()
+                        .map(|item| item.id),
+                );
+                ids.extend(
+                    self.store
+                        .list_evaluations(&investigation_id)?
+                        .iter()
+                        .map(|item| item.id),
+                );
+                ids.extend(
+                    self.store
+                        .list_verifications(&investigation_id)?
+                        .iter()
+                        .map(|item| item.id),
+                );
+                ids.sort_by_key(|id| id.to_string());
+                ids.dedup();
+                Ok((
+                    Vec::new(),
+                    ids.clone(),
+                    format!(
+                        "Read {} existing durable input(s); no source objects were created or modified.",
+                        ids.len()
+                    ),
+                ))
+            }
+            "generate_improvement_proposals" => {
+                let proposals = self.generate_improvement_proposals(investigation_id, actor)?;
+                let ids: Vec<_> = proposals.iter().map(|proposal| proposal.id).collect();
+                let evidence = proposals
+                    .iter()
+                    .flat_map(|proposal| {
+                        proposal
+                            .generation_inputs
+                            .iter()
+                            .map(|reference| reference.object_id)
+                    })
+                    .collect();
+                Ok((
+                    ids,
+                    evidence,
+                    format!(
+                        "Generated {} bounded Draft Proposal alternative(s); none accepted or applied.",
+                        proposals.len()
+                    ),
+                ))
+            }
+            "compare_improvement_proposals" => {
+                let proposals = self.list_improvement_proposals(investigation_id)?;
+                let ids: Vec<_> = proposals
+                    .proposals
+                    .iter()
+                    .map(|proposal| proposal.id)
+                    .collect();
+                let comparison =
+                    self.compare_improvement_proposals(investigation_id, ids.clone())?;
+                Ok((
+                    Vec::new(),
+                    ids,
+                    format!(
+                        "Compared {} Proposal alternative(s) using {}. Ranking is inspectable guidance only.",
+                        comparison.ranked.len(), comparison.method
+                    ),
+                ))
+            }
+            "summarize_proposal_ranking" => {
+                let comparison = self.prioritize_improvement_proposals(investigation_id)?;
+                let top = comparison
+                    .ranked
+                    .first()
+                    .map(|ranked| ranked.proposal_id.to_string())
+                    .unwrap_or_else(|| "none".into());
+                Ok((
+                    Vec::new(),
+                    comparison
+                        .ranked
+                        .iter()
+                        .map(|ranked| ranked.proposal_id)
+                        .collect(),
+                    format!(
+                        "Top review candidate: {top}. No Proposal was selected, accepted, applied, implemented, or verified."
+                    ),
                 ))
             }
             other => Err(RivoraError::validation(format!(
