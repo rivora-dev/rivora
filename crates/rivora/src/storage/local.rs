@@ -20,6 +20,8 @@
 //!     assistance/verification_suggestions/{object_id}.json
 //!     assistance/root_cause/{object_id}.json
 //!     assistance/reports/{object_id}.json
+//!     proposals/{object_id}.json
+//!     proposal_artifacts/{object_id}.json
 //!   graph/
 //!     relationships/{object_id}.json
 //! ```
@@ -35,9 +37,9 @@ use std::path::{Path, PathBuf};
 use crate::domain::{
     AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
     ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
-    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalListing,
-    RecalledContext, Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry,
-    VerificationReceipt, VerificationSuggestion,
+    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalArtifact,
+    ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
+    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -167,6 +169,15 @@ impl LocalStore {
 
     fn proposal_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
         self.proposals_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn proposal_artifacts_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("proposal_artifacts")
+    }
+
+    fn proposal_artifact_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
+        self.proposal_artifacts_dir(investigation_id)
             .join(format!("{id}.json"))
     }
 
@@ -743,6 +754,62 @@ impl Store for LocalStore {
                 .cmp(&b.revision_number)
                 .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
         });
+        Ok(listing)
+    }
+
+    fn append_proposal_artifact(&self, artifact: &ProposalArtifact) -> RivoraResult<()> {
+        let path = self.proposal_artifact_path(&artifact.investigation_id, &artifact.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "proposal artifact {} already exists",
+                artifact.id
+            )));
+        }
+        self.write_json(&path, artifact)
+    }
+
+    fn list_proposal_artifacts(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ProposalArtifactListing> {
+        use crate::domain::ProposalStorageDiagnostic;
+
+        let dir = self.proposal_artifacts_dir(id);
+        if !dir.exists() {
+            return Ok(ProposalArtifactListing::default());
+        }
+        let entries = fs::read_dir(&dir).map_err(|error| {
+            RivoraError::storage(format!("failed to read dir {}: {error}", dir.display()))
+        })?;
+        let mut listing = ProposalArtifactListing::default();
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                RivoraError::storage(format!("failed to read dir entry: {error}"))
+            })?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<ProposalArtifact>(&path) {
+                Ok(artifact) if artifact.investigation_id == *id => {
+                    listing.artifacts.push(artifact)
+                }
+                Ok(_) => listing.diagnostics.push(ProposalStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "proposal artifact investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(ProposalStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.artifacts.sort_by(|a, b| {
+            a.generated_at
+                .cmp(&b.generated_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(listing)
     }
 }

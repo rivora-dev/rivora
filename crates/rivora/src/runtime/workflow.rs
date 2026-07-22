@@ -758,25 +758,39 @@ impl Runtime {
                 ))
             }
             "compare_improvement_proposals" => {
-                let proposals = self.list_improvement_proposals(investigation_id)?;
-                let ids: Vec<_> = proposals
-                    .proposals
-                    .iter()
-                    .map(|proposal| proposal.id)
-                    .collect();
+                let proposals = self.latest_proposal_alternative_group(investigation_id)?;
+                let ids: Vec<_> = proposals.iter().map(|proposal| proposal.id).collect();
                 let comparison =
                     self.compare_improvement_proposals(investigation_id, ids.clone())?;
+                let factors = comparison
+                    .ranked
+                    .iter()
+                    .map(|ranked| {
+                        let detail = ranked
+                            .factors
+                            .iter()
+                            .map(|factor| format!("{}={:.3}", factor.name, factor.contribution))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{} [{}]", ranked.proposal_id, detail)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 Ok((
                     Vec::new(),
                     ids,
                     format!(
-                        "Compared {} Proposal alternative(s) using {}. Ranking is inspectable guidance only.",
-                        comparison.ranked.len(), comparison.method
+                        "Compared {} Proposal alternative(s) using {}. Factors: {}. Ranking is inspectable guidance only.",
+                        comparison.ranked.len(), comparison.method, factors
                     ),
                 ))
             }
             "summarize_proposal_ranking" => {
-                let comparison = self.prioritize_improvement_proposals(investigation_id)?;
+                let proposals = self.latest_proposal_alternative_group(investigation_id)?;
+                let comparison = self.compare_improvement_proposals(
+                    investigation_id,
+                    proposals.iter().map(|proposal| proposal.id).collect(),
+                )?;
                 let top = comparison
                     .ranked
                     .first()

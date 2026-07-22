@@ -300,6 +300,66 @@ pub struct ProposalComparison {
     pub explanation: String,
 }
 
+/// Durable human-readable and structured Proposal artifact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposalArtifact {
+    /// Artifact identifier.
+    pub id: ObjectId,
+    /// Owning Investigation.
+    pub investigation_id: InvestigationId,
+    /// Source Proposal snapshot.
+    pub proposal_id: ObjectId,
+    /// Sanitized structured Proposal representation.
+    pub proposal: ImprovementProposal,
+    /// Sanitized immutable lineage snapshots in revision order.
+    pub revisions: Vec<ImprovementProposal>,
+    /// Isolated corrupt revision records that may make history incomplete.
+    #[serde(default)]
+    pub revision_diagnostics: Vec<ProposalStorageDiagnostic>,
+    /// Deterministically ordered Markdown.
+    pub markdown: String,
+    /// Explicit no-application statement.
+    pub boundary: String,
+    /// Artifact creation timestamp.
+    pub generated_at: DateTime<Utc>,
+    /// Provenance.
+    pub provenance: Provenance,
+}
+
+/// Valid durable Proposal artifacts plus isolated-record diagnostics.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ProposalArtifactListing {
+    /// Valid artifacts, deterministically ordered.
+    pub artifacts: Vec<ProposalArtifact>,
+    /// Corrupt or foreign sibling records that were isolated.
+    pub diagnostics: Vec<ProposalStorageDiagnostic>,
+}
+
+/// Trace from current evidence through an Improvement Proposal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposalTrace {
+    /// Owning Investigation.
+    pub investigation_id: InvestigationId,
+    /// Observation identifiers.
+    pub observation_ids: Vec<ObjectId>,
+    /// Memory identifiers.
+    pub memory_ids: Vec<ObjectId>,
+    /// Knowledge identifiers.
+    pub knowledge_ids: Vec<ObjectId>,
+    /// Evaluation identifiers.
+    pub evaluation_ids: Vec<ObjectId>,
+    /// Verification Receipt identifiers.
+    pub verification_ids: Vec<ObjectId>,
+    /// Recommendation identifiers.
+    pub recommendation_ids: Vec<ObjectId>,
+    /// Proposal snapshot identifier.
+    pub proposal_id: ObjectId,
+    /// Optional manually supplied inert external implementation reference.
+    pub external_implementation_reference: Option<String>,
+    /// Boundary explanation.
+    pub explanation: String,
+}
+
 /// Durable concrete candidate improvement, never an applied change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImprovementProposal {

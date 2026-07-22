@@ -1,6 +1,6 @@
 # RFC-021: Proposal Generation, Comparison, Planning, and Export
 
-**Status:** Proposed  
+**Status:** Proposed
 **Target Version:** v0.4
 
 # Purpose
@@ -28,6 +28,17 @@ Suggested or dismissed Recalled Context never influences generation.
 Unverified Hypotheses remain labeled unverified. Historical evidence remains
 labeled historical.
 
+Generation requires at least one durable evidence or assistance input; an
+Investigation title alone is not an improvement opportunity. Every input is
+recorded separately from its evidence role. Supported or verified Hypotheses
+and passing Verification Receipts may support a Proposal. Contradicted or
+rejected Hypotheses, failed receipts, and unsuccessful outcomes contradict it.
+Inconclusive or otherwise neutral records remain generation inputs without
+being mislabeled as support. Attached Recalled Context records themselves are
+current provenance inputs, while their selected source objects remain labeled
+historical. Prior Proposal-generation workflows are excluded to avoid circular
+provenance.
+
 The baseline identifies a verified or evidence-backed opportunity and emits a
 smallest-useful-change alternative plus at least one bounded alternative. Each
 Proposal records the versioned derivation method and every influencing object.
@@ -38,21 +49,23 @@ confidence source.
 
 # Alternatives and Comparison
 
-Alternatives are independent durable Proposals in a shared lineage. Each
-records benefit, effort, implementation risk, verification complexity,
-reversibility, architectural fit, evidence strength, and drawbacks.
+Alternatives are independent durable Proposal lineages grouped by a shared
+improvement-opportunity identifier. Each records benefit, effort,
+implementation risk, verification complexity, reversibility, architectural
+fit, evidence strength, and drawbacks. Revisions stay within one lineage and
+never collapse alternative histories.
 
 Comparison returns ordered views, not an unexplained winner. Each view exposes
 factor name, weight, contribution, and explanation. MVP factors are:
 
-* evidence strength and contradiction level
-* expected impact and risk reduction
-* effort and scope size
-* architectural fit and backward compatibility
+* evidence strength
+* contradiction level
+* expected impact and priority rationale
+* implementation effort
+* generation-method architectural fit
 * reversibility
 * verification feasibility
-* labeled historical success or failure
-* urgency and dependency count
+* labeled historical successful, unsuccessful, rejected, accepted, or ignored outcomes
 
 Scores are presentation aids. Deterministic ties use Proposal id. The Runtime
 prefers the smallest alternative that addresses the supported need; it never
@@ -96,6 +109,10 @@ recall existing proposal inputs
 It uses approved Core Capabilities only. It contains no unrestricted loop, no
 acceptance step, and no application or external mutation step.
 
+Each execution compares and summarizes only the alternative group it just
+generated. Factor contributions are preserved in the durable workflow step
+notes; prior opportunities and manual Proposals cannot enter that ranking.
+
 # Artifacts and Handoff
 
 The Runtime renders deterministic Markdown and structured JSON-compatible
@@ -103,6 +120,14 @@ artifacts from a durable Proposal. Artifacts include status, evidence on both
 sides, historical labels, assumptions, scope, alternatives, plans, risks,
 success criteria, unresolved questions, provenance, revisions, and a visible
 no-application statement.
+
+Artifacts contain the sanitized lineage snapshots in revision order. Markdown
+renders snapshot and parent identifiers, actor, update time, refinement reason,
+transition provenance, and feedback provenance without repeating cumulative
+events on later snapshots. Corrupt Proposal revisions are isolated and exposed
+as artifact diagnostics with a visible incomplete-history warning. Corrupt or
+foreign artifact siblings do not prevent valid artifacts in the owning
+Investigation from loading and are returned as listing diagnostics.
 
 The coding-agent handoff is text only and must state:
 

@@ -88,7 +88,7 @@ fn proposal_cli_preserves_lifecycle_feedback_and_revisions() {
     );
     let proposal_id = created["id"].as_str().unwrap().to_string();
     let lineage_id = created["lineage_id"].as_str().unwrap().to_string();
-    assert_eq!(created["status"], "proposed");
+    assert_eq!(created["status"], "draft");
     assert_eq!(
         created["boundary"],
         "Proposal only — not applied, not implemented, not verified."
@@ -254,7 +254,7 @@ fn proposal_acceptance_is_explicit_and_reason_is_required() {
     );
     assert!(!missing_reason.status.success());
 
-    let review = run_ok(
+    let proposed = run_ok(
         &bin,
         &[
             "--data-dir",
@@ -263,6 +263,25 @@ fn proposal_acceptance_is_explicit_and_reason_is_required() {
             "proposal",
             "status",
             proposal_id,
+            "--investigation",
+            &investigation,
+            "--status",
+            "proposed",
+            "--reason",
+            "Human submitted the Draft",
+        ],
+    );
+    let proposed: serde_json::Value = serde_json::from_slice(&proposed.stdout).unwrap();
+    let proposed_id = proposed["id"].as_str().unwrap();
+    let review = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "status",
+            proposed_id,
             "--investigation",
             &investigation,
             "--status",
@@ -291,7 +310,7 @@ fn proposal_acceptance_is_explicit_and_reason_is_required() {
     );
     let accepted: serde_json::Value = serde_json::from_slice(&accepted.stdout).unwrap();
     assert_eq!(accepted["status"], "accepted");
-    assert_eq!(accepted["transitions"][1]["actor"], "cli");
+    assert_eq!(accepted["transitions"][2]["actor"], "cli");
     assert!(accepted.get("implemented").is_none());
 }
 
@@ -533,4 +552,146 @@ fn proposal_cli_generates_compares_prioritizes_and_explains_plans() {
         provenance["boundary"],
         "Proposal only — not applied, not implemented, not verified."
     );
+}
+
+#[test]
+fn proposal_cli_exports_handoff_portfolio_and_trace_through_capabilities() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+    let investigation = create_investigation(&bin, &data);
+    let created = create_proposal(
+        &bin,
+        &data,
+        &investigation,
+        "Export bounded deployment validation",
+    );
+    let proposal_id = created["id"].as_str().unwrap();
+
+    let markdown = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "proposal",
+            "export",
+            proposal_id,
+            "--investigation",
+            &investigation,
+            "--format",
+            "markdown",
+        ],
+    );
+    let markdown = String::from_utf8_lossy(&markdown.stdout);
+    assert!(markdown.contains("# Improvement Proposal: Export bounded deployment validation"));
+    assert!(markdown.contains("Proposal only — not applied, not implemented, not verified."));
+
+    let structured = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "proposal",
+            "export",
+            proposal_id,
+            "--investigation",
+            &investigation,
+            "--format",
+            "json",
+        ],
+    );
+    let structured: serde_json::Value = serde_json::from_slice(&structured.stdout).unwrap();
+    assert_eq!(structured["proposal_id"], proposal_id);
+    assert_eq!(structured["proposal"]["title"], created["title"]);
+    assert_eq!(
+        structured["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let handoff = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "proposal",
+            "handoff",
+            proposal_id,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let handoff = String::from_utf8_lossy(&handoff.stdout);
+    assert!(handoff.contains("This is an implementation proposal."));
+    assert!(handoff.contains("Do not exceed the approved Proposal scope."));
+    assert!(handoff.contains("Proposal only — not applied, not implemented, not verified."));
+
+    let portfolio = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "portfolio",
+            "--investigation",
+            &investigation,
+            "--priority",
+            "high",
+            "--category",
+            "reliability",
+            "--affected-component",
+            "runtime",
+        ],
+    );
+    let portfolio: serde_json::Value = serde_json::from_slice(&portfolio.stdout).unwrap();
+    assert_eq!(portfolio["proposals"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        portfolio["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let portfolio = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "portfolio",
+            "--investigation",
+            &investigation,
+            "--priority",
+            "high",
+            "--category",
+            "reliability",
+        ],
+    );
+    let portfolio: serde_json::Value = serde_json::from_slice(&portfolio.stdout).unwrap();
+    assert_eq!(portfolio["proposals"].as_array().unwrap().len(), 1);
+    assert_eq!(portfolio["proposals"][0]["id"], proposal_id);
+
+    let trace = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "proposal",
+            "trace",
+            proposal_id,
+            "--investigation",
+            &investigation,
+        ],
+    );
+    let trace: serde_json::Value = serde_json::from_slice(&trace.stdout).unwrap();
+    assert_eq!(trace["proposal_id"], proposal_id);
+    assert_eq!(
+        trace["boundary"],
+        "Proposal only — not applied, not implemented, not verified."
+    );
+
+    let help = run_ok(&bin, &["proposal", "export", "--help"]);
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(!help.contains("output-path"));
+    assert!(!help.contains("apply"));
 }

@@ -100,21 +100,40 @@ fn cli_and_workspace_remain_thin() {
                         "fn compare_improvement_proposals",
                         "fn update_improvement_proposal_status",
                         "append_proposal(",
-                        "append_only",
-                        "Memory is append-only",
+                        ".runtime()",
+                        ".store()",
                     ] {
-                        // Allow comments mentioning architecture, forbid function definitions.
-                        if forbidden.starts_with("fn ") {
-                            assert!(
-                                !content.contains(forbidden),
-                                "{} must not define reasoning function `{forbidden}`",
-                                path.display()
-                            );
-                        }
+                        assert!(
+                            !content.contains(forbidden),
+                            "{} must not own or bypass Capability behavior `{forbidden}`",
+                            path.display()
+                        );
                     }
-                    let _ = content;
                 }
             }
         }
+    }
+}
+
+/// Proposal generation and export may persist Rivora documents, but cannot apply changes.
+#[test]
+fn proposal_runtime_has_no_implementation_or_external_mutation_primitive() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(manifest_dir.join("src/runtime/proposal.rs")).unwrap();
+    for forbidden in [
+        "std::process::Command",
+        "std::fs::write",
+        "File::create",
+        "OpenOptions",
+        "fn apply_improvement_proposal",
+        "fn invoke_coding_agent",
+        "fn create_branch",
+        "fn create_pull_request",
+        "fn deploy",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "Proposal Runtime must not contain mutation primitive `{forbidden}`"
+        );
     }
 }

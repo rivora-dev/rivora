@@ -15,7 +15,9 @@ use rivora::domain::{
     ProposalPriority, ProposalStatus, ProposalTransitionAuthority, RelationshipKind,
     VerificationResult,
 };
-use rivora::runtime::proposal::{CreateProposalRequest, RefineProposalRequest};
+use rivora::runtime::proposal::{
+    CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
+};
 use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
 use rivora::storage::LocalStore;
 use rivora::{CapabilityService, Runtime};
@@ -261,7 +263,44 @@ enum ProposalCmd {
         #[arg(long)]
         investigation: String,
     },
-    /// Create an explicit concrete Proposal in Proposed state.
+    /// Export a durable Proposal artifact to stdout without modifying a repository.
+    Export {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+        #[arg(long, value_enum, default_value = "markdown")]
+        format: ProposalExportFormatArg,
+    },
+    /// Generate a bounded coding-agent implementation handoff as text only.
+    Handoff {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Filter the Investigation-level Proposal portfolio.
+    Portfolio {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long, value_enum)]
+        status: Option<ProposalPortfolioStatusArg>,
+        #[arg(long, value_enum)]
+        priority: Option<ProposalPriorityArg>,
+        #[arg(long, value_enum)]
+        category: Option<ProposalCategoryArg>,
+        #[arg(long)]
+        source_recommendation: Option<String>,
+        #[arg(long)]
+        affected_component: Option<String>,
+        #[arg(long)]
+        unresolved_high_priority: bool,
+    },
+    /// Trace durable evidence and reasoning objects through a Proposal.
+    Trace {
+        proposal: String,
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Create an explicit candidate (Draft unless validated evidence is cited).
     Create {
         #[arg(long)]
         investigation: String,
@@ -277,6 +316,16 @@ enum ProposalCmd {
         priority: ProposalPriorityArg,
         #[arg(long, default_value_t = 0.5)]
         confidence: f64,
+        #[arg(long = "supporting-evidence")]
+        supporting_evidence: Vec<String>,
+        #[arg(long = "contradicting-evidence")]
+        contradicting_evidence: Vec<String>,
+        #[arg(long = "source-recommendation")]
+        source_recommendations: Vec<String>,
+        #[arg(long = "affected-component")]
+        affected_components: Vec<String>,
+        #[arg(long = "affected-resource")]
+        affected_resources: Vec<String>,
     },
     /// List the latest Proposal revision in each lineage.
     List {
@@ -650,6 +699,39 @@ enum ProposalPriorityArg {
     Medium,
     Low,
     Exploratory,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ProposalExportFormatArg {
+    Markdown,
+    Json,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ProposalPortfolioStatusArg {
+    Draft,
+    Proposed,
+    UnderReview,
+    Accepted,
+    Rejected,
+    Deferred,
+    Superseded,
+    Withdrawn,
+}
+
+impl From<ProposalPortfolioStatusArg> for ProposalStatus {
+    fn from(value: ProposalPortfolioStatusArg) -> Self {
+        match value {
+            ProposalPortfolioStatusArg::Draft => Self::Draft,
+            ProposalPortfolioStatusArg::Proposed => Self::Proposed,
+            ProposalPortfolioStatusArg::UnderReview => Self::UnderReview,
+            ProposalPortfolioStatusArg::Accepted => Self::Accepted,
+            ProposalPortfolioStatusArg::Rejected => Self::Rejected,
+            ProposalPortfolioStatusArg::Deferred => Self::Deferred,
+            ProposalPortfolioStatusArg::Superseded => Self::Superseded,
+            ProposalPortfolioStatusArg::Withdrawn => Self::Withdrawn,
+        }
+    }
 }
 
 impl From<ProposalPriorityArg> for ProposalPriority {
@@ -1947,6 +2029,111 @@ fn run() -> Result<(), String> {
                     println!("{explanation}");
                 }
             }
+            ProposalCmd::Export {
+                proposal,
+                investigation,
+                format,
+            } => {
+                let artifact = caps
+                    .generate_proposal_artifact(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                        "cli",
+                    )
+                    .map_err(err)?;
+                match format {
+                    ProposalExportFormatArg::Markdown => println!("{}", artifact.markdown),
+                    ProposalExportFormatArg::Json => {
+                        print_value(true, &artifact, String::new);
+                    }
+                }
+            }
+            ProposalCmd::Handoff {
+                proposal,
+                investigation,
+            } => {
+                let handoff = caps
+                    .generate_coding_agent_handoff(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                    )
+                    .map_err(err)?;
+                println!("{handoff}");
+            }
+            ProposalCmd::Portfolio {
+                investigation,
+                status,
+                priority,
+                category,
+                source_recommendation,
+                affected_component,
+                unresolved_high_priority,
+            } => {
+                let proposals = caps
+                    .proposal_portfolio(
+                        parse_inv(&investigation)?,
+                        ProposalPortfolioFilter {
+                            status: status.map(Into::into),
+                            priority: priority.map(Into::into),
+                            category: category.map(Into::into),
+                            source_recommendation_id: source_recommendation
+                                .as_deref()
+                                .map(parse_obj)
+                                .transpose()?,
+                            affected_component,
+                            unresolved_high_priority,
+                        },
+                    )
+                    .map_err(err)?;
+                if cli.json {
+                    print_value(
+                        true,
+                        &serde_json::json!({
+                            "proposals": proposals,
+                            "boundary": PROPOSAL_BOUNDARY,
+                        }),
+                        String::new,
+                    );
+                } else {
+                    if proposals.is_empty() {
+                        println!("No matching Improvement Proposals.");
+                    } else {
+                        for proposal in proposals {
+                            println!(
+                                "{}  [{} / {}]  {}  (revision {})",
+                                proposal.id,
+                                proposal.status.as_str(),
+                                proposal.priority.as_str(),
+                                proposal.title,
+                                proposal.revision_number,
+                            );
+                        }
+                    }
+                    println!("{PROPOSAL_BOUNDARY}");
+                }
+            }
+            ProposalCmd::Trace {
+                proposal,
+                investigation,
+            } => {
+                let trace = caps
+                    .trace_improvement_proposal(parse_inv(&investigation)?, parse_obj(&proposal)?)
+                    .map_err(err)?;
+                print_proposal_value(cli.json, &trace, || {
+                    format!(
+                        "Observation ({}) → Memory ({}) → Knowledge ({}) → Evaluation ({}) → Verification ({}) → Recommendation ({}) → Improvement Proposal {}\n{}\n{}",
+                        trace.observation_ids.len(),
+                        trace.memory_ids.len(),
+                        trace.knowledge_ids.len(),
+                        trace.evaluation_ids.len(),
+                        trace.verification_ids.len(),
+                        trace.recommendation_ids.len(),
+                        trace.proposal_id,
+                        trace.explanation,
+                        PROPOSAL_BOUNDARY,
+                    )
+                });
+            }
             ProposalCmd::Create {
                 investigation,
                 title,
@@ -1955,6 +2142,11 @@ fn run() -> Result<(), String> {
                 category,
                 priority,
                 confidence,
+                supporting_evidence,
+                contradicting_evidence,
+                source_recommendations,
+                affected_components,
+                affected_resources,
             } => {
                 if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
                     return Err("proposal confidence must be between 0.0 and 1.0".into());
@@ -1969,6 +2161,20 @@ fn run() -> Result<(), String> {
                             category: category.into(),
                             priority: priority.into(),
                             confidence: Confidence::new(confidence),
+                            supporting_evidence_ids: supporting_evidence
+                                .iter()
+                                .map(|value| parse_obj(value))
+                                .collect::<Result<Vec<_>, _>>()?,
+                            contradicting_evidence_ids: contradicting_evidence
+                                .iter()
+                                .map(|value| parse_obj(value))
+                                .collect::<Result<Vec<_>, _>>()?,
+                            source_recommendation_ids: source_recommendations
+                                .iter()
+                                .map(|value| parse_obj(value))
+                                .collect::<Result<Vec<_>, _>>()?,
+                            affected_components,
+                            affected_resources,
                         },
                         "cli",
                     )
@@ -2297,8 +2503,13 @@ fn print_proposal_value<T: serde::Serialize>(
 }
 
 fn print_proposal(proposal: &ImprovementProposal) -> String {
+    let implementation = proposal
+        .external_implementation_reference
+        .as_deref()
+        .map(|reference| format!("manually referenced as {reference}; not verified"))
+        .unwrap_or_else(|| "not recorded".into());
     format!(
-        "Proposal {} revision {} [{} / {}]\n  {}\n  summary: {}\n  rationale: {}\n  supporting evidence: {}\n  contradicting evidence: {}\n{}",
+        "Proposal {} revision {} [{} / {}]\n  {}\n  summary: {}\n  rationale: {}\n  supporting evidence: {}\n  contradicting evidence: {}\n  implemented externally: {}\n  verified outcome: not established by Proposal state\n{}",
         proposal.id,
         proposal.revision_number,
         proposal.status.as_str(),
@@ -2308,6 +2519,7 @@ fn print_proposal(proposal: &ImprovementProposal) -> String {
         proposal.rationale,
         proposal.supporting_evidence.len(),
         proposal.contradicting_evidence.len(),
+        implementation,
         PROPOSAL_BOUNDARY,
     )
 }

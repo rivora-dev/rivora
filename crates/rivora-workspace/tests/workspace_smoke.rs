@@ -25,5 +25,12 @@ fn workspace_smoke_completes_investigation() {
     assert!(stdout.contains("Workspace Proposal alternatives: 2"));
     assert!(stdout.contains("Ranking is guidance, not a guaranteed correct implementation."));
     assert!(stdout.contains("Verification Plan is proposed work; it was not executed."));
+    assert!(stdout.contains("Workspace Proposal Markdown artifact:"));
+    assert!(stdout.contains("Workspace Proposal structured artifact:"));
+    assert!(stdout.contains("Workspace coding-agent handoff:"));
+    assert!(stdout.contains("Workspace Proposal portfolio: 2"));
+    assert!(stdout.contains("Workspace Proposal trace:"));
+    assert!(stdout.contains("This is an implementation proposal."));
     assert!(!stdout.contains("Apply Proposal"));
+    assert!(!stdout.contains("Invoke coding agent"));
 }

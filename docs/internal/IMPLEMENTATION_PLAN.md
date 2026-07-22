@@ -1,7 +1,7 @@
 # Rivora v0.4 Implementation Plan
 
-> **Release:** v0.4 — Improvement Proposals  
-> **Status:** In Progress  
+> **Release:** v0.4 — Improvement Proposals
+> **Status:** Implementation complete; exact committed-HEAD validation pending
 > **Primary question:** Can Rivora propose how the engineering system should improve?
 
 ## Goal

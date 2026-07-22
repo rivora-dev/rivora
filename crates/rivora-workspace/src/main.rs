@@ -15,7 +15,9 @@ use rivora::domain::{
     OutcomeDisposition, ProposalCategory, ProposalFeedbackCategory, ProposalPriority,
     ProposalStatus, ProposalTransitionAuthority, RecommendationStatus,
 };
-use rivora::runtime::proposal::{CreateProposalRequest, RefineProposalRequest};
+use rivora::runtime::proposal::{
+    CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
+};
 use rivora::storage::LocalStore;
 use rivora::{CapabilityService, Runtime};
 use rivora_connectors::github_actions::GitHubActionsConnector;
@@ -649,7 +651,7 @@ fn proposal_session(caps: &CapabilityService, id: InvestigationId) -> Result<(),
             "List Proposals",
             "Create explicit Proposal",
             "Inspect Proposal",
-            "Mark under review",
+            "Submit Draft and mark under review",
             "Accept Proposal",
             "Reject Proposal",
             "Defer Proposal",
@@ -663,6 +665,11 @@ fn proposal_session(caps: &CapabilityService, id: InvestigationId) -> Result<(),
             "Rank latest Proposals",
             "Inspect implementation and Verification Plans",
             "Explain generation provenance",
+            "Export Proposal as Markdown",
+            "Export Proposal as structured JSON",
+            "Generate coding-agent handoff",
+            "View Proposal portfolio",
+            "Trace Proposal evidence",
             "Back",
         ];
         let choice = Select::new()
@@ -755,6 +762,11 @@ fn proposal_session(caps: &CapabilityService, id: InvestigationId) -> Result<(),
                             category: categories[category],
                             priority: priorities[priority],
                             confidence: Confidence::neutral(),
+                            supporting_evidence_ids: Vec::new(),
+                            contradicting_evidence_ids: Vec::new(),
+                            source_recommendation_ids: Vec::new(),
+                            affected_components: Vec::new(),
+                            affected_resources: Vec::new(),
                         },
                         "workspace",
                     )
@@ -1007,6 +1019,69 @@ fn proposal_session(caps: &CapabilityService, id: InvestigationId) -> Result<(),
                     .map_err(err)?;
                 println!("{explanation}");
             }
+            17 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let artifact = caps
+                    .generate_proposal_artifact(id, proposal_id, "workspace")
+                    .map_err(err)?;
+                println!("{}", artifact.markdown);
+            }
+            18 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let artifact = caps
+                    .generate_proposal_artifact(id, proposal_id, "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&artifact).map_err(|error| error.to_string())?
+                );
+            }
+            19 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let handoff = caps
+                    .generate_coding_agent_handoff(id, proposal_id)
+                    .map_err(err)?;
+                println!("{handoff}");
+            }
+            20 => {
+                let proposals = caps
+                    .proposal_portfolio(id, ProposalPortfolioFilter::default())
+                    .map_err(err)?;
+                if proposals.is_empty() {
+                    println!("No matching Improvement Proposals.");
+                } else {
+                    for proposal in proposals {
+                        println!(
+                            "  {}  [{} / {} / {}]  {}  (revision {})",
+                            proposal.id,
+                            proposal.status.as_str(),
+                            proposal.priority.as_str(),
+                            proposal.category.as_str(),
+                            proposal.title,
+                            proposal.revision_number,
+                        );
+                    }
+                }
+                println!("Proposal only — not applied, not implemented, not verified.");
+            }
+            21 => {
+                let proposal_id = input_object_id("Proposal id")?;
+                let trace = caps
+                    .trace_improvement_proposal(id, proposal_id)
+                    .map_err(err)?;
+                println!(
+                    "Observation ({}) → Memory ({}) → Knowledge ({}) → Evaluation ({}) → Verification ({}) → Recommendation ({}) → Improvement Proposal {}",
+                    trace.observation_ids.len(),
+                    trace.memory_ids.len(),
+                    trace.knowledge_ids.len(),
+                    trace.evaluation_ids.len(),
+                    trace.verification_ids.len(),
+                    trace.recommendation_ids.len(),
+                    trace.proposal_id,
+                );
+                println!("{}", trace.explanation);
+                println!("Proposal only — not applied, not implemented, not verified.");
+            }
             _ => break,
         }
     }
@@ -1083,6 +1158,26 @@ fn transition_workspace_proposal(
         .with_prompt(prompt)
         .interact_text()
         .map_err(|e| e.to_string())?;
+    let current = caps
+        .get_improvement_proposal(investigation_id, proposal_id)
+        .map_err(err)?;
+    let proposal_id =
+        if status == ProposalStatus::UnderReview && current.status == ProposalStatus::Draft {
+            let proposed = caps
+                .update_improvement_proposal_status(
+                    investigation_id,
+                    proposal_id,
+                    ProposalStatus::Proposed,
+                    "workspace",
+                    "explicitly submit Draft for review",
+                    ProposalTransitionAuthority::ExternalCaller,
+                )
+                .map_err(err)?;
+            println!("Draft explicitly submitted as Proposed.");
+            proposed.id
+        } else {
+            proposal_id
+        };
     let proposal = caps
         .update_improvement_proposal_status(
             investigation_id,
@@ -1118,14 +1213,20 @@ fn optional_csv_input(prompt: &str) -> Result<Option<Vec<String>>, String> {
 }
 
 fn proposal_details(proposal: &ImprovementProposal) -> String {
+    let implementation = proposal
+        .external_implementation_reference
+        .as_deref()
+        .map(|reference| format!("manually referenced as {reference}; not verified"))
+        .unwrap_or_else(|| "not recorded".into());
     format!(
-        "Workspace Proposal {} revision {} [{} / {}]\n  {}\n  {}\nProposal only — not applied, not implemented, not verified.",
+        "Workspace Proposal {} revision {} [{} / {}]\n  {}\n  {}\n  implemented externally: {}\n  verified outcome: not established by Proposal state\nProposal only — not applied, not implemented, not verified.",
         proposal.id,
         proposal.revision_number,
         proposal.status.as_str(),
         proposal.priority.as_str(),
         proposal.title,
         proposal.summary,
+        implementation,
     )
 }
 
@@ -1629,11 +1730,16 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
                 category: ProposalCategory::Reliability,
                 priority: ProposalPriority::High,
                 confidence: Confidence::new(0.8),
+                supporting_evidence_ids: Vec::new(),
+                contradicting_evidence_ids: Vec::new(),
+                source_recommendation_ids: Vec::new(),
+                affected_components: Vec::new(),
+                affected_resources: Vec::new(),
             },
             "workspace",
         )
         .map_err(err)?;
-    assert_eq!(proposal.status, ProposalStatus::Proposed);
+    assert_eq!(proposal.status, ProposalStatus::Draft);
     let feedback = caps
         .add_improvement_proposal_feedback(
             assist_inv.id,
@@ -1657,10 +1763,20 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
             "address explicit scope feedback",
         )
         .map_err(err)?;
-    let under_review = caps
+    let proposed = caps
         .update_improvement_proposal_status(
             assist_inv.id,
             refined.id,
+            ProposalStatus::Proposed,
+            "workspace",
+            "explicitly submit smoke Draft",
+            ProposalTransitionAuthority::ExternalCaller,
+        )
+        .map_err(err)?;
+    let under_review = caps
+        .update_improvement_proposal_status(
+            assist_inv.id,
+            proposed.id,
             ProposalStatus::UnderReview,
             "workspace",
             "explicit smoke review",
@@ -1683,7 +1799,7 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
             .map_err(err)?
             .proposals
             .len(),
-        5
+        6
     );
     assert_eq!(
         caps.list_improvement_proposals(assist_inv.id)
@@ -1733,6 +1849,46 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
     assert!(provenance.contains("labeled historical"));
     println!("Verification Plan is proposed work; it was not executed.");
     println!("{provenance}");
+
+    let artifact = caps
+        .generate_proposal_artifact(assist_inv.id, alternatives[0].id, "workspace")
+        .map_err(err)?;
+    println!("Workspace Proposal Markdown artifact:");
+    println!("{}", artifact.markdown);
+    println!("Workspace Proposal structured artifact:");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&artifact).map_err(|error| error.to_string())?
+    );
+    let handoff = caps
+        .generate_coding_agent_handoff(assist_inv.id, alternatives[0].id)
+        .map_err(err)?;
+    println!("Workspace coding-agent handoff:");
+    println!("{handoff}");
+    let portfolio = caps
+        .proposal_portfolio(
+            assist_inv.id,
+            ProposalPortfolioFilter {
+                status: Some(ProposalStatus::Draft),
+                ..ProposalPortfolioFilter::default()
+            },
+        )
+        .map_err(err)?;
+    println!("Workspace Proposal portfolio: {}", portfolio.len());
+    let trace = caps
+        .trace_improvement_proposal(assist_inv.id, alternatives[0].id)
+        .map_err(err)?;
+    println!(
+        "Workspace Proposal trace: Observation ({}) → Memory ({}) → Knowledge ({}) → Evaluation ({}) → Verification ({}) → Recommendation ({}) → Improvement Proposal {}",
+        trace.observation_ids.len(),
+        trace.memory_ids.len(),
+        trace.knowledge_ids.len(),
+        trace.evaluation_ids.len(),
+        trace.verification_ids.len(),
+        trace.recommendation_ids.len(),
+        trace.proposal_id,
+    );
+    println!("{}", trace.explanation);
     let _ = GitHubActionsConnector::new("owner/repo").status();
     let _ = KubernetesConnector::new("default").status();
     let _ = SentryConnector::new("org", "project").status();

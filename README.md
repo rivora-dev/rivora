@@ -12,23 +12,27 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Release: v0.3 — Engineering Assistance
+## Current Development: v0.4 — Improvement Proposals
 
-Rivora v0.3 answers: **Can Rivora help?**
+Rivora v0.4 answers: **Can Rivora propose how the engineering system should improve?**
 
-It turns investigation understanding into explainable assistance without becoming an autonomous agent or auto-remediation system.
+It turns investigation understanding and engineering assistance into durable, concrete, evidence-backed candidate improvements without applying them.
 
 ```text
-Observe → Remember → Understand → Assist
+Observe → Remember → Understand → Assist → Propose Improvement
 ```
 
-Shipped in v0.3:
+Implemented for v0.4:
 
-- **Composite Capabilities & Assisted Workflows** (RFC-018) — multi-step plans that coordinate Core Capabilities with durable step history
-- **Expanded connectors** — GitHub Actions (CI), Kubernetes (infra), Sentry (observability), plus local + GitHub (read-only)
-- **Engineering Assistance** (RFC-019) — hypotheses, next verification, deployment readiness, risk forecasts, root-cause guidance, prioritized recommendations, engineering reports
+- **Improvement Proposal model and lifecycle** (RFC-020) — durable Proposal lineages, immutable revisions, explicit human decisions, feedback, and provenance
+- **Evidence-backed generation and comparison** (RFC-021) — deterministic alternatives, visible contradictions, inspectable factors, implementation outlines, and proposed Verification Plans
+- **Proposal artifacts and experience** — Markdown/JSON export, bounded coding-agent handoffs, Investigation portfolios, traceability, CLI commands, and Workspace flows
 
-v0.1/v0.2 foundations remain operational. Recommendations are still proposals. Connectors remain read-only. No external systems are mutated.
+v0.1-v0.3 foundations remain operational. A Recommendation suggests a direction; an Improvement Proposal describes a concrete candidate change. Accepted means approved for possible external implementation—it never means implemented or verified. Connectors remain read-only and no external system is mutated.
+
+Deterministic generation requires durable evidence. Passing verification and supported hypotheses may support a Proposal; failed verification, contradictions, and unsuccessful outcomes remain contradicting evidence. Inconclusive records remain visible inputs without being mislabeled. Attached historical context records the authorizing Recalled Context and labels every historical source.
+
+Human-authored candidates without validated evidence remain Draft; evidence-backed explicit candidates may begin Proposed. Current Learning Outcomes and related-Investigation historical outcomes remain separately labeled. Export surfaces isolated Proposal-revision diagnostics when revision history may be incomplete; durable artifact listings separately preserve artifact-record diagnostics.
 
 Interfaces (Workspace and CLI) invoke the same Capability layer over the same Runtime.
 
@@ -56,7 +60,8 @@ Runtime       (single source of reasoning)
       ├── Search and Recall
       ├── Recalled Context / Patterns / Trends
       ├── Assisted Workflows
-      └── Engineering Assistance
+      ├── Engineering Assistance
+      └── Improvement Proposals
       │
       ▼
 Local Store   (.rivora/data)
@@ -72,7 +77,9 @@ Connectors ──► Observations only ──► Runtime
 - Knowledge is derived from Memory.
 - Evaluations are explainable and evidence-backed.
 - Verification produces durable receipts (pass / fail / inconclusive).
-- Recommendations are proposals, never auto-applied.
+- Recommendations are directional assistance, never auto-applied.
+- Improvement Proposals are durable suggestions, never implementations.
+- Proposal acceptance is explicit and never implies implementation or verification.
 - Learning records outcomes without rewriting history.
 - Investigations remain independent historical records; relationships do not merge them.
 - Recalled historical context is labeled and distinct from current evidence.
@@ -144,6 +151,15 @@ Binaries:
 ./target/release/rivora investigation context-attach <ID> --source <PRIOR_ID>
 ./target/release/rivora patterns
 ./target/release/rivora trends --repository acme/app
+
+# Propose improvements (v0.4)
+./target/release/rivora proposal generate --investigation <ID>
+./target/release/rivora proposal list --investigation <ID>
+./target/release/rivora proposal compare --investigation <ID> <PROPOSAL_A> <PROPOSAL_B>
+./target/release/rivora proposal verification-plan --investigation <ID> <PROPOSAL_ID>
+./target/release/rivora proposal implementation-plan --investigation <ID> <PROPOSAL_ID>
+./target/release/rivora proposal export --investigation <ID> <PROPOSAL_ID> --format markdown
+./target/release/rivora proposal handoff --investigation <ID> <PROPOSAL_ID>
 ```
 
 Global flags:
@@ -178,6 +194,14 @@ Global flags:
 | `pipeline` | Run knowledge → evaluate → verify → recommend |
 | `patterns` | Detect evidence-backed patterns |
 | `trends` | Summarize historical trends |
+| `proposal generate` / `alternatives` | Generate deterministic bounded Proposal alternatives |
+| `proposal compare` / `prioritize` | Compare Proposals using inspectable factors |
+| `proposal show` / `explain` / `provenance` | Inspect Proposal content, evidence, and provenance |
+| `proposal feedback` / `refine` / `revisions` | Preserve feedback and immutable revisions |
+| `proposal accept` / `reject` / `defer` / `withdraw` | Record explicit human-controlled lifecycle decisions |
+| `proposal verification-plan` / `implementation-plan` | Inspect proposed, unexecuted plans |
+| `proposal export` / `handoff` | Emit Markdown/JSON artifacts or bounded implementation handoff text |
+| `proposal portfolio` / `trace` | Filter an Investigation portfolio and trace evidence to a Proposal |
 
 ---
 
@@ -202,6 +226,12 @@ The Workspace lets you:
 - search prior work and inspect match explanations
 - attach or dismiss Recalled Context
 - view patterns and minimal historical trends
+- generate and compare Improvement Proposal alternatives
+- inspect supporting and contradicting evidence, risks, assumptions, implementation outlines, and Verification Plans
+- attach feedback, refine while preserving revisions, and explicitly accept, reject, defer, supersede, or withdraw
+- export Proposal artifacts or bounded coding-agent handoff text
+
+The Workspace labels every Proposal as **not applied, not implemented, and not verified**. It has no Apply action and does not invoke coding agents.
 
 Non-interactive smoke mode (CI):
 
@@ -265,9 +295,13 @@ Local filesystem store under `--data-dir` (default `.rivora/data`):
   verifications/
   recommendations/
   learning/
+  proposals/
+  proposal_artifacts/
 ```
 
-Memory is append-only. Corrections create new records.
+Memory is append-only. Corrections create new records. Proposal storage is additive and lazy; existing v0.1-v0.3 stores require no migration.
+
+Proposal export is explicit and stdout-only in the CLI. It never writes into a source tree or silently overwrites a file.
 
 ---
 
@@ -300,14 +334,15 @@ Follow Red → Green → Refactor. See `.agents/skills/build-rivora/SKILL.md`.
 | `docs/internal/VISION.md` | Product vision |
 | `docs/internal/PRINCIPLES.md` | Engineering principles |
 | `docs/internal/ARCHITECTURAL_INVARIANTS.md` | Non-negotiable invariants |
-| `docs/internal/IMPLEMENTATION_PLAN.md` | v0.1 implementation plan |
-| `docs/rfc/RFC-000` … `RFC-014` | Foundational RFCs |
+| `docs/internal/IMPLEMENTATION_PLAN.md` | Current release implementation plan |
+| `ROADMAP.md` | Release progression and future boundary |
+| `docs/rfc/RFC-000` … `RFC-021` | Architecture and feature RFCs |
 
 ---
 
-## Roadmap (post v0.1)
+## What v0.4 never does
 
-Later versions may add Investigation Graphs, cross-investigation knowledge, collaboration, automation, connector SDKs, and enterprise features. These are **out of scope** for v0.1.
+Rivora v0.4 does not edit repositories, write patches to source, create branches or commits, open pull requests, deploy, mutate infrastructure/configuration/tickets, invoke coding agents, execute remediation, or infer Learning Outcomes from accepted Proposals. See `ROADMAP.md` for the release boundary.
 
 ---
 

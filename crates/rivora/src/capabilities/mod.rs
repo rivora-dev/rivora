@@ -10,17 +10,19 @@ use crate::domain::{
     Evaluation, Hypothesis, ImprovementProposal, Investigation, InvestigationId,
     InvestigationRelationship, InvestigationSummary, KnowledgeObject, LearningOutcome,
     MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
-    PrioritizedRecommendation, ProposalComparison, ProposalFeedbackCategory, ProposalListing,
-    ProposalStatus, ProposalTransitionAuthority, ProposalVerificationPlan, RecalledContext,
-    Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
-    VerificationSuggestion,
+    PrioritizedRecommendation, ProposalArtifact, ProposalArtifactListing, ProposalComparison,
+    ProposalFeedbackCategory, ProposalListing, ProposalStatus, ProposalTrace,
+    ProposalTransitionAuthority, ProposalVerificationPlan, RecalledContext, Recommendation,
+    RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 use crate::runtime::context::{DetectedPattern, HistoricalTrend};
 use crate::runtime::graph::{RelatedInvestigation, RelationshipExplanation};
 use crate::runtime::learning::RecordOutcomeRequest;
 use crate::runtime::observation::IngestObservationRequest;
-use crate::runtime::proposal::{CreateProposalRequest, RefineProposalRequest};
+use crate::runtime::proposal::{
+    CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
+};
 use crate::runtime::search::{
     OutcomeFilter, PriorOutcome, RecalledEvidence, SearchQuery, SearchResult,
 };
@@ -794,6 +796,64 @@ impl CapabilityService {
     ) -> RivoraResult<String> {
         self.runtime
             .explain_improvement_proposal_provenance(id, proposal_id)
+    }
+
+    /// Generate and store a sanitized Proposal artifact.
+    pub fn generate_proposal_artifact(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ProposalArtifact> {
+        self.runtime
+            .generate_proposal_artifact(id, proposal_id, actor)
+    }
+
+    /// List durable Proposal artifacts.
+    pub fn list_proposal_artifacts(
+        &self,
+        id: InvestigationId,
+    ) -> RivoraResult<ProposalArtifactListing> {
+        self.runtime.list_proposal_artifacts(id)
+    }
+
+    /// Generate coding-agent handoff text without invocation.
+    pub fn generate_coding_agent_handoff(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime.generate_coding_agent_handoff(id, proposal_id)
+    }
+
+    /// Filter the Investigation Proposal portfolio.
+    pub fn proposal_portfolio(
+        &self,
+        id: InvestigationId,
+        filter: ProposalPortfolioFilter,
+    ) -> RivoraResult<Vec<ImprovementProposal>> {
+        self.runtime.proposal_portfolio(id, filter)
+    }
+
+    /// Trace Engineering Objects through one Proposal.
+    pub fn trace_improvement_proposal(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<ProposalTrace> {
+        self.runtime.trace_improvement_proposal(id, proposal_id)
+    }
+
+    /// Record an inert manual external implementation reference.
+    pub fn record_external_implementation_reference(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        reference: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ImprovementProposal> {
+        self.runtime
+            .record_external_implementation_reference(id, proposal_id, reference, actor)
     }
 }
 

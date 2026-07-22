@@ -7,9 +7,9 @@ pub use local::LocalStore;
 use crate::domain::{
     AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
     ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
-    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalListing,
-    RecalledContext, Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry,
-    VerificationReceipt, VerificationSuggestion,
+    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalArtifact,
+    ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
+    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 
@@ -198,4 +198,13 @@ pub trait Store: Send + Sync {
         id: &InvestigationId,
         lineage_id: &ObjectId,
     ) -> RivoraResult<ProposalListing>;
+
+    /// Append one durable Proposal artifact snapshot.
+    fn append_proposal_artifact(&self, artifact: &ProposalArtifact) -> RivoraResult<()>;
+
+    /// List durable Proposal artifacts for an Investigation.
+    fn list_proposal_artifacts(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ProposalArtifactListing>;
 }

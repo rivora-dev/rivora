@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.0 — Improvement Proposals (unreleased)
+
+### Phase 1 — Proposal Model and Lifecycle (RFC-020)
+
+- Durable Improvement Proposal Engineering Object, distinct from Recommendation, implementation, and outcomes
+- Explicit Draft/Proposed/UnderReview/Accepted/Rejected/Deferred/Superseded/Withdrawn lifecycle
+- Immutable revisions preserve content, feedback, actor, reason, timestamps, source evidence, and supersession links
+- Lazy per-Investigation Proposal storage with deterministic listing and corrupted-record isolation
+- Shared Runtime Capabilities with thin CLI and Workspace Proposal flows
+
+### Phase 2 — Evidence-Backed Generation and Comparison (RFC-021)
+
+- Deterministic local generation of bounded alternatives from current and labeled historical evidence
+- Dismissed-context exclusion, visible contradictions, and explicit unverified-Hypothesis assumptions
+- Inspectable comparison factors and priority explanations without opaque model-only selection
+- Concrete but unexecuted implementation outlines and Verification Plans
+- Feedback-driven refinement and bounded `propose_engineering_improvement` Composite Capability
+
+### Phase 3 — Export and Experience (RFC-021)
+
+- Sanitized, deterministic Markdown and JSON-compatible Proposal artifacts
+- Bounded coding-agent implementation handoff text without agent invocation
+- Investigation-level portfolio filters and evidence-to-Proposal traceability
+- CLI stdout-only export and Workspace artifact, handoff, portfolio, and trace views
+- Additive storage compatibility with v0.1-v0.3 and explicit no-application architecture tests
+
 ## 0.3.0 — Engineering Assistance
 
 ### Phase 1 — Composite Capabilities and Assisted Workflows (RFC-018)

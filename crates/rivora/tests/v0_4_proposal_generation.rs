@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use rivora::domain::{
-    Confidence, EvidenceScope, Hypothesis, HypothesisStatus, ObservationKind, ProposalStatus,
-    Provenance,
+    Confidence, EvidenceScope, Hypothesis, HypothesisStatus, ObservationKind, OutcomeDisposition,
+    ProposalStatus, Provenance,
 };
 use rivora::{CapabilityService, LocalStore, ObjectId, Runtime};
 
@@ -44,8 +44,10 @@ fn deterministic_generation_preserves_inputs_boundaries_and_source_objects() {
     caps.verify_all(current.id, "tester").unwrap();
     caps.generate_recommendation(current.id, "tester").unwrap();
 
-    let supporting = ObjectId::new();
-    let contradicting = ObjectId::new();
+    let supporting = runtime.store().list_observations(&current.id).unwrap()[0].id;
+    let contradicting = runtime.store().list_recommendations(&current.id).unwrap()[0].id;
+    let dangling_supporting = ObjectId::new();
+    let dangling_contradicting = ObjectId::new();
     runtime
         .store()
         .append_hypothesis(&Hypothesis::new(
@@ -53,8 +55,8 @@ fn deterministic_generation_preserves_inputs_boundaries_and_source_objects() {
             "Timestamp parsing may be accepting ambiguous values.",
             HypothesisStatus::Inconclusive,
             Confidence::new(0.6),
-            vec![supporting],
-            vec![contradicting],
+            vec![supporting, dangling_supporting],
+            vec![contradicting, dangling_contradicting],
             Vec::new(),
             "test_unverified_v1",
             "unverified",
@@ -62,6 +64,11 @@ fn deterministic_generation_preserves_inputs_boundaries_and_source_objects() {
             Provenance::now("tester", "test"),
         ))
         .unwrap();
+    let inconclusive_hypothesis = runtime
+        .store()
+        .list_hypotheses(&current.id)
+        .unwrap()
+        .remove(0);
 
     let attached_source = caps
         .create_investigation("Prior successful timestamp validation", None, "tester")
@@ -131,6 +138,10 @@ fn deterministic_generation_preserves_inputs_boundaries_and_source_objects() {
             .contradicting_evidence
             .iter()
             .any(|e| e.object_id == contradicting));
+        assert!(!proposal
+            .generation_inputs
+            .iter()
+            .any(|e| e.object_id == dangling_supporting || e.object_id == dangling_contradicting));
         assert!(proposal
             .related_investigation_ids
             .contains(&attached_source.id));
@@ -141,14 +152,36 @@ fn deterministic_generation_preserves_inputs_boundaries_and_source_objects() {
             .generation_inputs
             .iter()
             .any(|e| e.scope == EvidenceScope::Historical));
+        assert!(proposal
+            .generation_inputs
+            .iter()
+            .any(|e| { e.object_id == attached.id && e.scope == EvidenceScope::Current }));
         assert!(attached.source_object_ids.iter().all(|id| proposal
             .generation_inputs
             .iter()
             .any(|e| e.object_id == *id)));
+        assert!(!proposal
+            .supporting_evidence
+            .iter()
+            .any(|e| e.object_id == inconclusive_hypothesis.id));
+        assert!(!proposal
+            .contradicting_evidence
+            .iter()
+            .any(|e| e.object_id == inconclusive_hypothesis.id));
         assert!(!proposal.implementation_outline.is_empty());
         assert!(!proposal.test_strategy.is_empty());
         assert!(!proposal.verification_plan.claims.is_empty());
         assert!(!proposal.priority_explanation.is_empty());
+        for factor in [
+            "current impact/severity",
+            "recurrence",
+            "verified evidence",
+            "blocked-work",
+            "risk-reduction",
+            "low-cost reversible",
+        ] {
+            assert!(proposal.priority_explanation.contains(factor));
+        }
         assert!(proposal
             .assumptions
             .iter()
@@ -169,6 +202,88 @@ fn deterministic_generation_preserves_inputs_boundaries_and_source_objects() {
         before, after,
         "Proposal generation must not mutate source objects"
     );
+}
+
+#[test]
+fn failed_verification_is_contradicting_and_never_raises_confidence() {
+    use rivora::domain::{VerificationReceipt, VerificationResult};
+
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Arc::new(Runtime::new(Arc::new(
+        LocalStore::open(dir.path()).unwrap(),
+    )));
+    let caps = CapabilityService::new(Arc::clone(&runtime));
+    let baseline = caps
+        .create_investigation("No verification baseline", None, "tester")
+        .unwrap();
+    caps.ingest_observation(
+        baseline.id,
+        ObservationKind::CheckResult,
+        "Observed failure without verification",
+        serde_json::json!({"component": "runtime"}),
+        "test-fixture",
+        Utc::now(),
+        None,
+        "tester",
+    )
+    .unwrap();
+    let baseline_proposal = caps
+        .generate_improvement_proposals(baseline.id, "runtime")
+        .unwrap()
+        .remove(0);
+
+    let failed = caps
+        .create_investigation("Failed verification case", None, "tester")
+        .unwrap();
+    let failed_receipt = VerificationReceipt::new(
+        failed.id,
+        ObjectId::new(),
+        "proposed boundary handles the failure",
+        VerificationResult::Fail,
+        Confidence::new(0.9),
+        vec![ObjectId::new()],
+        vec![ObjectId::new()],
+        "the claim was contradicted",
+        Provenance::now("tester", "test"),
+    );
+    runtime
+        .store()
+        .append_verification(&failed_receipt)
+        .unwrap();
+    let failed_proposal = caps
+        .generate_improvement_proposals(failed.id, "runtime")
+        .unwrap()
+        .remove(0);
+
+    assert!(failed_proposal
+        .contradicting_evidence
+        .iter()
+        .any(|reference| reference.object_id == failed_receipt.id));
+    assert!(!failed_proposal
+        .supporting_evidence
+        .iter()
+        .any(|reference| reference.object_id == failed_receipt.id));
+    assert!(failed_proposal.confidence.value() <= baseline_proposal.confidence.value());
+}
+
+#[test]
+fn generation_requires_an_evidence_backed_opportunity() {
+    let dir = tempfile::tempdir().unwrap();
+    let caps = CapabilityService::new(Arc::new(Runtime::new(Arc::new(
+        LocalStore::open(dir.path()).unwrap(),
+    ))));
+    let empty = caps
+        .create_investigation("Title alone is not evidence", None, "tester")
+        .unwrap();
+
+    assert!(caps
+        .generate_improvement_proposals(empty.id, "runtime")
+        .is_err());
+    assert!(caps
+        .list_improvement_proposals(empty.id)
+        .unwrap()
+        .proposals
+        .is_empty());
 }
 
 #[test]
@@ -215,6 +330,55 @@ fn comparison_exposes_factors_and_prefers_bounded_verifiable_change() {
 }
 
 #[test]
+fn comparison_keeps_current_learning_distinct_from_historical_outcomes() {
+    let dir = tempfile::tempdir().unwrap();
+    let caps = CapabilityService::new(Arc::new(Runtime::new(Arc::new(
+        LocalStore::open(dir.path()).unwrap(),
+    ))));
+    let inv = caps
+        .create_investigation("Current outcome labeling", None, "tester")
+        .unwrap();
+    ingest_failure(&caps, inv.id, "Current connector validation failed");
+    caps.evaluate_investigation(inv.id, "tester").unwrap();
+    let recommendation = caps.generate_recommendation(inv.id, "tester").unwrap()[0].clone();
+    let current_outcome = caps
+        .record_outcome(
+            inv.id,
+            Some(recommendation.id),
+            OutcomeDisposition::Successful,
+            "current Investigation outcome",
+            None,
+            "tester",
+        )
+        .unwrap();
+    let proposals = caps
+        .generate_improvement_proposals(inv.id, "runtime")
+        .unwrap();
+    let comparison = caps
+        .compare_improvement_proposals(inv.id, proposals.iter().map(|item| item.id).collect())
+        .unwrap();
+    let explanation = &comparison.ranked[0]
+        .factors
+        .iter()
+        .find(|factor| factor.name == "historical_context")
+        .unwrap()
+        .explanation;
+    assert!(explanation.contains("Labeled historical outcomes: 0 successful"));
+    assert!(explanation.contains("Current labeled outcomes: 1 successful"));
+    let artifact = caps
+        .generate_proposal_artifact(inv.id, proposals[0].id, "tester")
+        .unwrap();
+    assert!(artifact.markdown.contains(&format!(
+        "current Learning Outcome `{}`",
+        current_outcome.id
+    )));
+    assert!(!artifact.markdown.contains(&format!(
+        "historical Learning Outcome `{}`",
+        current_outcome.id
+    )));
+}
+
+#[test]
 fn propose_engineering_improvement_composite_is_bounded_and_never_accepts() {
     let dir = tempfile::tempdir().unwrap();
     let runtime = Arc::new(Runtime::new(Arc::new(
@@ -230,6 +394,9 @@ fn propose_engineering_improvement_composite_is_bounded_and_never_accepts() {
         "CI failed at configuration validation boundary",
     );
     caps.evaluate_investigation(inv.id, "tester").unwrap();
+    let prior_group = caps
+        .generate_improvement_proposals(inv.id, "runtime")
+        .unwrap();
 
     let definition = caps
         .list_composite_capabilities()
@@ -259,8 +426,20 @@ fn propose_engineering_improvement_composite_is_bounded_and_never_accepts() {
         .steps
         .iter()
         .all(|step| !step.capability.contains("accept") && !step.capability.contains("apply")));
+    let compare_step = workflow
+        .steps
+        .iter()
+        .find(|step| step.capability == "compare_improvement_proposals")
+        .unwrap();
+    assert!(compare_step
+        .notes
+        .contains("Compared 2 Proposal alternative(s)"));
+    assert!(compare_step
+        .evidence_refs
+        .iter()
+        .all(|id| !prior_group.iter().any(|proposal| proposal.id == *id)));
     let proposals = caps.list_improvement_proposals(inv.id).unwrap().proposals;
-    assert!(proposals.len() >= 2);
+    assert_eq!(proposals.len(), 4);
     assert!(proposals
         .iter()
         .all(|proposal| proposal.status == ProposalStatus::Draft));

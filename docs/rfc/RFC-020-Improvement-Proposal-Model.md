@@ -1,6 +1,6 @@
 # RFC-020: Improvement Proposal Model and Lifecycle
 
-**Status:** Proposed  
+**Status:** Proposed
 **Target Version:** v0.4
 
 # Purpose
@@ -46,8 +46,9 @@ types.
 
 # Lifecycle
 
-Generated Proposals begin `Draft`. Explicitly created reviewed candidates may
-begin `Proposed`.
+Generated Proposals begin `Draft`. Explicitly created candidates without a
+validated evidence or source-Recommendation reference also begin `Draft`.
+Explicitly created evidence-backed candidates may begin `Proposed`.
 
 The MVP statuses are:
 
@@ -80,6 +81,13 @@ previous snapshot. A superseding Proposal is written before a superseding link
 revision is created, so the child-to-parent relationship remains recoverable
 after partial failure.
 
+Content and lifecycle operations require the unique latest lineage snapshot,
+preventing ambiguous branches and duplicate revision numbers. Accepted,
+Rejected, Superseded, and Withdrawn content cannot be refined in place. A new
+candidate change requires a new Proposal; acceptance never carries silently to
+changed content. A manually supplied external implementation reference is the
+only inert metadata revision allowed after acceptance.
+
 # Storage
 
 Proposal snapshots live under their owning Investigation:
@@ -108,6 +116,13 @@ The shared Capability surface includes:
 * Add Proposal Feedback
 * Reject, Defer, Supersede, and Withdraw Proposal
 * List Proposal Revisions
+
+Explicit creation can cite validated current evidence—including v0.3 Recalled
+Context, Composite workflows, verification suggestions, readiness, risks,
+root-cause guidance, and reports—source Recommendations, affected components,
+and likely resources. Referenced objects must belong to the owning
+Investigation. Deterministic generation remains the primary evidence-backed
+path.
 
 Capabilities coordinate Runtime operations. CLI and Workspace never implement
 lifecycle or revision rules.
