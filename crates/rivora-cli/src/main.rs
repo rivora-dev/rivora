@@ -7,9 +7,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use rivora::domain::{InvestigationId, ObjectId, ObservationKind, OutcomeDisposition};
+use rivora::domain::{
+    InvestigationId, InvestigationStatus, ObjectId, ObservationKind, OutcomeDisposition,
+    RelationshipKind, VerificationResult,
+};
+use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
 use rivora::storage::LocalStore;
 use rivora::{CapabilityService, Runtime};
 use rivora_connectors::github::GitHubConnector;
@@ -75,10 +79,62 @@ enum Commands {
         #[arg(long)]
         github_fixture: Option<PathBuf>,
     },
-    /// Recall Investigation Memory.
+    /// Recall Investigation Memory, related evidence, or prior outcomes.
     Recall {
+        /// Investigation id (Memory recall; combine with --evidence for
+        /// related-evidence recall).
         #[arg(long)]
-        investigation: String,
+        investigation: Option<String>,
+        /// Recall related evidence for the Investigation.
+        #[arg(long)]
+        evidence: bool,
+        /// Prior-outcome recall: repository filter.
+        #[arg(long)]
+        repository: Option<String>,
+        /// Prior-outcome recall: only this disposition.
+        #[arg(long, value_enum)]
+        outcome: Option<DispositionArg>,
+        /// Prior-outcome recall: only Investigations related to this one.
+        #[arg(long)]
+        similar_to: Option<String>,
+    },
+    /// Search Investigations (text and/or structured filters).
+    Search {
+        /// Free-text query.
+        query: Option<String>,
+        /// Repository filter.
+        #[arg(long)]
+        repository: Option<String>,
+        /// Status filter (e.g. collecting, completed).
+        #[arg(long)]
+        status: Option<String>,
+        /// Connector source filter.
+        #[arg(long)]
+        source: Option<String>,
+        /// Verification result filter: pass, fail, inconclusive.
+        #[arg(long)]
+        verification: Option<String>,
+        /// Learning outcome filter.
+        #[arg(long, value_enum)]
+        outcome: Option<DispositionArg>,
+        /// Changed-file path filter.
+        #[arg(long)]
+        file: Option<String>,
+        /// Relationship kind filter (snake_case, e.g. shared_repository).
+        #[arg(long)]
+        relationship: Option<String>,
+        /// Only Investigations created after this RFC3339 timestamp.
+        #[arg(long)]
+        after: Option<String>,
+        /// Only Investigations created before this RFC3339 timestamp.
+        #[arg(long)]
+        before: Option<String>,
+        /// Maximum number of results.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Explain a specific result instead of listing all matches.
+        #[arg(long)]
+        explain: Option<String>,
     },
     /// Generate Investigation timeline.
     Timeline {
@@ -170,6 +226,12 @@ enum InvestigationCmd {
     ConfirmRelationship { relationship_id: String },
     /// Dismiss a relationship as irrelevant.
     DismissRelationship { relationship_id: String },
+    /// Find Investigations similar to this one.
+    Similar {
+        id: String,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -394,6 +456,12 @@ fn run() -> Result<(), String> {
                     format!("Dismissed relationship {}", relationship.id)
                 });
             }
+            InvestigationCmd::Similar { id, limit } => {
+                let results = caps
+                    .find_similar_investigations(parse_inv(&id)?, limit)
+                    .map_err(err)?;
+                print_value(cli.json, &results, || print_search_results(&results));
+            }
         },
         Commands::Observe {
             investigation,
@@ -493,21 +561,145 @@ fn run() -> Result<(), String> {
                 }
             }
         }
-        Commands::Recall { investigation } => {
-            let memory = caps
-                .recall_memory(parse_inv(&investigation)?)
-                .map_err(err)?;
-            print_value(cli.json, &memory, || {
-                if memory.is_empty() {
-                    "No memory records.".into()
-                } else {
-                    memory
-                        .iter()
-                        .map(|m| format!("{}  {}  {}", m.recorded_at.to_rfc3339(), m.id, m.summary))
-                        .collect::<Vec<_>>()
-                        .join("\n")
+        Commands::Recall {
+            investigation,
+            evidence,
+            repository,
+            outcome,
+            similar_to,
+        } => {
+            let has_outcome_filters =
+                repository.is_some() || outcome.is_some() || similar_to.is_some();
+            match (investigation, evidence, has_outcome_filters) {
+                (Some(id), true, _) => {
+                    let recalled = caps.recall_related_evidence(parse_inv(&id)?).map_err(err)?;
+                    print_value(cli.json, &recalled, || {
+                        if recalled.is_empty() {
+                            "No related evidence.".into()
+                        } else {
+                            recalled
+                                .iter()
+                                .map(|r| {
+                                    format!(
+                                        "[{}] from {}\n  {}",
+                                        r.relationship_kind.as_str(),
+                                        r.investigation_id,
+                                        r.explanation.lines().next().unwrap_or("")
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    });
                 }
-            });
+                (Some(id), false, false) => {
+                    let memory = caps.recall_memory(parse_inv(&id)?).map_err(err)?;
+                    print_value(cli.json, &memory, || {
+                        if memory.is_empty() {
+                            "No memory records.".into()
+                        } else {
+                            memory
+                                .iter()
+                                .map(|m| {
+                                    format!(
+                                        "{}  {}  {}",
+                                        m.recorded_at.to_rfc3339(),
+                                        m.id,
+                                        m.summary
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    });
+                }
+                (None, false, true) => {
+                    let outcomes = caps
+                        .recall_prior_outcomes(OutcomeFilter {
+                            repository,
+                            similar_to: similar_to.map(|s| parse_inv(&s)).transpose()?,
+                            disposition: outcome.map(Into::into),
+                        })
+                        .map_err(err)?;
+                    print_value(cli.json, &outcomes, || {
+                        if outcomes.is_empty() {
+                            "No prior outcomes.".into()
+                        } else {
+                            outcomes
+                                .iter()
+                                .map(|o| {
+                                    format!(
+                                        "{}  [{}]  {} — {}{}",
+                                        o.investigation_id,
+                                        o.outcome.disposition.as_str(),
+                                        o.investigation_title,
+                                        o.outcome.notes,
+                                        o.recommendation_summary
+                                            .as_ref()
+                                            .map(|s| format!(" (re: {s})"))
+                                            .unwrap_or_default()
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    });
+                }
+                _ => {
+                    return Err("provide --investigation, --investigation with --evidence, \
+                         or outcome filters (--repository/--outcome/--similar-to)"
+                        .into())
+                }
+            }
+        }
+        Commands::Search {
+            query,
+            repository,
+            status,
+            source,
+            verification,
+            outcome,
+            file,
+            relationship,
+            after,
+            before,
+            limit,
+            explain,
+        } => {
+            let search_query = SearchQuery {
+                text: query,
+                investigation_id: None,
+                repository,
+                status: status.map(|s| parse_status(&s)).transpose()?,
+                connector_source: source,
+                verification_result: verification.map(|v| parse_verification(&v)).transpose()?,
+                outcome: outcome.map(Into::into),
+                relationship_kind: relationship
+                    .map(|r| parse_relationship_kind(&r))
+                    .transpose()?,
+                file,
+                created_after: after.map(|d| parse_datetime(&d)).transpose()?,
+                created_before: before.map(|d| parse_datetime(&d)).transpose()?,
+                limit,
+            };
+            if let Some(id) = explain {
+                let result = caps
+                    .explain_search_result(parse_inv(&id)?, search_query)
+                    .map_err(err)?;
+                print_value(cli.json, &result, || {
+                    format!(
+                        "{}  [{}]  {}\n  score: {:.2}\n  {}",
+                        result.investigation_id,
+                        result.status,
+                        result.title,
+                        result.score,
+                        result.explanation
+                    )
+                });
+            } else {
+                let results = caps.search_investigations(search_query).map_err(err)?;
+                print_value(cli.json, &results, || print_search_results(&results));
+            }
         }
         Commands::Timeline { investigation } => {
             let timeline = caps
@@ -707,6 +899,69 @@ fn parse_kind(s: &str) -> ObservationKind {
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
+}
+
+fn parse_status(s: &str) -> Result<InvestigationStatus, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "created" => Ok(InvestigationStatus::Created),
+        "collecting" => Ok(InvestigationStatus::Collecting),
+        "understanding" => Ok(InvestigationStatus::Understanding),
+        "evaluating" => Ok(InvestigationStatus::Evaluating),
+        "verifying" => Ok(InvestigationStatus::Verifying),
+        "recommending" => Ok(InvestigationStatus::Recommending),
+        "learning" => Ok(InvestigationStatus::Learning),
+        "completed" => Ok(InvestigationStatus::Completed),
+        other => Err(format!("unknown status: {other}")),
+    }
+}
+
+fn parse_verification(s: &str) -> Result<VerificationResult, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "pass" => Ok(VerificationResult::Pass),
+        "fail" => Ok(VerificationResult::Fail),
+        "inconclusive" => Ok(VerificationResult::Inconclusive),
+        other => Err(format!("unknown verification result: {other}")),
+    }
+}
+
+fn parse_relationship_kind(s: &str) -> Result<RelationshipKind, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "shared_repository" => Ok(RelationshipKind::SharedRepository),
+        "shared_commit" => Ok(RelationshipKind::SharedCommit),
+        "shared_pull_request" => Ok(RelationshipKind::SharedPullRequest),
+        "shared_file_path" => Ok(RelationshipKind::SharedFilePath),
+        "shared_connector_source" => Ok(RelationshipKind::SharedConnectorSource),
+        "similar_observations" => Ok(RelationshipKind::SimilarObservations),
+        "shared_evaluation_category" => Ok(RelationshipKind::SharedEvaluationCategory),
+        "related_verification_outcome" => Ok(RelationshipKind::RelatedVerificationOutcome),
+        "repeated_failure_signature" => Ok(RelationshipKind::RepeatedFailureSignature),
+        "related_recommendation" => Ok(RelationshipKind::RelatedRecommendation),
+        "related_learning_outcome" => Ok(RelationshipKind::RelatedLearningOutcome),
+        "explicit_link" => Ok(RelationshipKind::ExplicitLink),
+        other => Err(format!("unknown relationship kind: {other}")),
+    }
+}
+
+fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
+    DateTime::parse_from_rfc3339(s)
+        .map(|d| d.with_timezone(&Utc))
+        .map_err(|e| format!("invalid RFC3339 timestamp `{s}`: {e}"))
+}
+
+fn print_search_results(results: &[SearchResult]) -> String {
+    if results.is_empty() {
+        return "No matching Investigations.".into();
+    }
+    results
+        .iter()
+        .map(|r| {
+            format!(
+                "{}  [{}]  {}  (score {:.2})\n    {}",
+                r.investigation_id, r.status, r.title, r.score, r.explanation
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn print_value<T: serde::Serialize>(json: bool, value: &T, human: impl FnOnce() -> String) {

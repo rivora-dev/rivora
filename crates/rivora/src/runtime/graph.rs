@@ -10,9 +10,9 @@ use std::fmt::Write as _;
 
 use crate::domain::{
     Confidence, ConfirmationState, DerivationMetadata, Evaluation, Investigation, InvestigationId,
-    InvestigationRelationship, KnowledgeObject, LearningOutcome, ObjectId, Observation,
-    ObservationKind, Provenance, Recommendation, RelationshipConfirmation, RelationshipEvidence,
-    RelationshipKind, VerificationReceipt,
+    InvestigationRelationship, KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId,
+    Observation, ObservationKind, Provenance, Recommendation, RelationshipConfirmation,
+    RelationshipEvidence, RelationshipKind, VerificationReceipt,
 };
 use crate::error::{RivoraError, RivoraResult};
 use crate::runtime::Runtime;
@@ -272,9 +272,10 @@ impl Runtime {
     }
 
     /// Load the full durable context used for relationship derivation.
-    fn load_context_bundle(&self, id: &InvestigationId) -> RivoraResult<ContextBundle> {
+    pub(crate) fn load_context_bundle(&self, id: &InvestigationId) -> RivoraResult<ContextBundle> {
         Ok(ContextBundle {
             observations: self.store.list_observations(id)?,
+            memory: self.store.list_memory(id)?,
             knowledge: self.store.list_knowledge(id)?,
             evaluations: self.store.list_evaluations(id)?,
             verifications: self.store.list_verifications(id)?,
@@ -285,24 +286,22 @@ impl Runtime {
 }
 
 /// Full durable Engineering Object context for one Investigation.
-struct ContextBundle {
-    observations: Vec<Observation>,
-    /// Loaded as part of the full durable context; no v0.2 derivation
-    /// signal consumes Knowledge yet.
-    #[allow(dead_code)]
-    knowledge: Vec<KnowledgeObject>,
-    evaluations: Vec<Evaluation>,
-    verifications: Vec<VerificationReceipt>,
-    recommendations: Vec<Recommendation>,
-    learning: Vec<LearningOutcome>,
+pub(crate) struct ContextBundle {
+    pub(crate) observations: Vec<Observation>,
+    pub(crate) memory: Vec<MemoryRecord>,
+    pub(crate) knowledge: Vec<KnowledgeObject>,
+    pub(crate) evaluations: Vec<Evaluation>,
+    pub(crate) verifications: Vec<VerificationReceipt>,
+    pub(crate) recommendations: Vec<Recommendation>,
+    pub(crate) learning: Vec<LearningOutcome>,
 }
 
 /// A shared artifact discovered between two Investigations.
-struct SharedArtifact {
-    key: String,
-    description: String,
-    a_ids: Vec<ObjectId>,
-    b_ids: Vec<ObjectId>,
+pub(crate) struct SharedArtifact {
+    pub(crate) key: String,
+    pub(crate) description: String,
+    pub(crate) a_ids: Vec<ObjectId>,
+    pub(crate) b_ids: Vec<ObjectId>,
 }
 
 /// Stopwords excluded from significant-token comparison.
@@ -568,7 +567,7 @@ fn push_candidate(
 }
 
 /// Intersect two per-side artifact maps (key → object ids) into shared artifacts.
-fn intersect(
+pub(crate) fn intersect(
     a: &BTreeMap<String, Vec<ObjectId>>,
     b: &BTreeMap<String, Vec<ObjectId>>,
     describe: impl Fn(&str) -> String,
@@ -611,7 +610,7 @@ fn snake_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String {
 }
 
 /// Normalized repository keys from Repository observations.
-fn repository_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn repository_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for observation in observations
         .iter()
@@ -636,7 +635,7 @@ fn repository_key(observation: &Observation) -> Option<String> {
 }
 
 /// Normalized commit keys from Commit observations.
-fn commit_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn commit_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for observation in observations
         .iter()
@@ -661,7 +660,7 @@ fn commit_key(observation: &Observation) -> Option<String> {
 }
 
 /// Normalized pull request keys from PullRequest observations.
-fn pull_request_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn pull_request_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for observation in observations
         .iter()
@@ -683,7 +682,7 @@ fn pull_request_key(observation: &Observation) -> Option<String> {
 }
 
 /// Changed file paths from ChangedFiles observation payloads.
-fn file_path_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn file_path_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for observation in observations
         .iter()
@@ -706,7 +705,7 @@ fn file_path_keys(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId
 }
 
 /// Connector source names across all observations.
-fn connector_sources(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn connector_sources(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for observation in observations {
         map.entry(observation.source.clone())
@@ -717,7 +716,7 @@ fn connector_sources(observations: &[Observation]) -> BTreeMap<String, Vec<Objec
 }
 
 /// (Assessment type, severity) category keys from Evaluations.
-fn evaluation_categories(evaluations: &[Evaluation]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn evaluation_categories(evaluations: &[Evaluation]) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for evaluation in evaluations {
         map.entry(format!(
@@ -732,7 +731,9 @@ fn evaluation_categories(evaluations: &[Evaluation]) -> BTreeMap<String, Vec<Obj
 }
 
 /// Outcome keys from Verification Receipts.
-fn verification_outcomes(verifications: &[VerificationReceipt]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn verification_outcomes(
+    verifications: &[VerificationReceipt],
+) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for receipt in verifications {
         map.entry(receipt.result.as_str().to_string())
@@ -743,7 +744,7 @@ fn verification_outcomes(verifications: &[VerificationReceipt]) -> BTreeMap<Stri
 }
 
 /// Normalized failure signatures from failing CheckResult/TestOutput observations.
-fn failure_signatures(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn failure_signatures(observations: &[Observation]) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for observation in observations.iter().filter(|o| {
         matches!(
@@ -780,7 +781,7 @@ fn failure_signatures(observations: &[Observation]) -> BTreeMap<String, Vec<Obje
 }
 
 /// Deterministic signature keys from Recommendations.
-fn recommendation_signatures(
+pub(crate) fn recommendation_signatures(
     recommendations: &[Recommendation],
 ) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
@@ -810,7 +811,9 @@ fn recommendation_signature(summary: &str) -> String {
 }
 
 /// Disposition keys from Learning Outcomes.
-fn learning_dispositions(learning: &[LearningOutcome]) -> BTreeMap<String, Vec<ObjectId>> {
+pub(crate) fn learning_dispositions(
+    learning: &[LearningOutcome],
+) -> BTreeMap<String, Vec<ObjectId>> {
     let mut map: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
     for outcome in learning {
         map.entry(outcome.disposition.as_str().to_string())
@@ -821,7 +824,7 @@ fn learning_dispositions(learning: &[LearningOutcome]) -> BTreeMap<String, Vec<O
 }
 
 /// Lowercase alphanumeric tokens of length >= 4, minus stopwords.
-fn significant_tokens(text: &str) -> BTreeSet<String> {
+pub(crate) fn significant_tokens(text: &str) -> BTreeSet<String> {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.len() >= 4 && !STOPWORDS.contains(w))

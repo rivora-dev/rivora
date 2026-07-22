@@ -193,6 +193,223 @@ fn cli_investigation_graph_workflow() {
 }
 
 #[test]
+fn cli_search_and_recall_workflow() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+
+    let a = create_investigation(&bin, &data, "Deploy regression in acme app");
+    let b = create_investigation(&bin, &data, "CI build broken in acme app");
+
+    for (id, key) in [(&a, "a"), (&b, "b")] {
+        run_ok(
+            &bin,
+            &[
+                "--data-dir",
+                data.to_str().unwrap(),
+                "observe",
+                "--investigation",
+                id,
+                "--summary",
+                "GitHub repository `acme/app`",
+                "--kind",
+                "repository",
+                "--payload",
+                r#"{"full_name":"acme/app"}"#,
+                "--idempotency-key",
+                &format!("repo-{key}"),
+            ],
+        );
+        run_ok(
+            &bin,
+            &[
+                "--data-dir",
+                data.to_str().unwrap(),
+                "observe",
+                "--investigation",
+                id,
+                "--summary",
+                "Check build failed",
+                "--kind",
+                "check_result",
+                "--payload",
+                r#"{"name":"build","conclusion":"failure"}"#,
+                "--idempotency-key",
+                &format!("check-{key}"),
+            ],
+        );
+        run_ok(
+            &bin,
+            &[
+                "--data-dir",
+                data.to_str().unwrap(),
+                "pipeline",
+                "--investigation",
+                id,
+            ],
+        );
+    }
+
+    // Record a successful outcome on A.
+    let recs = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "recommend",
+            "--investigation",
+            &a,
+        ],
+    );
+    let rec_json: serde_json::Value = serde_json::from_slice(&recs.stdout).unwrap();
+    let rec_id = rec_json[0]["id"].as_str().unwrap();
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "learn",
+            "--investigation",
+            &a,
+            "--recommendation",
+            rec_id,
+            "--disposition",
+            "successful",
+            "--notes",
+            "rollback resolved it",
+        ],
+    );
+
+    // Text search finds A and B.
+    let search = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "search",
+            "acme build failed",
+        ],
+    );
+    let results: serde_json::Value = serde_json::from_slice(&search.stdout).unwrap();
+    let ids: Vec<&str> = results
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|r| r["investigation_id"].as_str())
+        .collect();
+    assert!(ids.contains(&a.as_str()) && ids.contains(&b.as_str()));
+    for result in results.as_array().unwrap() {
+        assert!(result["explanation"].as_str().unwrap().len() > 10);
+        assert!(!result["matched_evidence"].as_array().unwrap().is_empty());
+    }
+
+    // Structured search: repository + outcome filters.
+    let search = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "search",
+            "--repository",
+            "acme/app",
+            "--outcome",
+            "successful",
+        ],
+    );
+    let results: serde_json::Value = serde_json::from_slice(&search.stdout).unwrap();
+    assert_eq!(results.as_array().unwrap().len(), 1);
+    assert_eq!(results[0]["investigation_id"].as_str(), Some(a.as_str()));
+
+    // Explain a search result.
+    let explained = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "search",
+            "--repository",
+            "acme/app",
+            "--explain",
+            &a,
+        ],
+    );
+    assert!(String::from_utf8_lossy(&explained.stdout).contains("acme/app"));
+
+    // Similar investigations for B rank A first.
+    let similar = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "investigation",
+            "similar",
+            &b,
+        ],
+    );
+    let results: serde_json::Value = serde_json::from_slice(&similar.stdout).unwrap();
+    assert_eq!(
+        results.as_array().unwrap()[0]["investigation_id"].as_str(),
+        Some(a.as_str())
+    );
+
+    // Recall: memory (v0.1), related evidence, prior outcomes.
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "recall",
+            "--investigation",
+            &a,
+        ],
+    );
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "investigation",
+            "refresh-relationships",
+            &a,
+        ],
+    );
+    let evidence = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "recall",
+            "--investigation",
+            &a,
+            "--evidence",
+        ],
+    );
+    assert!(String::from_utf8_lossy(&evidence.stdout).contains("shared_repository"));
+
+    let outcomes = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "recall",
+            "--outcome",
+            "successful",
+        ],
+    );
+    let outcomes_json: serde_json::Value = serde_json::from_slice(&outcomes.stdout).unwrap();
+    assert_eq!(outcomes_json.as_array().unwrap().len(), 1);
+    assert_eq!(
+        outcomes_json[0]["investigation_id"].as_str(),
+        Some(a.as_str())
+    );
+}
+
+#[test]
 fn cli_full_investigation_workflow() {
     let dir = tempdir().unwrap();
     let data = dir.path().join("data");

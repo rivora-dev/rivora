@@ -59,6 +59,8 @@ fn run() -> Result<(), String> {
             "Create Investigation",
             "Open Investigation",
             "List Investigations",
+            "Search Investigations",
+            "Prior Outcomes",
             "Quit",
         ];
         let choice = Select::new()
@@ -111,6 +113,72 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
+            3 => {
+                let text: String = Input::new()
+                    .with_prompt("Search text (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let repository: String = Input::new()
+                    .with_prompt("Repository filter (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let query = rivora::runtime::search::SearchQuery {
+                    text: if text.trim().is_empty() {
+                        None
+                    } else {
+                        Some(text)
+                    },
+                    repository: if repository.trim().is_empty() {
+                        None
+                    } else {
+                        Some(repository)
+                    },
+                    ..rivora::runtime::search::SearchQuery::default()
+                };
+                let results = caps.search_investigations(query).map_err(err)?;
+                if results.is_empty() {
+                    println!("No matching Investigations.");
+                } else {
+                    for r in &results {
+                        println!(
+                            "  {}  [{}]  {}  (score {:.2})",
+                            r.investigation_id, r.status, r.title, r.score
+                        );
+                        println!("      {}", r.explanation);
+                    }
+                    let open: String = Input::new()
+                        .with_prompt("Open result id (optional)")
+                        .allow_empty(true)
+                        .interact_text()
+                        .map_err(|e| e.to_string())?;
+                    if !open.trim().is_empty() {
+                        let inv = caps
+                            .open_investigation(open.trim().parse().map_err(err)?)
+                            .map_err(err)?;
+                        investigation_session(&caps, inv)?;
+                    }
+                }
+            }
+            4 => {
+                let outcomes = caps
+                    .recall_prior_outcomes(rivora::runtime::search::OutcomeFilter::default())
+                    .map_err(err)?;
+                if outcomes.is_empty() {
+                    println!("No prior outcomes recorded.");
+                } else {
+                    for o in outcomes {
+                        println!(
+                            "  • [{}]  {}  [{}]  {}",
+                            o.outcome.disposition.as_str(),
+                            o.investigation_id,
+                            o.investigation_title,
+                            o.outcome.notes
+                        );
+                    }
+                }
+            }
             _ => break,
         }
     }
@@ -149,6 +217,8 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Record outcome",
             "Complete Investigation",
             "Reopen Investigation",
+            "Find Similar Investigations",
+            "Recall Related Evidence",
             "Back",
         ];
         let choice = Select::new()
@@ -336,6 +406,39 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     .reopen_investigation(inv.id, Some("reopened in workspace".into()))
                     .map_err(err)?;
                 println!("{} Reopened ({})", style("✓").green(), inv.status);
+            }
+            17 => {
+                let results = caps
+                    .find_similar_investigations(inv.id, Some(10))
+                    .map_err(err)?;
+                if results.is_empty() {
+                    println!("No similar Investigations found.");
+                } else {
+                    for r in &results {
+                        println!(
+                            "  • {}  [{}]  {}  (score {:.2})",
+                            r.investigation_id, r.status, r.title, r.score
+                        );
+                        println!("      {}", r.explanation);
+                    }
+                }
+            }
+            18 => {
+                let recalled = caps.recall_related_evidence(inv.id).map_err(err)?;
+                if recalled.is_empty() {
+                    println!("No related evidence. Refresh relationships first.");
+                } else {
+                    for r in &recalled {
+                        println!(
+                            "  • [{}] from {}",
+                            r.relationship_kind.as_str(),
+                            r.investigation_id
+                        );
+                        for e in &r.evidence {
+                            println!("      - {}", e.description);
+                        }
+                    }
+                }
             }
             _ => break,
         }
@@ -571,6 +674,23 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
         .explain_relationship(related[0].relationship.id)
         .map_err(err)?;
     assert!(!explanation.explanation.is_empty());
+
+    // Search and Recall: the completed investigation is searchable and
+    // similar investigations are explainable (RFC-016).
+    let results = caps
+        .search_investigations(rivora::runtime::search::SearchQuery {
+            text: Some("smoke repository".into()),
+            ..rivora::runtime::search::SearchQuery::default()
+        })
+        .map_err(err)?;
+    assert!(results.iter().all(|r| !r.explanation.is_empty()));
+    let similar = caps
+        .find_similar_investigations(other.id, Some(5))
+        .map_err(err)?;
+    assert!(
+        similar.iter().any(|r| r.investigation_id == done.id),
+        "expected completed investigation as similar in workspace smoke"
+    );
 
     println!(
         "workspace smoke ok: investigation {} status {}",

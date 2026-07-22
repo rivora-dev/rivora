@@ -14,6 +14,9 @@ use crate::error::RivoraResult;
 use crate::runtime::graph::{RelatedInvestigation, RelationshipExplanation};
 use crate::runtime::learning::RecordOutcomeRequest;
 use crate::runtime::observation::IngestObservationRequest;
+use crate::runtime::search::{
+    OutcomeFilter, PriorOutcome, RecalledEvidence, SearchQuery, SearchResult,
+};
 use crate::runtime::Runtime;
 
 /// Shared Capability service used by every interface.
@@ -253,6 +256,42 @@ impl CapabilityService {
         actor: impl Into<String>,
     ) -> RivoraResult<InvestigationRelationship> {
         self.runtime.dismiss_relationship(relationship_id, actor)
+    }
+
+    /// Search Investigations (RFC-016).
+    pub fn search_investigations(&self, query: SearchQuery) -> RivoraResult<Vec<SearchResult>> {
+        self.runtime.search_investigations(query)
+    }
+
+    /// Find Similar Investigations (RFC-016).
+    pub fn find_similar_investigations(
+        &self,
+        id: InvestigationId,
+        limit: Option<usize>,
+    ) -> RivoraResult<Vec<SearchResult>> {
+        self.runtime.find_similar_investigations(id, limit)
+    }
+
+    /// Explain Search Result (RFC-016).
+    pub fn explain_search_result(
+        &self,
+        investigation_id: InvestigationId,
+        query: SearchQuery,
+    ) -> RivoraResult<SearchResult> {
+        self.runtime.explain_search_result(investigation_id, query)
+    }
+
+    /// Recall Related Evidence (RFC-016).
+    pub fn recall_related_evidence(
+        &self,
+        id: InvestigationId,
+    ) -> RivoraResult<Vec<RecalledEvidence>> {
+        self.runtime.recall_related_evidence(id)
+    }
+
+    /// Recall Prior Outcomes (RFC-016).
+    pub fn recall_prior_outcomes(&self, filter: OutcomeFilter) -> RivoraResult<Vec<PriorOutcome>> {
+        self.runtime.recall_prior_outcomes(filter)
     }
 
     /// Complete Investigation.
