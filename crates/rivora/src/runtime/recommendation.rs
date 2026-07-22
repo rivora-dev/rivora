@@ -108,7 +108,7 @@ impl Runtime {
                 )
         };
 
-        let recommendation = Recommendation::new(
+        let mut recommendation = Recommendation::new(
             investigation_id,
             summary,
             rationale,
@@ -117,6 +117,12 @@ impl Runtime {
             confidence,
             provenance,
         );
+
+        // Cite attached Recalled Context: prior outcomes may warn or note
+        // success, but previous Recommendations are never auto-repeated
+        // (RFC-017).
+        let influence = self.historical_influence(investigation_id)?;
+        Self::apply_historical_influence_to_recommendation(&mut recommendation, &influence);
 
         // Recommendations must never be auto-applied: status stays Proposed.
         debug_assert_eq!(

@@ -61,6 +61,8 @@ fn run() -> Result<(), String> {
             "List Investigations",
             "Search Investigations",
             "Prior Outcomes",
+            "Patterns",
+            "Historical Trends",
             "Quit",
         ];
         let choice = Select::new()
@@ -179,6 +181,42 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
+            5 => {
+                let patterns = caps.detect_patterns("workspace").map_err(err)?;
+                if patterns.is_empty() {
+                    println!("No patterns detected.");
+                } else {
+                    for p in patterns {
+                        println!(
+                            "  • [{}]  {}  ({} investigations)",
+                            p.kind.as_str(),
+                            p.signature,
+                            p.occurrence_count
+                        );
+                        println!("      {}", p.description);
+                    }
+                }
+            }
+            6 => {
+                let repository: String = Input::new()
+                    .with_prompt("Repository filter (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let filter = if repository.trim().is_empty() {
+                    None
+                } else {
+                    Some(repository)
+                };
+                let trend = caps.summarize_historical_trend(filter).map_err(err)?;
+                println!("{}", trend.summary);
+                if !trend.top_failure_signatures.is_empty() {
+                    println!("Top failure signatures:");
+                    for item in trend.top_failure_signatures {
+                        println!("  • {} ({})", item.label, item.count);
+                    }
+                }
+            }
             _ => break,
         }
     }
@@ -219,6 +257,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Reopen Investigation",
             "Find Similar Investigations",
             "Recall Related Evidence",
+            "Recalled Context",
             "Back",
         ];
         let choice = Select::new()
@@ -440,6 +479,120 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                     }
                 }
             }
+            19 => context_session(caps, inv.id)?,
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+/// Recalled Context sub-loop: suggest, attach, dismiss, and inspect
+/// historical context for the current Investigation (RFC-017).
+fn context_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
+    loop {
+        let contexts = caps.list_recalled_context(id).map_err(err)?;
+        println!("\n{}", style("Recalled Context").bold());
+        if contexts.is_empty() {
+            println!("  No recalled context yet.");
+        } else {
+            for c in &contexts {
+                println!(
+                    "  • [{}]  {}  from {}  ({})",
+                    c.state.as_str(),
+                    c.id,
+                    c.source_investigation_id,
+                    c.origin.as_str()
+                );
+                println!("      reason: {}", c.reason);
+                println!("      {}", c.evidence_summary);
+            }
+        }
+
+        let actions = vec![
+            "Suggest from related / similar",
+            "Attach source Investigation",
+            "Attach suggested context",
+            "Dismiss context",
+            "Open source Investigation",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Context")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+
+        match choice {
+            0 => {
+                let suggested = caps
+                    .suggest_recalled_context(id, "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} {} context record(s)",
+                    style("✓").green(),
+                    suggested.len()
+                );
+            }
+            1 => {
+                let source: String = Input::new()
+                    .with_prompt("Source Investigation id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason: String = Input::new()
+                    .with_prompt("Reason (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason = if reason.trim().is_empty() {
+                    None
+                } else {
+                    Some(reason)
+                };
+                let context = caps
+                    .attach_recalled_context_from_source(
+                        id,
+                        source.parse().map_err(err)?,
+                        reason,
+                        "workspace",
+                    )
+                    .map_err(err)?;
+                println!(
+                    "{} Attached {} (historical; not current fact)",
+                    style("✓").green(),
+                    context.id
+                );
+            }
+            2 => {
+                let context_id: String = Input::new()
+                    .with_prompt("Recalled Context id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let context = caps
+                    .attach_recalled_context(id, context_id.parse().map_err(err)?, "workspace")
+                    .map_err(err)?;
+                println!("{} Attached {}", style("✓").green(), context.id);
+            }
+            3 => {
+                let context_id: String = Input::new()
+                    .with_prompt("Recalled Context id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let context = caps
+                    .dismiss_recalled_context(id, context_id.parse().map_err(err)?, "workspace")
+                    .map_err(err)?;
+                println!("{} Dismissed {}", style("✓").green(), context.id);
+            }
+            4 => {
+                let source: String = Input::new()
+                    .with_prompt("Source Investigation id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let inv = caps
+                    .open_investigation(source.parse().map_err(err)?)
+                    .map_err(err)?;
+                investigation_session(caps, inv)?;
+            }
             _ => break,
         }
     }
@@ -588,6 +741,10 @@ fn show_status(caps: &CapabilityService, id: InvestigationId) -> Result<(), Stri
         caps.list_recommendations(id).map_err(err)?.len()
     );
     println!("Learning: {}", caps.list_learning(id).map_err(err)?.len());
+    println!(
+        "Recalled context: {}",
+        caps.list_recalled_context(id).map_err(err)?.len()
+    );
     Ok(())
 }
 
@@ -691,6 +848,33 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
         similar.iter().any(|r| r.investigation_id == done.id),
         "expected completed investigation as similar in workspace smoke"
     );
+
+    // Recalled Context: attach historical intelligence without rewriting
+    // the source Investigation (RFC-017).
+    let context = caps
+        .attach_recalled_context_from_source(
+            other.id,
+            done.id,
+            Some("workspace smoke prior context".into()),
+            "workspace",
+        )
+        .map_err(err)?;
+    assert_eq!(
+        context.state,
+        rivora::domain::RecalledContextState::Attached
+    );
+    let listed = caps.list_recalled_context(other.id).map_err(err)?;
+    assert_eq!(listed.len(), 1);
+    assert!(caps.list_recalled_context(done.id).map_err(err)?.is_empty());
+
+    let patterns = caps.detect_patterns("workspace").map_err(err)?;
+    assert!(
+        !patterns.is_empty(),
+        "expected patterns from shared repository smoke data"
+    );
+    let trend = caps.summarize_historical_trend(None).map_err(err)?;
+    assert!(trend.investigation_count >= 2);
+    assert!(!trend.summary.is_empty());
 
     println!(
         "workspace smoke ok: investigation {} status {}",

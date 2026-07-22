@@ -1,6 +1,6 @@
 # RFC-015: Investigation Graph
 
-**Status:** Draft (Implemented)
+**Status:** Implemented
 **Target Version:** v0.2
 
 # Purpose

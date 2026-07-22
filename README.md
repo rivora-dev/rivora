@@ -12,9 +12,11 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Release: v0.1 — Runtime Foundation
+## Current Release: v0.2 — Investigation Intelligence
 
-Rivora v0.1 proves one coherent Runtime can execute the complete engineering understanding lifecycle:
+Rivora v0.2 extends the Runtime Foundation so Rivora can **remember** across Investigations.
+
+v0.1 lifecycle (unchanged):
 
 ```text
 Observation
@@ -24,6 +26,20 @@ Observation
 → Verification
 → Recommendation
 → Learning
+```
+
+v0.2 cross-Investigation intelligence:
+
+```text
+Completed and Active Investigations
+                ↓
+       Investigation Relationships
+                ↓
+          Search and Recall
+                ↓
+       Reusable Engineering Knowledge
+                ↓
+       Better Current Investigations
 ```
 
 Interfaces (Workspace and CLI) invoke the same Capability layer over the same Runtime.
@@ -47,7 +63,10 @@ Runtime       (single source of reasoning)
       ├── Evaluation Engine
       ├── Verification Engine
       ├── Recommendation Engine
-      └── Learning Engine
+      ├── Learning Engine
+      ├── Investigation Graph
+      ├── Search and Recall
+      └── Recalled Context / Patterns / Trends
       │
       ▼
 Local Store   (.rivora/data)
@@ -65,6 +84,8 @@ Connectors ──► Observations only ──► Runtime
 - Verification produces durable receipts (pass / fail / inconclusive).
 - Recommendations are proposals, never auto-applied.
 - Learning records outcomes without rewriting history.
+- Investigations remain independent historical records; relationships do not merge them.
+- Recalled historical context is labeled and distinct from current evidence.
 - Connectors only observe and normalize.
 - Workspace and CLI share the same Capabilities and Runtime.
 
@@ -123,6 +144,16 @@ Binaries:
 
 # Reopen when new observations arrive
 ./target/release/rivora investigation reopen <ID>
+
+# Cross-Investigation intelligence (v0.2)
+./target/release/rivora investigation refresh-relationships <ID>
+./target/release/rivora investigation related <ID>
+./target/release/rivora investigation similar <ID>
+./target/release/rivora search "build failed" --repository acme/app
+./target/release/rivora investigation context-suggest <ID>
+./target/release/rivora investigation context-attach <ID> --source <PRIOR_ID>
+./target/release/rivora patterns
+./target/release/rivora trends --repository acme/app
 ```
 
 Global flags:
@@ -139,8 +170,15 @@ Global flags:
 | `investigation list` | List Investigations |
 | `investigation complete` | Complete (must be in Learning) |
 | `investigation reopen` | Reopen Completed → Collecting |
+| `investigation related` | List related Investigations |
+| `investigation link` / `unlink` | Explicit relationship management |
+| `investigation relationship` | Explain a relationship |
+| `investigation refresh-relationships` | Re-derive graph edges |
+| `investigation similar` | Find similar Investigations |
+| `investigation context*` | List / suggest / attach / dismiss Recalled Context |
 | `observe` | Ingest Observations (manual / local / GitHub) |
-| `recall` | Recall Investigation Memory |
+| `search` | Search Investigations (text + structured filters) |
+| `recall` | Recall Memory, related evidence, or prior outcomes |
 | `timeline` | Chronological Memory timeline |
 | `knowledge` | Derive Knowledge from Memory |
 | `evaluate` | Produce explainable Evaluations |
@@ -148,6 +186,8 @@ Global flags:
 | `recommend` | Generate evidence-backed Recommendations |
 | `learn` | Record Learning outcomes |
 | `pipeline` | Run knowledge → evaluate → verify → recommend |
+| `patterns` | Detect evidence-backed patterns |
+| `trends` | Summarize historical trends |
 
 ---
 
@@ -168,6 +208,10 @@ The Workspace lets you:
 - evaluate, verify, recommend
 - record outcomes
 - complete or reopen
+- browse related and similar Investigations
+- search prior work and inspect match explanations
+- attach or dismiss Recalled Context
+- view patterns and minimal historical trends
 
 Non-interactive smoke mode (CI):
 

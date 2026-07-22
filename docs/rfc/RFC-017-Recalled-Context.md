@@ -1,6 +1,6 @@
 # RFC-017: Recalled Context and Reusable Knowledge
 
-**Status:** Draft (Implemented)
+**Status:** Implemented
 **Target Version:** v0.2
 
 # Purpose

@@ -410,6 +410,151 @@ fn cli_search_and_recall_workflow() {
 }
 
 #[test]
+fn cli_recalled_context_patterns_and_trends_workflow() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+
+    let a = create_investigation(&bin, &data, "CLI context A acme");
+    let b = create_investigation(&bin, &data, "CLI context B acme");
+    let c = create_investigation(&bin, &data, "CLI context C current");
+
+    for (id, key) in [(&a, "a"), (&b, "b"), (&c, "c")] {
+        run_ok(
+            &bin,
+            &[
+                "--data-dir",
+                data.to_str().unwrap(),
+                "observe",
+                "--investigation",
+                id,
+                "--summary",
+                "GitHub repository `acme/app`",
+                "--kind",
+                "repository",
+                "--payload",
+                r#"{"full_name":"acme/app"}"#,
+                "--idempotency-key",
+                &format!("ctx-repo-{key}"),
+            ],
+        );
+        run_ok(
+            &bin,
+            &[
+                "--data-dir",
+                data.to_str().unwrap(),
+                "observe",
+                "--investigation",
+                id,
+                "--summary",
+                "Check build failed",
+                "--kind",
+                "check_result",
+                "--payload",
+                r#"{"name":"build","conclusion":"failure"}"#,
+                "--idempotency-key",
+                &format!("ctx-check-{key}"),
+            ],
+        );
+        run_ok(
+            &bin,
+            &[
+                "--data-dir",
+                data.to_str().unwrap(),
+                "pipeline",
+                "--investigation",
+                id,
+            ],
+        );
+    }
+
+    // Attach historical context from A into C.
+    let attached = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "investigation",
+            "context-attach",
+            &c,
+            "--source",
+            &a,
+            "--reason",
+            "prior acme failure",
+        ],
+    );
+    let ctx: serde_json::Value = serde_json::from_slice(&attached.stdout).unwrap();
+    assert_eq!(ctx["state"].as_str(), Some("attached"));
+    assert_eq!(ctx["investigation_id"].as_str(), Some(c.as_str()));
+    assert_eq!(ctx["source_investigation_id"].as_str(), Some(a.as_str()));
+    let context_id = ctx["id"].as_str().unwrap().to_string();
+
+    // List context.
+    let listed = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "investigation",
+            "context",
+            &c,
+        ],
+    );
+    let contexts: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(contexts.as_array().unwrap().len(), 1);
+
+    // Patterns and trends.
+    let patterns = run_ok(
+        &bin,
+        &["--data-dir", data.to_str().unwrap(), "--json", "patterns"],
+    );
+    let patterns_json: serde_json::Value = serde_json::from_slice(&patterns.stdout).unwrap();
+    assert!(!patterns_json.as_array().unwrap().is_empty());
+
+    let trends = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "trends",
+            "--repository",
+            "acme/app",
+        ],
+    );
+    let trend: serde_json::Value = serde_json::from_slice(&trends.stdout).unwrap();
+    assert!(trend["investigation_count"].as_u64().unwrap() >= 3);
+
+    // Dismiss does not delete history; source investigation still lists empty context.
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "investigation",
+            "context-dismiss",
+            &c,
+            &context_id,
+        ],
+    );
+    let source_ctx = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "investigation",
+            "context",
+            &a,
+        ],
+    );
+    let source_json: serde_json::Value = serde_json::from_slice(&source_ctx.stdout).unwrap();
+    assert!(source_json.as_array().unwrap().is_empty());
+}
+
+#[test]
 fn cli_full_investigation_workflow() {
     let dir = tempdir().unwrap();
     let data = dir.path().join("data");

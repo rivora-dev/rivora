@@ -6,8 +6,8 @@ pub use local::LocalStore;
 
 use crate::domain::{
     Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
-    LearningOutcome, MemoryRecord, ObjectId, Observation, Recommendation, TimelineEntry,
-    VerificationReceipt,
+    LearningOutcome, MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation,
+    TimelineEntry, VerificationReceipt,
 };
 use crate::error::RivoraResult;
 
@@ -99,4 +99,17 @@ pub trait Store: Send + Sync {
 
     /// Delete an Investigation Relationship by id.
     fn delete_relationship(&self, id: &ObjectId) -> RivoraResult<()>;
+
+    /// Persist a new or updated Recalled Context record (upsert; RFC-017).
+    fn save_recalled_context(&self, context: &RecalledContext) -> RivoraResult<()>;
+
+    /// Load a Recalled Context record by id.
+    fn load_recalled_context(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<RecalledContext>;
+
+    /// List Recalled Context records for an Investigation.
+    fn list_recalled_context(&self, id: &InvestigationId) -> RivoraResult<Vec<RecalledContext>>;
 }

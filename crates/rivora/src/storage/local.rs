@@ -12,6 +12,7 @@
 //!     verifications/{object_id}.json
 //!     recommendations/{object_id}.json
 //!     learning/{object_id}.json
+//!     context/{object_id}.json
 //!   graph/
 //!     relationships/{object_id}.json
 //! ```
@@ -25,8 +26,8 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::{
     Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
-    LearningOutcome, MemoryRecord, ObjectId, Observation, Recommendation, TimelineEntry,
-    VerificationReceipt,
+    LearningOutcome, MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation,
+    TimelineEntry, VerificationReceipt,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -66,6 +67,7 @@ impl LocalStore {
             "verifications",
             "recommendations",
             "learning",
+            "context",
         ] {
             fs::create_dir_all(dir.join(sub))
                 .map_err(|e| RivoraError::storage(format!("failed to create {sub} dir: {e}")))?;
@@ -428,6 +430,31 @@ impl Store for LocalStore {
         }
         fs::remove_file(&path)
             .map_err(|e| RivoraError::storage(format!("failed to delete relationship: {e}")))
+    }
+
+    fn save_recalled_context(&self, context: &RecalledContext) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&context.investigation_id)?;
+        let path = self.object_path(&context.investigation_id, "context", &context.id);
+        self.write_json(&path, context)
+    }
+
+    fn load_recalled_context(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<RecalledContext> {
+        let path = self.object_path(investigation_id, "context", id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        self.read_json(&path)
+    }
+
+    fn list_recalled_context(&self, id: &InvestigationId) -> RivoraResult<Vec<RecalledContext>> {
+        let mut items: Vec<RecalledContext> =
+            self.list_json_dir(&self.inv_dir(id).join("context"))?;
+        items.sort_by_key(|c| c.recalled_at);
+        Ok(items)
     }
 }
 

@@ -1,5 +1,7 @@
 //! Rivora Runtime — single source of engineering reasoning (RFC-005, RFC-014).
 
+/// Recalled Context, patterns, and historical trends (RFC-017).
+pub mod context;
 /// Local-first embedding abstraction for semantic recall (RFC-016).
 pub mod embedding;
 mod evaluation;

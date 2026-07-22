@@ -8,9 +8,10 @@ use std::sync::Arc;
 use crate::domain::{
     Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
     LearningOutcome, MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
-    Recommendation, TimelineEntry, VerificationReceipt,
+    RecalledContext, Recommendation, TimelineEntry, VerificationReceipt,
 };
 use crate::error::RivoraResult;
+use crate::runtime::context::{DetectedPattern, HistoricalTrend};
 use crate::runtime::graph::{RelatedInvestigation, RelationshipExplanation};
 use crate::runtime::learning::RecordOutcomeRequest;
 use crate::runtime::observation::IngestObservationRequest;
@@ -292,6 +293,74 @@ impl CapabilityService {
     /// Recall Prior Outcomes (RFC-016).
     pub fn recall_prior_outcomes(&self, filter: OutcomeFilter) -> RivoraResult<Vec<PriorOutcome>> {
         self.runtime.recall_prior_outcomes(filter)
+    }
+
+    /// Suggest Recalled Context from related / similar Investigations (RFC-017).
+    pub fn suggest_recalled_context(
+        &self,
+        id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<RecalledContext>> {
+        self.runtime.suggest_recalled_context(id, actor)
+    }
+
+    /// Attach historical context from a source Investigation (RFC-017).
+    pub fn attach_recalled_context_from_source(
+        &self,
+        investigation_id: InvestigationId,
+        source_investigation_id: InvestigationId,
+        reason: Option<String>,
+        actor: impl Into<String>,
+    ) -> RivoraResult<RecalledContext> {
+        self.runtime.attach_recalled_context_from_source(
+            investigation_id,
+            source_investigation_id,
+            reason,
+            actor,
+        )
+    }
+
+    /// Attach (confirm) a suggested Recalled Context record (RFC-017).
+    pub fn attach_recalled_context(
+        &self,
+        investigation_id: InvestigationId,
+        context_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<RecalledContext> {
+        self.runtime
+            .attach_recalled_context(investigation_id, context_id, actor)
+    }
+
+    /// Dismiss a Recalled Context record (RFC-017).
+    pub fn dismiss_recalled_context(
+        &self,
+        investigation_id: InvestigationId,
+        context_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<RecalledContext> {
+        self.runtime
+            .dismiss_recalled_context(investigation_id, context_id, actor)
+    }
+
+    /// List Recalled Context for an Investigation (RFC-017).
+    pub fn list_recalled_context(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<Vec<RecalledContext>> {
+        self.runtime.list_recalled_context(investigation_id)
+    }
+
+    /// Detect Investigation patterns across durable records (RFC-017).
+    pub fn detect_patterns(&self, actor: impl Into<String>) -> RivoraResult<Vec<DetectedPattern>> {
+        self.runtime.detect_patterns(actor)
+    }
+
+    /// Summarize historical trends (RFC-017).
+    pub fn summarize_historical_trend(
+        &self,
+        repository: Option<String>,
+    ) -> RivoraResult<HistoricalTrend> {
+        self.runtime.summarize_historical_trend(repository)
     }
 
     /// Complete Investigation.

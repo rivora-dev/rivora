@@ -1,6 +1,6 @@
 # RFC-016: Search and Recall
 
-**Status:** Draft (Implemented)
+**Status:** Implemented
 **Target Version:** v0.2
 
 # Purpose

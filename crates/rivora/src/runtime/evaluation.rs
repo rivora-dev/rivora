@@ -153,7 +153,11 @@ impl Runtime {
             provenance,
         ));
 
-        for evaluation in &evaluations {
+        // Cite attached Recalled Context without absorbing historical
+        // conclusions into current Knowledge (RFC-017).
+        let influence = self.historical_influence(investigation_id)?;
+        for evaluation in &mut evaluations {
+            Self::apply_historical_influence_to_evaluation(evaluation, &influence);
             self.store.append_evaluation(evaluation)?;
         }
 

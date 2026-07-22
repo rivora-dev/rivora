@@ -181,6 +181,14 @@ enum Commands {
         #[arg(long)]
         investigation: String,
     },
+    /// Detect Investigation patterns across durable records (RFC-017).
+    Patterns,
+    /// Summarize historical trends (RFC-017).
+    Trends {
+        /// Optional repository filter.
+        #[arg(long)]
+        repository: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -232,6 +240,26 @@ enum InvestigationCmd {
         #[arg(long)]
         limit: Option<usize>,
     },
+    /// List Recalled Context for an Investigation (RFC-017).
+    Context { id: String },
+    /// Suggest Recalled Context from related / similar Investigations.
+    ContextSuggest { id: String },
+    /// Attach historical context from a source Investigation (or confirm a suggestion).
+    ContextAttach {
+        /// Current Investigation id.
+        id: String,
+        /// Source Investigation id (manual attach).
+        #[arg(long)]
+        source: Option<String>,
+        /// Existing Recalled Context id (confirm suggested).
+        #[arg(long)]
+        context: Option<String>,
+        /// Reason for attachment.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Dismiss a Recalled Context record.
+    ContextDismiss { id: String, context: String },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -461,6 +489,62 @@ fn run() -> Result<(), String> {
                     .find_similar_investigations(parse_inv(&id)?, limit)
                     .map_err(err)?;
                 print_value(cli.json, &results, || print_search_results(&results));
+            }
+            InvestigationCmd::Context { id } => {
+                let contexts = caps.list_recalled_context(parse_inv(&id)?).map_err(err)?;
+                print_value(cli.json, &contexts, || print_recalled_contexts(&contexts));
+            }
+            InvestigationCmd::ContextSuggest { id } => {
+                let contexts = caps
+                    .suggest_recalled_context(parse_inv(&id)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &contexts, || print_recalled_contexts(&contexts));
+            }
+            InvestigationCmd::ContextAttach {
+                id,
+                source,
+                context,
+                reason,
+            } => {
+                let inv = parse_inv(&id)?;
+                let attached = match (source, context) {
+                    (Some(source), None) => caps
+                        .attach_recalled_context_from_source(
+                            inv,
+                            parse_inv(&source)?,
+                            reason,
+                            "cli",
+                        )
+                        .map_err(err)?,
+                    (None, Some(context_id)) => caps
+                        .attach_recalled_context(inv, parse_obj(&context_id)?, "cli")
+                        .map_err(err)?,
+                    _ => {
+                        return Err(
+                            "context-attach requires exactly one of --source or --context".into(),
+                        );
+                    }
+                };
+                print_value(cli.json, &attached, || {
+                    format!(
+                        "Attached context {} from {} ({})",
+                        attached.id,
+                        attached.source_investigation_id,
+                        attached.state.as_str()
+                    )
+                });
+            }
+            InvestigationCmd::ContextDismiss { id, context } => {
+                let dismissed = caps
+                    .dismiss_recalled_context(parse_inv(&id)?, parse_obj(&context)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &dismissed, || {
+                    format!(
+                        "Dismissed context {} ({})",
+                        dismissed.id,
+                        dismissed.state.as_str()
+                    )
+                });
             }
         },
         Commands::Observe {
@@ -861,6 +945,42 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+        Commands::Patterns => {
+            let patterns = caps.detect_patterns("cli").map_err(err)?;
+            print_value(cli.json, &patterns, || {
+                if patterns.is_empty() {
+                    "No patterns detected.".into()
+                } else {
+                    patterns
+                        .iter()
+                        .map(|p| {
+                            format!(
+                                "[{}]  {}  ({} investigations, confidence {:.0}%)\n  {}",
+                                p.kind.as_str(),
+                                p.signature,
+                                p.occurrence_count,
+                                p.confidence.value() * 100.0,
+                                p.description
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            });
+        }
+        Commands::Trends { repository } => {
+            let trend = caps.summarize_historical_trend(repository).map_err(err)?;
+            print_value(cli.json, &trend, || {
+                let mut out = trend.summary.clone();
+                if !trend.top_failure_signatures.is_empty() {
+                    out.push_str("\nTop failure signatures:");
+                    for item in &trend.top_failure_signatures {
+                        out.push_str(&format!("\n  {} ({})", item.label, item.count));
+                    }
+                }
+                out
+            });
+        }
     }
 
     Ok(())
@@ -946,6 +1066,28 @@ fn parse_datetime(s: &str) -> Result<DateTime<Utc>, String> {
     DateTime::parse_from_rfc3339(s)
         .map(|d| d.with_timezone(&Utc))
         .map_err(|e| format!("invalid RFC3339 timestamp `{s}`: {e}"))
+}
+
+fn print_recalled_contexts(contexts: &[rivora::domain::RecalledContext]) -> String {
+    if contexts.is_empty() {
+        return "No recalled context.".into();
+    }
+    contexts
+        .iter()
+        .map(|c| {
+            format!(
+                "{}  [{}]  from {}  ({})\n  reason: {}\n  {}\n  {}",
+                c.id,
+                c.state.as_str(),
+                c.source_investigation_id,
+                c.origin.as_str(),
+                c.reason,
+                c.evidence_summary,
+                c.explanation
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn print_search_results(results: &[SearchResult]) -> String {
