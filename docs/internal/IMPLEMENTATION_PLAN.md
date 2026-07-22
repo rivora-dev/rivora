@@ -1,103 +1,66 @@
-# Rivora v0.3 Implementation Plan
+# Rivora v0.4 Implementation Plan
 
-> **Release:** v0.3 — Engineering Assistance  
-> **Status:** Implemented  
-> **Primary question:** Can Rivora help?
+> **Release:** v0.4 — Improvement Proposals  
+> **Status:** In Progress  
+> **Primary question:** Can Rivora propose how the engineering system should improve?
 
 ## Goal
 
-Extend Rivora so current and historical engineering understanding becomes
-actively useful through explainable, evidence-backed assistance—without
-turning Rivora into an autonomous agent or automatic remediation system.
-
-Preserve v0.1 Runtime Foundation and v0.2 Investigation Intelligence.
+Extend the v0.1-v0.3 Runtime with durable, explainable Improvement Proposals
+without applying changes or mutating engineering systems.
 
 ```text
-Observe → Remember → Understand → Assist
+Observe → Remember → Understand → Assist → Propose Improvement
 ```
 
----
+## Architectural Basis
 
-# Phase 1 — Composite Capabilities and Assisted Workflows
-
-## Purpose
-
-Coordinate existing Core Capabilities into durable, inspectable assisted
-workflows.
-
-## Primary RFCs
-
-* RFC-011 — Capabilities
-* RFC-014 — Runtime Execution Model
-* RFC-018 — Composite Capabilities and Assisted Workflows
-
-## Deliverables
-
-* Composite Capability definitions
-* Assisted Workflow domain + persistence
-* Plan / execute / cancel / resume / explain / summarize
-* CLI `assist` and Workspace Assistance session
-
----
-
-# Phase 2 — Expanded Engineering Connectors
-
-## Purpose
-
-Richer read-only evidence across CI, infrastructure, and observability.
-
-## Primary RFCs
-
-* RFC-012 — Connectors
-
-## Deliverables
-
-* GitHub Actions connector
-* Kubernetes connector
-* Sentry connector
-* Fixture mode, status, secret redaction
-* CLI `connector` commands and Workspace connector panel
-
----
-
-# Phase 3 — Explainable Engineering Assistance
-
-## Purpose
-
-Turn evidence into hypotheses, verification guidance, readiness, risk,
-root-cause guidance, prioritized recommendations, and reports.
-
-## Primary RFCs
-
+* RFC-020 — Improvement Proposal Model and Lifecycle
+* RFC-021 — Proposal Generation, Comparison, Planning, and Export
+* RFC-018 — Composite Capabilities
 * RFC-019 — Engineering Assistance
 
-## Deliverables
+## Phase 1 — Proposal Model and Lifecycle
 
-* Hypothesis model and generation
-* Next-best verification suggestions
-* Deployment readiness assessment
-* Risk forecast
-* Root-cause guidance
-* Recommendation prioritization factors
-* Engineering reports
+* distinct durable Improvement Proposal Engineering Object
+* explicit human-controlled lifecycle and immutable transitions
+* full preserved revisions and feedback provenance
+* lazy per-Investigation storage with corrupted-record isolation
+* shared Runtime Capabilities, CLI commands, and Workspace area
+* no application or source-object mutation
 
----
+Gate: focused model/storage/lifecycle/interface tests plus all existing tests.
 
-# Explicitly Out of Scope for v0.3
+## Phase 2 — Generation and Comparison
 
-Do not implement:
+* deterministic read-only generation from existing durable evidence
+* current/historical evidence labeling and dismissed-context exclusion
+* bounded alternatives and inspectable comparison/priority factors
+* implementation outlines and Verification Plans
+* feedback-driven refinement
+* bounded `propose_engineering_improvement` Composite Capability
 
-* Automatic infrastructure mutation, deploy, merge, restart
-* Auto-applied Recommendations
-* Unrestricted agent loops or tool invention
-* Collaboration / multi-user product features
-* Marketplace / plugin SDK
-* Hosted multi-tenant infrastructure
-* Chat-first agent interface as primary UX
+Gate: focused generation/comparison/composite tests plus full validation.
 
----
+## Phase 3 — Planning, Export, and Experience
 
-# Prior Releases
+* deterministic Markdown and structured artifacts
+* bounded coding-agent handoff text
+* Investigation Proposal portfolio and traceability
+* Workspace status/revision/export experience and explicit boundary language
+* isolated end-to-end workflow and restart verification
 
-* v0.1 — Runtime Foundation (Implemented)
-* v0.2 — Investigation Intelligence (Implemented)
+Gate: export/interface/e2e tests, structured review, full repository validation,
+manual isolated verification, and documentation/version closeout.
+
+## Compatibility
+
+Existing v0.1-v0.3 JSON remains unchanged. v0.4 storage is additive and lazy;
+missing Proposal directories return empty. No destructive migration is planned.
+
+## Explicitly Out of Scope
+
+Automatic application, repository editing, patches written to source, branches,
+commits, pull requests, deploys, infrastructure/configuration/ticket mutation,
+agent invocation, unrestricted loops, scheduled automation, collaboration,
+SDKs, marketplaces, hosted control planes, multi-tenancy, and v0.5+ behavior.
