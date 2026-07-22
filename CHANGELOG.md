@@ -1,6 +1,38 @@
 # Changelog
 
+## 0.3.0 — Engineering Assistance
+
+### Phase 1 — Composite Capabilities and Assisted Workflows (RFC-018)
+
+- Core versus Composite Capability model with approved Composite definitions
+- Durable Assisted Workflows with planned/running/completed/partial/failed/cancelled statuses
+- Step records preserve capability, evidence, outputs, failures, skips, and confirmation gates
+- Plan, execute, cancel, resume, retry, explain, and summarize workflow Capabilities
+- Initial composites: investigate engineering problem, assess deployment readiness, explain failure
+- CLI `assist` commands and Workspace Assistance session share CapabilityService
+
+### Phase 2 — Expanded Engineering Connectors (RFC-012)
+
+- GitHub Actions (CI) connector with fixture mode, rate-limit handling, secret redaction
+- Kubernetes (infrastructure) connector with fixture mode and optional kubectl observe
+- Sentry (observability) connector with fixture mode and secret redaction
+- Connector status/test/collect CLI; Workspace connector status panel
+- New Observation kinds: WorkflowRun, Infrastructure, Observability
+- Read-only boundary enforced; no external mutations
+
+### Phase 3 — Explainable Engineering Assistance (RFC-019)
+
+- Ranked Hypotheses with supporting and contradicting evidence
+- Next-best verification suggestions with feasibility and confidence impact
+- Deployment readiness assessments (ready/hold/inspect/unknown) with blockers and dimensions
+- Risk forecasts with categories, severity, historical comparison, and mitigations
+- Probabilistic root-cause guidance (never unverified fact)
+- Recommendation prioritization with inspectable ranking factors
+- Durable engineering reports generated from Runtime data
+- CLI report/assist surfaces and Workspace assistance flows
+
 ## 0.2.0 — Investigation Intelligence
+
 
 ### Phase 1 — Investigation Graph (RFC-015)
 

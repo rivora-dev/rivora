@@ -13,6 +13,13 @@
 //!     recommendations/{object_id}.json
 //!     learning/{object_id}.json
 //!     context/{object_id}.json
+//!     workflows/{object_id}.json
+//!     hypotheses/{object_id}.json
+//!     assistance/readiness/{object_id}.json
+//!     assistance/risks/{object_id}.json
+//!     assistance/verification_suggestions/{object_id}.json
+//!     assistance/root_cause/{object_id}.json
+//!     assistance/reports/{object_id}.json
 //!   graph/
 //!     relationships/{object_id}.json
 //! ```
@@ -20,14 +27,16 @@
 //! The `graph` area (RFC-015) is separate from per-Investigation
 //! directories. It is created lazily on first relationship write, so
 //! stores containing only v0.1 data keep working unchanged.
+//! New v0.3 directories are created lazily for the same reason.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
-    Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
-    LearningOutcome, MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation,
-    TimelineEntry, VerificationReceipt,
+    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
+    Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome,
+    MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation, RiskForecast,
+    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -59,6 +68,10 @@ impl LocalStore {
 
     fn ensure_inv_dirs(&self, id: &InvestigationId) -> RivoraResult<PathBuf> {
         let dir = self.inv_dir(id);
+        // Only create single-level object directories here. Nested
+        // `assistance/*` paths are created lazily by write_json so
+        // stores with v0.1/v0.2 layouts keep a flat investigation tree
+        // until assistance objects are written.
         for sub in [
             "observations",
             "memory",
@@ -68,6 +81,8 @@ impl LocalStore {
             "recommendations",
             "learning",
             "context",
+            "workflows",
+            "hypotheses",
         ] {
             fs::create_dir_all(dir.join(sub))
                 .map_err(|e| RivoraError::storage(format!("failed to create {sub} dir: {e}")))?;
@@ -454,6 +469,180 @@ impl Store for LocalStore {
         let mut items: Vec<RecalledContext> =
             self.list_json_dir(&self.inv_dir(id).join("context"))?;
         items.sort_by_key(|c| c.recalled_at);
+        Ok(items)
+    }
+
+    fn save_workflow(&self, workflow: &AssistedWorkflow) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&workflow.investigation_id)?;
+        let path = self.object_path(&workflow.investigation_id, "workflows", &workflow.id);
+        self.write_json(&path, workflow)
+    }
+
+    fn load_workflow(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<AssistedWorkflow> {
+        let path = self.object_path(investigation_id, "workflows", id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        self.read_json(&path)
+    }
+
+    fn list_workflows(&self, id: &InvestigationId) -> RivoraResult<Vec<AssistedWorkflow>> {
+        let mut items: Vec<AssistedWorkflow> =
+            self.list_json_dir(&self.inv_dir(id).join("workflows"))?;
+        items.sort_by_key(|w| w.planned_at);
+        Ok(items)
+    }
+
+    fn append_hypothesis(&self, hypothesis: &Hypothesis) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&hypothesis.investigation_id)?;
+        let path = self.object_path(&hypothesis.investigation_id, "hypotheses", &hypothesis.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "hypothesis {} already exists",
+                hypothesis.id
+            )));
+        }
+        self.write_json(&path, hypothesis)
+    }
+
+    fn list_hypotheses(&self, id: &InvestigationId) -> RivoraResult<Vec<Hypothesis>> {
+        let mut items: Vec<Hypothesis> =
+            self.list_json_dir(&self.inv_dir(id).join("hypotheses"))?;
+        items.sort_by(|a, b| {
+            a.rank
+                .cmp(&b.rank)
+                .then_with(|| a.generated_at.cmp(&b.generated_at))
+        });
+        Ok(items)
+    }
+
+    fn append_verification_suggestion(
+        &self,
+        suggestion: &VerificationSuggestion,
+    ) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&suggestion.investigation_id)?;
+        let path = self.object_path(
+            &suggestion.investigation_id,
+            "assistance/verification_suggestions",
+            &suggestion.id,
+        );
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "verification suggestion {} already exists",
+                suggestion.id
+            )));
+        }
+        self.write_json(&path, suggestion)
+    }
+
+    fn list_verification_suggestions(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<VerificationSuggestion>> {
+        let mut items: Vec<VerificationSuggestion> =
+            self.list_json_dir(&self.inv_dir(id).join("assistance/verification_suggestions"))?;
+        items.sort_by(|a, b| {
+            a.rank
+                .cmp(&b.rank)
+                .then_with(|| a.generated_at.cmp(&b.generated_at))
+        });
+        Ok(items)
+    }
+
+    fn append_deployment_readiness(&self, readiness: &DeploymentReadiness) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&readiness.investigation_id)?;
+        let path = self.object_path(
+            &readiness.investigation_id,
+            "assistance/readiness",
+            &readiness.id,
+        );
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "deployment readiness {} already exists",
+                readiness.id
+            )));
+        }
+        self.write_json(&path, readiness)
+    }
+
+    fn list_deployment_readiness(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<DeploymentReadiness>> {
+        let mut items: Vec<DeploymentReadiness> =
+            self.list_json_dir(&self.inv_dir(id).join("assistance/readiness"))?;
+        items.sort_by_key(|r| r.assessed_at);
+        Ok(items)
+    }
+
+    fn append_risk_forecast(&self, forecast: &RiskForecast) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&forecast.investigation_id)?;
+        let path = self.object_path(&forecast.investigation_id, "assistance/risks", &forecast.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "risk forecast {} already exists",
+                forecast.id
+            )));
+        }
+        self.write_json(&path, forecast)
+    }
+
+    fn list_risk_forecasts(&self, id: &InvestigationId) -> RivoraResult<Vec<RiskForecast>> {
+        let mut items: Vec<RiskForecast> =
+            self.list_json_dir(&self.inv_dir(id).join("assistance/risks"))?;
+        items.sort_by_key(|r| r.forecasted_at);
+        Ok(items)
+    }
+
+    fn append_root_cause_guidance(&self, guidance: &RootCauseGuidance) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&guidance.investigation_id)?;
+        let path = self.object_path(
+            &guidance.investigation_id,
+            "assistance/root_cause",
+            &guidance.id,
+        );
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "root cause guidance {} already exists",
+                guidance.id
+            )));
+        }
+        self.write_json(&path, guidance)
+    }
+
+    fn list_root_cause_guidance(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<RootCauseGuidance>> {
+        let mut items: Vec<RootCauseGuidance> =
+            self.list_json_dir(&self.inv_dir(id).join("assistance/root_cause"))?;
+        items.sort_by_key(|g| g.generated_at);
+        Ok(items)
+    }
+
+    fn append_engineering_report(&self, report: &EngineeringReport) -> RivoraResult<()> {
+        self.ensure_inv_dirs(&report.investigation_id)?;
+        let path = self.object_path(&report.investigation_id, "assistance/reports", &report.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "engineering report {} already exists",
+                report.id
+            )));
+        }
+        self.write_json(&path, report)
+    }
+
+    fn list_engineering_reports(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<EngineeringReport>> {
+        let mut items: Vec<EngineeringReport> =
+            self.list_json_dir(&self.inv_dir(id).join("assistance/reports"))?;
+        items.sort_by_key(|r| r.generated_at);
         Ok(items)
     }
 }

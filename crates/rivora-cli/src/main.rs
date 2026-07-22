@@ -17,7 +17,10 @@ use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
 use rivora::storage::LocalStore;
 use rivora::{CapabilityService, Runtime};
 use rivora_connectors::github::GitHubConnector;
+use rivora_connectors::github_actions::{ConnectorStatusReport, GitHubActionsConnector};
+use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
+use rivora_connectors::sentry::SentryConnector;
 use rivora_connectors::NormalizedObservation;
 
 #[derive(Debug, Parser)]
@@ -188,6 +191,156 @@ enum Commands {
         /// Optional repository filter.
         #[arg(long)]
         repository: Option<String>,
+    },
+    /// Engineering assistance and Composite Capabilities (RFC-018 / RFC-019).
+    Assist {
+        #[command(subcommand)]
+        action: AssistCmd,
+    },
+    /// Read-only connector operations (RFC-012).
+    Connector {
+        #[command(subcommand)]
+        action: ConnectorCmd,
+    },
+    /// Generate an engineering report for an Investigation.
+    Report {
+        #[arg(long)]
+        investigation: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AssistCmd {
+    /// List Composite Capability intents.
+    Intents,
+    /// Plan a Composite Capability workflow.
+    Plan {
+        /// Composite intent slug.
+        intent: String,
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Investigate an engineering problem (composite).
+    Investigate { investigation: String },
+    /// Assess deployment readiness (composite).
+    Readiness { investigation: String },
+    /// Explain a failure (composite).
+    ExplainFailure { investigation: String },
+    /// Generate ranked hypotheses.
+    Hypotheses {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Recommend next verification steps.
+    NextVerification {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Forecast risks.
+    Risks {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Root-cause guidance.
+    RootCause {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Prioritize recommendations.
+    Prioritize {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Summarize investigation state.
+    Summarize {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Workflow inspection and control.
+    Workflow {
+        #[command(subcommand)]
+        action: WorkflowCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum WorkflowCmd {
+    /// Show a workflow.
+    Show {
+        #[arg(long)]
+        investigation: String,
+        workflow: String,
+    },
+    /// List workflows for an Investigation.
+    List {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Resume a workflow.
+    Resume {
+        #[arg(long)]
+        investigation: String,
+        workflow: String,
+    },
+    /// Cancel a workflow.
+    Cancel {
+        #[arg(long)]
+        investigation: String,
+        workflow: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Explain a workflow.
+    Explain {
+        #[arg(long)]
+        investigation: String,
+        workflow: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConnectorCmd {
+    /// List available connectors.
+    List,
+    /// Show connector status (no secrets).
+    Status {
+        /// Connector id: github_actions | kubernetes | sentry | github | local
+        connector: String,
+    },
+    /// Test connector configuration.
+    Test {
+        connector: String,
+        #[arg(long)]
+        repository: Option<String>,
+        #[arg(long)]
+        namespace: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Collect / preview normalized observations (fixture or live).
+    Collect {
+        connector: String,
+        /// Fixture JSON path (offline).
+        #[arg(long)]
+        fixture: Option<PathBuf>,
+        #[arg(long)]
+        repository: Option<String>,
+        #[arg(long)]
+        namespace: Option<String>,
+        #[arg(long)]
+        organization: Option<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// When set, ingest into this Investigation.
+        #[arg(long)]
+        investigation: Option<String>,
+        /// Preview only (default true unless --investigation is set with --ingest).
+        #[arg(long)]
+        ingest: bool,
     },
 }
 
@@ -981,9 +1134,547 @@ fn run() -> Result<(), String> {
                 out
             });
         }
+        Commands::Assist { action } => match action {
+            AssistCmd::Intents => {
+                let defs = caps.list_composite_capabilities();
+                print_value(cli.json, &defs, || {
+                    defs.iter()
+                        .map(|d| {
+                            format!(
+                                "{} — {}\n  cores: {}",
+                                d.id,
+                                d.description,
+                                d.core_capabilities.join(" → ")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            AssistCmd::Plan {
+                intent,
+                investigation,
+            } => {
+                let wf = caps
+                    .plan_workflow(parse_inv(&investigation)?, intent, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &wf, || {
+                    format!(
+                        "Planned workflow {} intent={} steps={}",
+                        wf.id,
+                        wf.intent,
+                        wf.steps.len()
+                    )
+                });
+            }
+            AssistCmd::Investigate { investigation } => {
+                let wf = caps
+                    .run_composite(
+                        parse_inv(&investigation)?,
+                        "investigate_engineering_problem",
+                        "cli",
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &wf, || {
+                    format!(
+                        "Workflow {} status={}\n{}",
+                        wf.id,
+                        wf.status.as_str(),
+                        wf.summary.as_deref().unwrap_or("")
+                    )
+                });
+            }
+            AssistCmd::Readiness { investigation } => {
+                let id = parse_inv(&investigation)?;
+                let wf = caps
+                    .run_composite(id, "assess_deployment_readiness", "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &wf, || {
+                    format!(
+                        "Readiness workflow {} status={}\n{}",
+                        wf.id,
+                        wf.status.as_str(),
+                        wf.summary.as_deref().unwrap_or("")
+                    )
+                });
+            }
+            AssistCmd::ExplainFailure { investigation } => {
+                let wf = caps
+                    .run_composite(parse_inv(&investigation)?, "explain_failure", "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &wf, || {
+                    format!(
+                        "Explain-failure workflow {} status={}\n{}",
+                        wf.id,
+                        wf.status.as_str(),
+                        wf.summary.as_deref().unwrap_or("")
+                    )
+                });
+            }
+            AssistCmd::Hypotheses { investigation } => {
+                let hyps = caps
+                    .generate_hypotheses(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &hyps, || {
+                    hyps.iter()
+                        .map(|h| {
+                            format!(
+                                "{}. [{} conf={:.0}%] {}",
+                                h.rank,
+                                h.status.as_str(),
+                                h.confidence.value() * 100.0,
+                                h.statement
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            AssistCmd::NextVerification { investigation } => {
+                let suggestions = caps
+                    .recommend_next_verification(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &suggestions, || {
+                    suggestions
+                        .iter()
+                        .map(|s| {
+                            format!(
+                                "{}. {} — {} ({})",
+                                s.rank,
+                                s.claim,
+                                s.method,
+                                s.feasibility.as_str()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            AssistCmd::Risks { investigation } => {
+                let forecast = caps
+                    .forecast_risk(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &forecast, || {
+                    let mut out = forecast.summary.clone();
+                    for item in &forecast.items {
+                        out.push_str(&format!(
+                            "\n- {} [{}]: {}",
+                            item.category.as_str(),
+                            item.severity.as_str(),
+                            item.mitigation
+                        ));
+                    }
+                    out
+                });
+            }
+            AssistCmd::RootCause { investigation } => {
+                let guidance = caps
+                    .generate_root_cause_guidance(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &guidance, || guidance.guidance.clone());
+            }
+            AssistCmd::Prioritize { investigation } => {
+                let ranked = caps
+                    .prioritize_recommendations(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &ranked, || {
+                    ranked
+                        .iter()
+                        .map(|r| {
+                            format!(
+                                "{}. score={:.3} {} — {}",
+                                r.rank, r.score, r.summary, r.explanation
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            AssistCmd::Summarize { investigation } => {
+                let summary = caps
+                    .summarize_investigation_state(parse_inv(&investigation)?, "cli")
+                    .map_err(err)?;
+                print_value(cli.json, &summary, || summary.summary.clone());
+            }
+            AssistCmd::Workflow { action } => match action {
+                WorkflowCmd::Show {
+                    investigation,
+                    workflow,
+                } => {
+                    let wf = caps
+                        .open_workflow(parse_inv(&investigation)?, parse_obj(&workflow)?)
+                        .map_err(err)?;
+                    print_value(cli.json, &wf, || {
+                        format!(
+                            "Workflow {} intent={} status={}\n{}",
+                            wf.id,
+                            wf.intent,
+                            wf.status.as_str(),
+                            wf.summary.as_deref().unwrap_or("")
+                        )
+                    });
+                }
+                WorkflowCmd::List { investigation } => {
+                    let list = caps
+                        .list_workflows(parse_inv(&investigation)?)
+                        .map_err(err)?;
+                    print_value(cli.json, &list, || {
+                        list.iter()
+                            .map(|w| {
+                                format!(
+                                    "{}  {}  [{}]  steps={}",
+                                    w.id,
+                                    w.intent,
+                                    w.status.as_str(),
+                                    w.steps.len()
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    });
+                }
+                WorkflowCmd::Resume {
+                    investigation,
+                    workflow,
+                } => {
+                    let wf = caps
+                        .resume_workflow(parse_inv(&investigation)?, parse_obj(&workflow)?, "cli")
+                        .map_err(err)?;
+                    print_value(cli.json, &wf, || {
+                        format!("Resumed {} status={}", wf.id, wf.status.as_str())
+                    });
+                }
+                WorkflowCmd::Cancel {
+                    investigation,
+                    workflow,
+                    reason,
+                } => {
+                    let wf = caps
+                        .cancel_workflow(
+                            parse_inv(&investigation)?,
+                            parse_obj(&workflow)?,
+                            reason,
+                            "cli",
+                        )
+                        .map_err(err)?;
+                    print_value(cli.json, &wf, || {
+                        format!("Cancelled {} status={}", wf.id, wf.status.as_str())
+                    });
+                }
+                WorkflowCmd::Explain {
+                    investigation,
+                    workflow,
+                } => {
+                    let text = caps
+                        .explain_workflow(parse_inv(&investigation)?, parse_obj(&workflow)?)
+                        .map_err(err)?;
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(
+                                &serde_json::json!({ "explanation": text })
+                            )
+                            .map_err(|e| e.to_string())?
+                        );
+                    } else {
+                        println!("{text}");
+                    }
+                }
+            },
+        },
+        Commands::Connector { action } => match action {
+            ConnectorCmd::List => {
+                let list = vec![
+                    ConnectorStatusReport {
+                        id: "local".into(),
+                        category: "local".into(),
+                        configured: true,
+                        read_only: true,
+                        details: "local project observer".into(),
+                    },
+                    ConnectorStatusReport {
+                        id: "github".into(),
+                        category: "code".into(),
+                        configured: std::env::var("GITHUB_TOKEN").is_ok(),
+                        read_only: true,
+                        details: "GitHub repository/PR observer".into(),
+                    },
+                    GitHubActionsConnector::new("owner/repo").status(),
+                    KubernetesConnector::new("default").status(),
+                    SentryConnector::new("org", "project").status(),
+                ];
+                print_value(cli.json, &list, || {
+                    list.iter()
+                        .map(|c| {
+                            format!(
+                                "{}  [{}]  configured={}  read_only={}  {}",
+                                c.id, c.category, c.configured, c.read_only, c.details
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            ConnectorCmd::Status { connector } => {
+                let report = connector_status(&connector)?;
+                print_value(cli.json, &report, || {
+                    format!(
+                        "{} [{}] configured={} read_only={}\n{}",
+                        report.id,
+                        report.category,
+                        report.configured,
+                        report.read_only,
+                        report.details
+                    )
+                });
+            }
+            ConnectorCmd::Test {
+                connector,
+                repository,
+                namespace,
+                organization,
+                project,
+            } => {
+                let msg = connector_test(
+                    &connector,
+                    repository.as_deref(),
+                    namespace.as_deref(),
+                    organization.as_deref(),
+                    project.as_deref(),
+                )?;
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({ "result": msg }))
+                            .map_err(|e| e.to_string())?
+                    );
+                } else {
+                    println!("{msg}");
+                }
+            }
+            ConnectorCmd::Collect {
+                connector,
+                fixture,
+                repository,
+                namespace,
+                organization,
+                project,
+                path,
+                investigation,
+                ingest,
+            } => {
+                let observations = connector_collect(
+                    &connector,
+                    fixture.as_ref(),
+                    repository.as_deref(),
+                    namespace.as_deref(),
+                    organization.as_deref(),
+                    project.as_deref(),
+                    path.as_ref(),
+                )?;
+                if let Some(inv) = investigation {
+                    if ingest {
+                        let inv_id = parse_inv(&inv)?;
+                        let mut receipts = Vec::new();
+                        for obs in &observations {
+                            let (observation, memory, replay) = caps
+                                .ingest_observation(
+                                    inv_id,
+                                    obs.kind.clone(),
+                                    obs.summary.clone(),
+                                    obs.payload.clone(),
+                                    obs.source.clone(),
+                                    obs.observed_at,
+                                    obs.idempotency_key.clone(),
+                                    "cli",
+                                )
+                                .map_err(err)?;
+                            receipts.push(serde_json::json!({
+                                "observation_id": observation.id,
+                                "memory_id": memory.id,
+                                "summary": observation.summary,
+                                "idempotent_replay": replay,
+                            }));
+                        }
+                        print_value(cli.json, &receipts, || {
+                            format!("Ingested {} observation(s).", receipts.len())
+                        });
+                    } else {
+                        print_value(
+                            cli.json,
+                            &observations
+                                .iter()
+                                .map(|o| {
+                                    serde_json::json!({
+                                        "kind": o.kind.as_str(),
+                                        "summary": o.summary,
+                                        "source": o.source,
+                                        "idempotency_key": o.idempotency_key,
+                                    })
+                                })
+                                .collect::<Vec<_>>(),
+                            || {
+                                format!(
+                                    "Preview {} observation(s). Pass --ingest to write Memory.",
+                                    observations.len()
+                                )
+                            },
+                        );
+                    }
+                } else {
+                    print_value(
+                        cli.json,
+                        &observations
+                            .iter()
+                            .map(|o| {
+                                serde_json::json!({
+                                    "kind": o.kind.as_str(),
+                                    "summary": o.summary,
+                                    "source": o.source,
+                                    "idempotency_key": o.idempotency_key,
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                        || {
+                            observations
+                                .iter()
+                                .map(|o| format!("[{}] {}", o.kind.as_str(), o.summary))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        },
+                    );
+                }
+            }
+        },
+        Commands::Report { investigation } => {
+            let report = caps
+                .generate_engineering_report(parse_inv(&investigation)?, "cli")
+                .map_err(err)?;
+            if cli.json {
+                print_value(true, &report, String::new);
+            } else {
+                println!("{}", report.markdown);
+            }
+        }
     }
 
     Ok(())
+}
+
+fn connector_status(name: &str) -> Result<ConnectorStatusReport, String> {
+    match name {
+        "github_actions" | "actions" | "ci" => {
+            Ok(GitHubActionsConnector::new("owner/repo").status())
+        }
+        "kubernetes" | "k8s" => Ok(KubernetesConnector::new("default").status()),
+        "sentry" => Ok(SentryConnector::new("org", "project").status()),
+        "github" => Ok(ConnectorStatusReport {
+            id: "github".into(),
+            category: "code".into(),
+            configured: std::env::var("GITHUB_TOKEN")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .is_some(),
+            read_only: true,
+            details: "GitHub connector (repository/PR)".into(),
+        }),
+        "local" => Ok(ConnectorStatusReport {
+            id: "local".into(),
+            category: "local".into(),
+            configured: true,
+            read_only: true,
+            details: "Local project connector".into(),
+        }),
+        other => Err(format!("unknown connector: {other}")),
+    }
+}
+
+fn connector_test(
+    name: &str,
+    repository: Option<&str>,
+    namespace: Option<&str>,
+    organization: Option<&str>,
+    project: Option<&str>,
+) -> Result<String, String> {
+    match name {
+        "github_actions" | "actions" | "ci" => {
+            GitHubActionsConnector::new(repository.unwrap_or("owner/repo"))
+                .test_configuration()
+                .map_err(err)
+        }
+        "kubernetes" | "k8s" => KubernetesConnector::new(namespace.unwrap_or("default"))
+            .test_configuration()
+            .map_err(err),
+        "sentry" => {
+            SentryConnector::new(organization.unwrap_or("org"), project.unwrap_or("project"))
+                .test_configuration()
+                .map_err(err)
+        }
+        "github" | "local" => Ok(format!("{name}: available (read-only)")),
+        other => Err(format!("unknown connector: {other}")),
+    }
+}
+
+fn connector_collect(
+    name: &str,
+    fixture: Option<&PathBuf>,
+    repository: Option<&str>,
+    namespace: Option<&str>,
+    organization: Option<&str>,
+    project: Option<&str>,
+    path: Option<&PathBuf>,
+) -> Result<Vec<NormalizedObservation>, String> {
+    match name {
+        "github_actions" | "actions" | "ci" => {
+            if let Some(path) = fixture {
+                let raw = std::fs::read_to_string(path).map_err(err)?;
+                let value: serde_json::Value = serde_json::from_str(&raw).map_err(err)?;
+                GitHubActionsConnector::observe_from_fixture(&value).map_err(err)
+            } else {
+                GitHubActionsConnector::new(repository.unwrap_or("owner/repo"))
+                    .observe()
+                    .map_err(err)
+            }
+        }
+        "kubernetes" | "k8s" => {
+            if let Some(path) = fixture {
+                let raw = std::fs::read_to_string(path).map_err(err)?;
+                let value: serde_json::Value = serde_json::from_str(&raw).map_err(err)?;
+                KubernetesConnector::observe_from_fixture(&value).map_err(err)
+            } else {
+                KubernetesConnector::new(namespace.unwrap_or("default"))
+                    .observe()
+                    .map_err(err)
+            }
+        }
+        "sentry" => {
+            if let Some(path) = fixture {
+                let raw = std::fs::read_to_string(path).map_err(err)?;
+                let value: serde_json::Value = serde_json::from_str(&raw).map_err(err)?;
+                SentryConnector::observe_from_fixture(&value).map_err(err)
+            } else {
+                SentryConnector::new(organization.unwrap_or("org"), project.unwrap_or("project"))
+                    .observe()
+                    .map_err(err)
+            }
+        }
+        "local" => {
+            let root = path.cloned().unwrap_or_else(|| PathBuf::from("."));
+            LocalConnector::new(root).observe().map_err(err)
+        }
+        "github" => {
+            if let Some(path) = fixture {
+                let raw = std::fs::read_to_string(path).map_err(err)?;
+                let value: serde_json::Value = serde_json::from_str(&raw).map_err(err)?;
+                GitHubConnector::observe_from_fixture(&value).map_err(err)
+            } else {
+                GitHubConnector::new(repository.ok_or("repository required for github")?)
+                    .observe()
+                    .map_err(err)
+            }
+        }
+        other => Err(format!("unknown connector: {other}")),
+    }
 }
 
 fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
@@ -1013,6 +1704,9 @@ fn parse_kind(s: &str) -> ObservationKind {
         "issue" => ObservationKind::Issue,
         "user" | "user_input" => ObservationKind::UserInput,
         "local_event" => ObservationKind::LocalEvent,
+        "workflow_run" | "workflow-run" | "ci" => ObservationKind::WorkflowRun,
+        "infrastructure" | "infra" | "k8s" => ObservationKind::Infrastructure,
+        "observability" | "alert" | "sentry" => ObservationKind::Observability,
         other => ObservationKind::Other(other.into()),
     }
 }

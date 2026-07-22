@@ -6,9 +6,12 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
-    LearningOutcome, MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
-    RecalledContext, Recommendation, TimelineEntry, VerificationReceipt,
+    AssistedWorkflow, CompositeCapabilityDefinition, DeploymentReadiness, EngineeringReport,
+    Evaluation, Hypothesis, Investigation, InvestigationId, InvestigationRelationship,
+    InvestigationSummary, KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation,
+    ObservationKind, OutcomeDisposition, PrioritizedRecommendation, RecalledContext,
+    Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
+    VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 use crate::runtime::context::{DetectedPattern, HistoricalTrend};
@@ -398,6 +401,227 @@ impl CapabilityService {
             verifications,
             recommendations,
         })
+    }
+
+    // --- RFC-018 Composite Capabilities / Assisted Workflows ---
+
+    /// List approved Composite Capability definitions.
+    pub fn list_composite_capabilities(&self) -> Vec<CompositeCapabilityDefinition> {
+        self.runtime.list_composite_capabilities()
+    }
+
+    /// Plan a Composite Capability workflow without executing it.
+    pub fn plan_workflow(
+        &self,
+        investigation_id: InvestigationId,
+        intent: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime.plan_workflow(investigation_id, intent, actor)
+    }
+
+    /// Execute a planned workflow.
+    pub fn execute_workflow(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime
+            .execute_workflow(investigation_id, workflow_id, actor)
+    }
+
+    /// Plan and run a Composite Capability end to end.
+    pub fn run_composite(
+        &self,
+        investigation_id: InvestigationId,
+        intent: impl Into<String>,
+        actor: impl Into<String>,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime.run_composite(investigation_id, intent, actor)
+    }
+
+    /// Open a workflow by id.
+    pub fn open_workflow(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime.open_workflow(investigation_id, workflow_id)
+    }
+
+    /// List workflows for an Investigation.
+    pub fn list_workflows(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<Vec<AssistedWorkflow>> {
+        self.runtime.list_workflows(investigation_id)
+    }
+
+    /// Cancel a workflow safely.
+    pub fn cancel_workflow(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+        reason: Option<String>,
+        actor: impl Into<String>,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime
+            .cancel_workflow(investigation_id, workflow_id, reason, actor)
+    }
+
+    /// Resume a partial or failed workflow.
+    pub fn resume_workflow(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime
+            .resume_workflow(investigation_id, workflow_id, actor)
+    }
+
+    /// Retry a failed workflow step.
+    pub fn retry_workflow_step(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+        step_index: u32,
+        actor: impl Into<String>,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime
+            .retry_workflow_step(investigation_id, workflow_id, step_index, actor)
+    }
+
+    /// Confirm a confirmation-required workflow step.
+    pub fn confirm_workflow_step(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+        step_index: u32,
+        actor: impl Into<String>,
+    ) -> RivoraResult<AssistedWorkflow> {
+        self.runtime
+            .confirm_workflow_step(investigation_id, workflow_id, step_index, actor)
+    }
+
+    /// Explain workflow decisions and step states.
+    pub fn explain_workflow(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime.explain_workflow(investigation_id, workflow_id)
+    }
+
+    /// Summarize a workflow.
+    pub fn summarize_workflow(
+        &self,
+        investigation_id: InvestigationId,
+        workflow_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime
+            .summarize_workflow(investigation_id, workflow_id)
+    }
+
+    // --- RFC-019 Engineering Assistance ---
+
+    /// Generate ranked hypotheses.
+    pub fn generate_hypotheses(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<Hypothesis>> {
+        self.runtime.generate_hypotheses(investigation_id, actor)
+    }
+
+    /// Recommend next-best verification.
+    pub fn recommend_next_verification(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<VerificationSuggestion>> {
+        self.runtime
+            .recommend_next_verification(investigation_id, actor)
+    }
+
+    /// Assess deployment readiness.
+    pub fn assess_deployment_readiness(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<DeploymentReadiness> {
+        self.runtime
+            .assess_deployment_readiness(investigation_id, actor)
+    }
+
+    /// Forecast risks.
+    pub fn forecast_risk(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<RiskForecast> {
+        self.runtime.forecast_risk(investigation_id, actor)
+    }
+
+    /// Generate root-cause guidance.
+    pub fn generate_root_cause_guidance(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<RootCauseGuidance> {
+        self.runtime
+            .generate_root_cause_guidance(investigation_id, actor)
+    }
+
+    /// Prioritize Recommendations with inspectable factors.
+    pub fn prioritize_recommendations(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<PrioritizedRecommendation>> {
+        self.runtime
+            .prioritize_recommendations(investigation_id, actor)
+    }
+
+    /// Generate an engineering report.
+    pub fn generate_engineering_report(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<EngineeringReport> {
+        self.runtime
+            .generate_engineering_report(investigation_id, actor)
+    }
+
+    /// Summarize Investigation state.
+    pub fn summarize_investigation_state(
+        &self,
+        investigation_id: InvestigationId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<InvestigationSummary> {
+        self.runtime
+            .summarize_investigation_state(investigation_id, actor)
+    }
+
+    /// List stored hypotheses.
+    pub fn list_hypotheses(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<Vec<Hypothesis>> {
+        let _ = self.runtime.open_investigation(investigation_id)?;
+        self.runtime.store().list_hypotheses(&investigation_id)
+    }
+
+    /// List engineering reports.
+    pub fn list_engineering_reports(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<Vec<EngineeringReport>> {
+        let _ = self.runtime.open_investigation(investigation_id)?;
+        self.runtime
+            .store()
+            .list_engineering_reports(&investigation_id)
     }
 }
 

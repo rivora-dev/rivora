@@ -1,7 +1,9 @@
 //! Engineering Object Model (RFC-004) and Investigation lifecycle (RFC-013).
 
+mod assistance;
 mod context;
 mod evaluation;
+mod hypothesis;
 mod ids;
 mod investigation;
 mod knowledge;
@@ -13,9 +15,12 @@ mod provenance;
 mod recommendation;
 mod relationship;
 mod verification;
+mod workflow;
 
+pub use assistance::*;
 pub use context::*;
 pub use evaluation::*;
+pub use hypothesis::*;
 pub use ids::*;
 pub use investigation::*;
 pub use knowledge::*;
@@ -27,3 +32,4 @@ pub use provenance::*;
 pub use recommendation::*;
 pub use relationship::*;
 pub use verification::*;
+pub use workflow::*;

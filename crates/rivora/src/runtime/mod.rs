@@ -1,5 +1,7 @@
 //! Rivora Runtime — single source of engineering reasoning (RFC-005, RFC-014).
 
+/// Explainable Engineering Assistance (RFC-019).
+pub mod assistance;
 /// Recalled Context, patterns, and historical trends (RFC-017).
 pub mod context;
 /// Local-first embedding abstraction for semantic recall (RFC-016).
@@ -18,6 +20,8 @@ mod recommendation;
 /// Search and Recall subsystem (RFC-016).
 pub mod search;
 mod verification;
+/// Composite Capabilities and Assisted Workflows (RFC-018).
+pub mod workflow;
 
 use std::sync::Arc;
 

@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "rivora"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "rivora-connectors",
@@ -879,7 +879,7 @@ dependencies = [
 
 [[package]]
 name = "rivora-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "clap",
@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "rivora-connectors"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "reqwest",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "rivora-workspace"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "clap",

@@ -98,10 +98,18 @@ impl Runtime {
                 text.contains("fail")
                     || text.contains("error")
                     || text.contains("rollback")
+                    || text.contains("alert")
                     || matches!(
                         o.kind,
-                        ObservationKind::CheckResult | ObservationKind::TestOutput
-                    ) && (text.contains("fail") || text.contains("error"))
+                        ObservationKind::CheckResult
+                            | ObservationKind::TestOutput
+                            | ObservationKind::WorkflowRun
+                            | ObservationKind::Observability
+                            | ObservationKind::Infrastructure
+                    ) && (text.contains("fail")
+                        || text.contains("error")
+                        || text.contains("degraded")
+                        || text.contains("unhealthy"))
             })
             .collect();
 

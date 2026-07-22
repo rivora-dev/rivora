@@ -15,7 +15,10 @@ use rivora::domain::{
 };
 use rivora::storage::LocalStore;
 use rivora::{CapabilityService, Runtime};
+use rivora_connectors::github_actions::GitHubActionsConnector;
+use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
+use rivora_connectors::sentry::SentryConnector;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -63,6 +66,7 @@ fn run() -> Result<(), String> {
             "Prior Outcomes",
             "Patterns",
             "Historical Trends",
+            "Connectors",
             "Quit",
         ];
         let choice = Select::new()
@@ -217,6 +221,7 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
+            7 => connector_session(&caps)?,
             _ => break,
         }
     }
@@ -258,6 +263,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Find Similar Investigations",
             "Recall Related Evidence",
             "Recalled Context",
+            "Assistance (composites & reports)",
             "Back",
         ];
         let choice = Select::new()
@@ -480,9 +486,208 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
                 }
             }
             19 => context_session(caps, inv.id)?,
+            20 => assistance_session(caps, inv.id)?,
             _ => break,
         }
     }
+    Ok(())
+}
+
+/// Assisted workflows and engineering assistance (RFC-018 / RFC-019).
+fn assistance_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
+    loop {
+        println!("\n{}", style("Assistance").bold());
+        let actions = vec![
+            "List composite intents",
+            "Plan investigate workflow",
+            "Run Investigate Engineering Problem",
+            "Run Assess Deployment Readiness",
+            "Run Explain Failure",
+            "Generate Hypotheses",
+            "Next Verification",
+            "Forecast Risks",
+            "Root-Cause Guidance",
+            "Prioritize Recommendations",
+            "Generate Engineering Report",
+            "Summarize Investigation",
+            "List Workflows",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Assistance")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+        match choice {
+            0 => {
+                for d in caps.list_composite_capabilities() {
+                    println!("  • {} — {}", d.id, d.description);
+                }
+            }
+            1 => {
+                let wf = caps
+                    .plan_workflow(id, "investigate_engineering_problem", "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} Planned {} ({} steps)",
+                    style("✓").green(),
+                    wf.id,
+                    wf.steps.len()
+                );
+                for s in &wf.steps {
+                    println!("  {}. {}", s.index, s.capability);
+                }
+            }
+            2 => {
+                let wf = caps
+                    .run_composite(id, "investigate_engineering_problem", "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} {} status={}",
+                    style("✓").green(),
+                    wf.intent,
+                    wf.status.as_str()
+                );
+                if let Some(s) = wf.summary {
+                    println!("{s}");
+                }
+            }
+            3 => {
+                let wf = caps
+                    .run_composite(id, "assess_deployment_readiness", "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} readiness workflow status={}",
+                    style("✓").green(),
+                    wf.status.as_str()
+                );
+            }
+            4 => {
+                let wf = caps
+                    .run_composite(id, "explain_failure", "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} explain-failure status={}",
+                    style("✓").green(),
+                    wf.status.as_str()
+                );
+            }
+            5 => {
+                for h in caps.generate_hypotheses(id, "workspace").map_err(err)? {
+                    println!("  {}. [{}] {}", h.rank, h.status.as_str(), h.statement);
+                }
+            }
+            6 => {
+                for s in caps
+                    .recommend_next_verification(id, "workspace")
+                    .map_err(err)?
+                {
+                    println!("  {}. {} — {}", s.rank, s.claim, s.method);
+                }
+            }
+            7 => {
+                let f = caps.forecast_risk(id, "workspace").map_err(err)?;
+                println!("{}", f.summary);
+                for item in f.items {
+                    println!(
+                        "  • {} [{}]: {}",
+                        item.category.as_str(),
+                        item.severity.as_str(),
+                        item.mitigation
+                    );
+                }
+            }
+            8 => {
+                let g = caps
+                    .generate_root_cause_guidance(id, "workspace")
+                    .map_err(err)?;
+                println!("{}", g.guidance);
+            }
+            9 => {
+                for r in caps
+                    .prioritize_recommendations(id, "workspace")
+                    .map_err(err)?
+                {
+                    println!("  {}. score={:.3} {}", r.rank, r.score, r.summary);
+                }
+            }
+            10 => {
+                let report = caps
+                    .generate_engineering_report(id, "workspace")
+                    .map_err(err)?;
+                println!("{}", report.markdown);
+            }
+            11 => {
+                let s = caps
+                    .summarize_investigation_state(id, "workspace")
+                    .map_err(err)?;
+                println!("{}", s.summary);
+            }
+            12 => {
+                for w in caps.list_workflows(id).map_err(err)? {
+                    println!("  {}  {}  [{}]", w.id, w.intent, w.status.as_str());
+                }
+            }
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+/// Connector status and fixture ingest (read-only).
+fn connector_session(caps: &CapabilityService) -> Result<(), String> {
+    loop {
+        println!("\n{}", style("Connectors").bold());
+        let actions = vec![
+            "List connector status",
+            "Test GitHub Actions config",
+            "Test Kubernetes config",
+            "Test Sentry config",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Connectors")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+        match choice {
+            0 => {
+                for c in [
+                    GitHubActionsConnector::new("owner/repo").status(),
+                    KubernetesConnector::new("default").status(),
+                    SentryConnector::new("org", "project").status(),
+                ] {
+                    println!(
+                        "  {} [{}] configured={} read_only={} — {}",
+                        c.id, c.category, c.configured, c.read_only, c.details
+                    );
+                }
+            }
+            1 => {
+                let msg = GitHubActionsConnector::new("owner/repo")
+                    .test_configuration()
+                    .map_err(|e| e.to_string())?;
+                println!("{} {msg}", style("✓").green());
+            }
+            2 => {
+                let msg = KubernetesConnector::new("default")
+                    .test_configuration()
+                    .map_err(|e| e.to_string())?;
+                println!("{} {msg}", style("✓").green());
+            }
+            3 => {
+                let msg = SentryConnector::new("org", "project")
+                    .test_configuration()
+                    .map_err(|e| e.to_string())?;
+                println!("{} {msg}", style("✓").green());
+            }
+            _ => break,
+        }
+    }
+    // Keep caps referenced for future ingest UI; suppress unused warning.
+    let _ = caps.list_investigations().map_err(err)?;
     Ok(())
 }
 
@@ -875,6 +1080,50 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
     let trend = caps.summarize_historical_trend(None).map_err(err)?;
     assert!(trend.investigation_count >= 2);
     assert!(!trend.summary.is_empty());
+
+    // v0.3 Engineering Assistance: composites, hypotheses, report (RFC-018/019).
+    let assist_inv = caps
+        .create_investigation("Workspace smoke assist", None, "workspace")
+        .map_err(err)?;
+    let _ = caps
+        .ingest_observation(
+            assist_inv.id,
+            ObservationKind::WorkflowRun,
+            "CI workflow failed in smoke assist",
+            serde_json::json!({"conclusion": "failure"}),
+            "github_actions",
+            Utc::now(),
+            Some("workspace-smoke-assist-ci".into()),
+            "workspace",
+        )
+        .map_err(err)?;
+    let wf = caps
+        .run_composite(assist_inv.id, "explain_failure", "workspace")
+        .map_err(err)?;
+    assert!(
+        matches!(
+            wf.status,
+            rivora::domain::WorkflowStatus::Completed
+                | rivora::domain::WorkflowStatus::PartiallyCompleted
+        ),
+        "assist workflow status={}",
+        wf.status.as_str()
+    );
+    let hyps = caps
+        .generate_hypotheses(assist_inv.id, "workspace")
+        .map_err(err)?;
+    assert!(!hyps.is_empty());
+    let readiness = caps
+        .assess_deployment_readiness(assist_inv.id, "workspace")
+        .map_err(err)?;
+    assert!(!readiness.dimensions.is_empty());
+    let report = caps
+        .generate_engineering_report(assist_inv.id, "workspace")
+        .map_err(err)?;
+    assert!(!report.markdown.is_empty());
+    let _ = GitHubActionsConnector::new("owner/repo").status();
+    let _ = KubernetesConnector::new("default").status();
+    let _ = SentryConnector::new("org", "project").status();
 
     println!(
         "workspace smoke ok: investigation {} status {}",

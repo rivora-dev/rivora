@@ -12,35 +12,23 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Release: v0.2 — Investigation Intelligence
+## Current Release: v0.3 — Engineering Assistance
 
-Rivora v0.2 extends the Runtime Foundation so Rivora can **remember** across Investigations.
+Rivora v0.3 answers: **Can Rivora help?**
 
-v0.1 lifecycle (unchanged):
-
-```text
-Observation
-→ Memory
-→ Knowledge
-→ Evaluation
-→ Verification
-→ Recommendation
-→ Learning
-```
-
-v0.2 cross-Investigation intelligence:
+It turns investigation understanding into explainable assistance without becoming an autonomous agent or auto-remediation system.
 
 ```text
-Completed and Active Investigations
-                ↓
-       Investigation Relationships
-                ↓
-          Search and Recall
-                ↓
-       Reusable Engineering Knowledge
-                ↓
-       Better Current Investigations
+Observe → Remember → Understand → Assist
 ```
+
+Shipped in v0.3:
+
+- **Composite Capabilities & Assisted Workflows** (RFC-018) — multi-step plans that coordinate Core Capabilities with durable step history
+- **Expanded connectors** — GitHub Actions (CI), Kubernetes (infra), Sentry (observability), plus local + GitHub (read-only)
+- **Engineering Assistance** (RFC-019) — hypotheses, next verification, deployment readiness, risk forecasts, root-cause guidance, prioritized recommendations, engineering reports
+
+v0.1/v0.2 foundations remain operational. Recommendations are still proposals. Connectors remain read-only. No external systems are mutated.
 
 Interfaces (Workspace and CLI) invoke the same Capability layer over the same Runtime.
 
@@ -66,13 +54,15 @@ Runtime       (single source of reasoning)
       ├── Learning Engine
       ├── Investigation Graph
       ├── Search and Recall
-      └── Recalled Context / Patterns / Trends
+      ├── Recalled Context / Patterns / Trends
+      ├── Assisted Workflows
+      └── Engineering Assistance
       │
       ▼
 Local Store   (.rivora/data)
 
 Connectors ──► Observations only ──► Runtime
-  (local, GitHub)
+  (local, GitHub, GitHub Actions, Kubernetes, Sentry)
 ```
 
 ### Architectural invariants

@@ -5,9 +5,10 @@ mod local;
 pub use local::LocalStore;
 
 use crate::domain::{
-    Evaluation, Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject,
-    LearningOutcome, MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation,
-    TimelineEntry, VerificationReceipt,
+    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
+    Investigation, InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome,
+    MemoryRecord, ObjectId, Observation, RecalledContext, Recommendation, RiskForecast,
+    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 
@@ -112,4 +113,68 @@ pub trait Store: Send + Sync {
 
     /// List Recalled Context records for an Investigation.
     fn list_recalled_context(&self, id: &InvestigationId) -> RivoraResult<Vec<RecalledContext>>;
+
+    /// Persist a new or updated Assisted Workflow (upsert; RFC-018).
+    fn save_workflow(&self, workflow: &AssistedWorkflow) -> RivoraResult<()>;
+
+    /// Load an Assisted Workflow by id.
+    fn load_workflow(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<AssistedWorkflow>;
+
+    /// List Assisted Workflows for an Investigation.
+    fn list_workflows(&self, id: &InvestigationId) -> RivoraResult<Vec<AssistedWorkflow>>;
+
+    /// Append a Hypothesis (RFC-019).
+    fn append_hypothesis(&self, hypothesis: &Hypothesis) -> RivoraResult<()>;
+
+    /// List Hypotheses for an Investigation.
+    fn list_hypotheses(&self, id: &InvestigationId) -> RivoraResult<Vec<Hypothesis>>;
+
+    /// Append a Verification Suggestion.
+    fn append_verification_suggestion(
+        &self,
+        suggestion: &VerificationSuggestion,
+    ) -> RivoraResult<()>;
+
+    /// List Verification Suggestions for an Investigation.
+    fn list_verification_suggestions(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<VerificationSuggestion>>;
+
+    /// Append a Deployment Readiness assessment.
+    fn append_deployment_readiness(&self, readiness: &DeploymentReadiness) -> RivoraResult<()>;
+
+    /// List Deployment Readiness assessments for an Investigation.
+    fn list_deployment_readiness(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<DeploymentReadiness>>;
+
+    /// Append a Risk Forecast.
+    fn append_risk_forecast(&self, forecast: &RiskForecast) -> RivoraResult<()>;
+
+    /// List Risk Forecasts for an Investigation.
+    fn list_risk_forecasts(&self, id: &InvestigationId) -> RivoraResult<Vec<RiskForecast>>;
+
+    /// Append Root-Cause Guidance.
+    fn append_root_cause_guidance(&self, guidance: &RootCauseGuidance) -> RivoraResult<()>;
+
+    /// List Root-Cause Guidance for an Investigation.
+    fn list_root_cause_guidance(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<RootCauseGuidance>>;
+
+    /// Append an Engineering Report.
+    fn append_engineering_report(&self, report: &EngineeringReport) -> RivoraResult<()>;
+
+    /// List Engineering Reports for an Investigation.
+    fn list_engineering_reports(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<EngineeringReport>>;
 }

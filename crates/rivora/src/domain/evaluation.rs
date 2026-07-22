@@ -50,6 +50,19 @@ pub enum AssessmentType {
     Severity,
 }
 
+impl AssessmentType {
+    /// Stable string form.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Health => "health",
+            Self::Risk => "risk",
+            Self::Confidence => "confidence",
+            Self::Readiness => "readiness",
+            Self::Severity => "severity",
+        }
+    }
+}
+
 /// Explainable Evaluation of Investigation Knowledge.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Evaluation {

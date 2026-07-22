@@ -6,7 +6,12 @@
 #![forbid(unsafe_code)]
 
 pub mod github;
+pub mod github_actions;
+pub mod kubernetes;
 pub mod local;
+pub mod sentry;
+
+pub use github_actions::ConnectorStatusReport;
 
 use rivora::domain::{ObservationKind, Provenance};
 use thiserror::Error;

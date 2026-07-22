@@ -693,3 +693,122 @@ fn cli_full_investigation_workflow() {
         String::from_utf8_lossy(&reopen.stderr)
     );
 }
+
+#[test]
+fn cli_v0_3_assist_and_connectors() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let bin = rivora_bin();
+    let id = create_investigation(&bin, &data, "v0.3 assist case");
+
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "observe",
+            "--investigation",
+            &id,
+            "--summary",
+            "CI workflow failed",
+            "--kind",
+            "workflow_run",
+            "--payload",
+            r#"{"conclusion":"failure","name":"deploy"}"#,
+            "--idempotency-key",
+            "v03-ci",
+        ],
+    );
+
+    // Connector list / status
+    run_ok(
+        &bin,
+        &["--data-dir", data.to_str().unwrap(), "connector", "list"],
+    );
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "connector",
+            "status",
+            "github_actions",
+        ],
+    );
+
+    // Fixture collect for github_actions
+    let fixture = dir.path().join("actions.json");
+    std::fs::write(
+        &fixture,
+        r#"{"repository":"acme/app","workflow_runs":[{"id":1,"name":"CI","status":"completed","conclusion":"failure","event":"push","updated_at":"2026-01-01T00:00:00Z"}]}"#,
+    )
+    .unwrap();
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "connector",
+            "collect",
+            "github_actions",
+            "--fixture",
+            fixture.to_str().unwrap(),
+            "--investigation",
+            &id,
+            "--ingest",
+        ],
+    );
+
+    // Composite assist
+    let out = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "assist",
+            "investigate",
+            &id,
+        ],
+    );
+    let wf: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(wf["id"].as_str().is_some());
+    assert!(wf["status"].as_str().is_some());
+
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "assist",
+            "hypotheses",
+            "--investigation",
+            &id,
+        ],
+    );
+    run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "assist",
+            "readiness",
+            &id,
+        ],
+    );
+    let report = run_ok(
+        &bin,
+        &[
+            "--data-dir",
+            data.to_str().unwrap(),
+            "report",
+            "--investigation",
+            &id,
+        ],
+    );
+    let text = String::from_utf8_lossy(&report.stdout);
+    assert!(text.contains("Engineering Report") || text.contains("#"));
+}

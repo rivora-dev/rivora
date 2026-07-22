@@ -33,6 +33,12 @@ pub enum ObservationKind {
     UserInput,
     /// Local structured event file.
     LocalEvent,
+    /// CI / CD workflow run.
+    WorkflowRun,
+    /// Infrastructure resource or deployment state.
+    Infrastructure,
+    /// Observability error, alert, or anomaly.
+    Observability,
     /// Other / extension kind.
     Other(String),
 }
@@ -52,6 +58,9 @@ impl ObservationKind {
             Self::Issue => "issue",
             Self::UserInput => "user_input",
             Self::LocalEvent => "local_event",
+            Self::WorkflowRun => "workflow_run",
+            Self::Infrastructure => "infrastructure",
+            Self::Observability => "observability",
             Self::Other(s) => s.as_str(),
         }
     }

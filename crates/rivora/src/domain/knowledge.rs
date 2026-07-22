@@ -48,6 +48,19 @@ pub enum KnowledgeKind {
     Activity,
 }
 
+impl KnowledgeKind {
+    /// Stable string form.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Summary => "summary",
+            Self::Pattern => "pattern",
+            Self::Relationship => "relationship",
+            Self::RiskSignal => "risk_signal",
+            Self::Activity => "activity",
+        }
+    }
+}
+
 /// How Knowledge was derived.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DerivationMetadata {
