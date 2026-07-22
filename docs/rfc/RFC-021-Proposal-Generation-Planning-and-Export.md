@@ -1,6 +1,6 @@
 # RFC-021: Proposal Generation, Comparison, Planning, and Export
 
-**Status:** Proposed
+**Status:** Implemented
 **Target Version:** v0.4
 
 # Purpose

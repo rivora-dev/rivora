@@ -8,7 +8,7 @@ engineering-system mutation boundaries.
 * v0.1 — Runtime Foundation: observe, remember, reason, verify, recommend, learn
 * v0.2 — Investigation Intelligence: relate, search, recall, reuse context
 * v0.3 — Engineering Assistance: composite workflows, hypotheses, risk, readiness, reports
-* v0.4 — Improvement Proposals: implementation complete with final committed-HEAD validation pending; durable candidate changes, comparison, refinement, proposed plans, export
+* v0.4 — Improvement Proposals: complete and ready for local integration review; durable candidate changes, comparison, refinement, proposed plans, export
 
 ## Current boundary
 

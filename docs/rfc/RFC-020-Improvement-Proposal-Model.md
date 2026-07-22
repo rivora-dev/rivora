@@ -1,6 +1,6 @@
 # RFC-020: Improvement Proposal Model and Lifecycle
 
-**Status:** Proposed
+**Status:** Implemented
 **Target Version:** v0.4
 
 # Purpose
