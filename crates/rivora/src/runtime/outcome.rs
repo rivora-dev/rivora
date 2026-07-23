@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{
     CausalLanguage, Confidence, ConfidenceBreakdown, ConfidenceComponent, ConfidencePenalty,
-    ExpectedResultAssessment, ExpectedResultKind, ExpectedResultSpec, HistoricalInfluenceExplanation,
-    HistoricalPatternInfluence, ImplementationListing, ImplementationRecord,
-    ImplementationReference, ImplementationSource, ImplementationStatus, ImprovementProposal,
-    InvestigationId, LearningPattern, MaterialitySeverity, MeasuredLearningOutcome,
-    MeasuredOutcomeListing, MeasuredOutcomeStatus, ObjectId, OutcomeClassification,
-    OutcomeEvaluationReport, OutcomeEvidenceLink, OutcomeEvidenceRelation, PatternStatus,
-    Provenance, ResultAssessmentKind,
+    ExpectedResultAssessment, ExpectedResultKind, ExpectedResultSpec,
+    HistoricalInfluenceExplanation, HistoricalPatternInfluence, ImplementationListing,
+    ImplementationRecord, ImplementationReference, ImplementationSource, ImplementationStatus,
+    ImprovementProposal, InvestigationId, LearningPattern, MaterialitySeverity,
+    MeasuredLearningOutcome, MeasuredOutcomeListing, MeasuredOutcomeStatus, ObjectId,
+    OutcomeClassification, OutcomeEvaluationReport, OutcomeEvidenceLink, OutcomeEvidenceRelation,
+    PatternStatus, Provenance, ResultAssessmentKind,
 };
 use crate::error::{RivoraError, RivoraResult};
 use crate::runtime::Runtime;
@@ -274,12 +274,8 @@ impl Runtime {
         let actor = actor.into();
         let reason = reason.into();
         let current = self.get_latest_implementation(investigation_id, record_id)?;
-        let next = current.transitioned(
-            ImplementationStatus::Withdrawn,
-            &actor,
-            &reason,
-            Utc::now(),
-        )?;
+        let next =
+            current.transitioned(ImplementationStatus::Withdrawn, &actor, &reason, Utc::now())?;
         self.store.append_implementation_record(&next)?;
         Ok(next)
     }
@@ -585,10 +581,10 @@ impl Runtime {
 
         // Evaluate against the exact implementation snapshot linked at creation.
         // Fall back to latest revision in that lineage if the snapshot is missing.
-        let implementation = match self.store.load_implementation_record(
-            &investigation_id,
-            &current.implementation_record_id,
-        ) {
+        let implementation = match self
+            .store
+            .load_implementation_record(&investigation_id, &current.implementation_record_id)
+        {
             Ok(record) => record,
             Err(RivoraError::ObjectNotFound(_)) => {
                 let listing = self.store.list_implementation_revisions(
@@ -599,7 +595,9 @@ impl Runtime {
                     .records
                     .into_iter()
                     .max_by_key(|r| r.revision_number)
-                    .ok_or(RivoraError::ObjectNotFound(current.implementation_record_id))?
+                    .ok_or(RivoraError::ObjectNotFound(
+                        current.implementation_record_id,
+                    ))?
             }
             Err(error) => return Err(error),
         };
@@ -1020,10 +1018,7 @@ impl Runtime {
     }
 
     /// Export a Learning Pattern as Markdown.
-    pub fn export_learning_pattern_markdown(
-        &self,
-        pattern_id: ObjectId,
-    ) -> RivoraResult<String> {
+    pub fn export_learning_pattern_markdown(&self, pattern_id: ObjectId) -> RivoraResult<String> {
         let pattern = self.store.load_learning_pattern(&pattern_id)?;
         Ok(format_pattern_markdown(&pattern))
     }
@@ -1102,7 +1097,7 @@ impl Runtime {
 const EVALUATION_METHOD: &str = "measured_outcome_evaluation_v1";
 
 /// Internal evaluation result.
-struct EvaluationResult {
+pub struct EvaluationResult {
     classification: OutcomeClassification,
     assessments: Vec<ExpectedResultAssessment>,
     confidence_breakdown: ConfidenceBreakdown,
@@ -1195,7 +1190,12 @@ pub fn evaluate_outcome_deterministic(
     steps.push(format!(
         "Implementation proven: {implementation_proven} (status={}, evidence={}, refs={})",
         implementation.status.as_str(),
-        implementation.evidence_ids.len() + outcome.evidence_links.iter().filter(|l| l.relation == OutcomeEvidenceRelation::ConfirmsImplementation).count(),
+        implementation.evidence_ids.len()
+            + outcome
+                .evidence_links
+                .iter()
+                .filter(|l| l.relation == OutcomeEvidenceRelation::ConfirmsImplementation)
+                .count(),
         implementation.references.len()
     ));
 
@@ -1205,7 +1205,8 @@ pub fn evaluate_outcome_deterministic(
         breakdown.penalties.push(ConfidencePenalty {
             name: "missing_implementation_proof".into(),
             amount: 0.5,
-            explanation: "Implementation is not proven by status, references, or confirming evidence".into(),
+            explanation:
+                "Implementation is not proven by status, references, or confirming evidence".into(),
         });
         breakdown.final_confidence = Confidence::new(0.2);
         return EvaluationResult {
@@ -1295,7 +1296,9 @@ pub fn evaluate_outcome_deterministic(
             unresolved_questions: vec!["Resolve disputed implementation evidence".into()],
             causal_language: CausalLanguage::ObservedAfterImplementation,
             lessons: Vec::new(),
-            recommended_follow_up: vec!["Resolve implementation dispute before re-evaluation".into()],
+            recommended_follow_up: vec![
+                "Resolve implementation dispute before re-evaluation".into()
+            ],
             verification_ready: false,
             blocked: false,
             steps,
@@ -1462,8 +1465,14 @@ pub fn evaluate_outcome_deterministic(
         classification.as_str()
     ));
 
-    let confidence_breakdown =
-        build_confidence_breakdown(implementation, has_baseline, has_post, &assessments, &regressions, &contradictions);
+    let confidence_breakdown = build_confidence_breakdown(
+        implementation,
+        has_baseline,
+        has_post,
+        &assessments,
+        &regressions,
+        &contradictions,
+    );
 
     let causal_language = if classification == OutcomeClassification::Successful
         && confidence_breakdown.final_confidence.value() >= 0.8
@@ -1476,10 +1485,7 @@ pub fn evaluate_outcome_deterministic(
     } else {
         CausalLanguage::ObservedAfterImplementation
     };
-    steps.push(format!(
-        "Causal language = {}",
-        causal_language.as_str()
-    ));
+    steps.push(format!("Causal language = {}", causal_language.as_str()));
 
     let lessons = derive_lessons(classification, &assessments);
     let recommended_follow_up = derive_follow_up(classification, &unresolved, &regressions);
@@ -1496,7 +1502,9 @@ pub fn evaluate_outcome_deterministic(
             OutcomeClassification::Pending | OutcomeClassification::NotImplemented
         )
         && confidence_breakdown.final_confidence.value() >= 0.4
-        && contradictions.iter().all(|c| c.resolved || c.severity != MaterialitySeverity::Critical);
+        && contradictions
+            .iter()
+            .all(|c| c.resolved || c.severity != MaterialitySeverity::Critical);
 
     steps.push(format!(
         "Verification ready: {verification_ready} (blocked={blocked})"
@@ -1643,14 +1651,14 @@ fn build_confidence_breakdown(
     contradictions: &[crate::domain::ContradictionRecord],
 ) -> ConfidenceBreakdown {
     let mut components = Vec::new();
-    let impl_quality = if !implementation.references.is_empty() && !implementation.evidence_ids.is_empty()
-    {
-        0.9
-    } else if !implementation.references.is_empty() || !implementation.evidence_ids.is_empty() {
-        0.7
-    } else {
-        0.4
-    };
+    let impl_quality =
+        if !implementation.references.is_empty() && !implementation.evidence_ids.is_empty() {
+            0.9
+        } else if !implementation.references.is_empty() || !implementation.evidence_ids.is_empty() {
+            0.7
+        } else {
+            0.4
+        };
     components.push(ConfidenceComponent {
         name: "implementation_evidence_quality".into(),
         value: impl_quality,
@@ -1805,9 +1813,7 @@ fn derive_lessons(
             .collect(),
         evidence_strength: "Deterministic assessment from linked evidence".into(),
         proposal_category: None,
-        applicability: vec![
-            "Applies only under similar evidence and scope conditions".into(),
-        ],
+        applicability: vec!["Applies only under similar evidence and scope conditions".into()],
         exceptions: Vec::new(),
     }]
 }
@@ -2096,9 +2102,11 @@ mod tests {
             Provenance::now("engineer", "test"),
         )
         .unwrap();
-        record.references.push(ImplementationReference::PullRequest {
-            reference: "42".into(),
-        });
+        record
+            .references
+            .push(ImplementationReference::PullRequest {
+                reference: "42".into(),
+            });
 
         let e1 = ObjectId::new();
         let e2 = ObjectId::new();

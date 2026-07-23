@@ -10,10 +10,14 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
 use rivora::domain::{
-    Confidence, ImprovementProposal, InvestigationId, InvestigationStatus, ObjectId,
-    ObservationKind, OutcomeDisposition, ProposalCategory, ProposalFeedbackCategory,
-    ProposalPriority, ProposalStatus, ProposalTransitionAuthority, RelationshipKind,
-    VerificationResult,
+    Confidence, ImplementationRecord, ImplementationReference, ImplementationSource,
+    ImprovementProposal, InvestigationId, InvestigationStatus, MeasuredLearningOutcome, ObjectId,
+    ObservationKind, OutcomeDisposition, OutcomeEvidenceRelation, ProposalCategory,
+    ProposalFeedbackCategory, ProposalPriority, ProposalStatus, ProposalTransitionAuthority,
+    RelationshipKind, VerificationResult,
+};
+use rivora::runtime::outcome::{
+    CollectOutcomeEvidenceRequest, RecordImplementationRequest, ReviseImplementationRequest,
 };
 use rivora::runtime::proposal::{
     CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
@@ -29,6 +33,7 @@ use rivora_connectors::sentry::SentryConnector;
 use rivora_connectors::NormalizedObservation;
 
 const PROPOSAL_BOUNDARY: &str = "Proposal only — not applied, not implemented, not verified.";
+const LEARNING_BOUNDARY: &str = "Measured Learning Outcome — external implementation recorded, never auto-applied; verified only with explicit actor+reason.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -173,8 +178,8 @@ enum Commands {
         #[arg(long)]
         investigation: String,
     },
-    /// Record a Learning outcome.
-    Learn {
+    /// Record a v0.1 Learning Outcome disposition (recommendation feedback).
+    RecordOutcome {
         #[arg(long)]
         investigation: String,
         #[arg(long)]
@@ -185,6 +190,16 @@ enum Commands {
         notes: String,
         #[arg(long)]
         impact: Option<String>,
+    },
+    /// Implementation Records for external work associated with Proposals (v0.5).
+    Implementation {
+        #[command(subcommand)]
+        action: ImplementationCmd,
+    },
+    /// Measured Learning Outcomes, patterns, and historical influence (v0.5).
+    Learn {
+        #[command(subcommand)]
+        action: LearnCmd,
     },
     /// Run full pipeline: knowledge → evaluate → verify → recommend.
     Pipeline {
@@ -433,6 +448,233 @@ enum ProposalCmd {
 }
 
 #[derive(Debug, Subcommand)]
+enum ImplementationCmd {
+    /// Record that external implementation work was performed for a Proposal.
+    Record {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        proposal: String,
+        #[arg(long, value_enum)]
+        source: ImplementationSourceArg,
+        #[arg(long)]
+        summary: String,
+        /// Free-form reference value (used with --reference-kind).
+        #[arg(long)]
+        reference: Option<String>,
+        #[arg(long, value_enum)]
+        reference_kind: Option<ImplementationReferenceKindArg>,
+        #[arg(long)]
+        commit_sha: Option<String>,
+        #[arg(long)]
+        pr: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        observed_file: Vec<String>,
+        #[arg(long)]
+        observed_component: Vec<String>,
+        #[arg(long, default_value = "")]
+        declared_scope: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// List Implementation Records for an Investigation.
+    List {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show one Implementation Record.
+    Show {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        implementation: String,
+    },
+    /// Revise an Implementation Record into a successor snapshot.
+    Revise {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        implementation: String,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Link evidence object identifiers to an Implementation Record.
+    EvidenceAdd {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        implementation: String,
+        #[arg(long = "evidence", required = true)]
+        evidence: Vec<String>,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Mark an Implementation Record ready for Measured Outcome evaluation.
+    Ready {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        implementation: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Withdraw an Implementation Record.
+    Withdraw {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        implementation: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum LearnCmd {
+    /// Create a Draft Measured Learning Outcome.
+    Create {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        proposal: String,
+        #[arg(long)]
+        implementation: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Collect typed evidence on a Measured Learning Outcome.
+    EvidenceAdd {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long)]
+        evidence: String,
+        #[arg(long, value_enum)]
+        relation: OutcomeEvidenceRelationArg,
+        #[arg(long)]
+        expected_result: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Deterministically evaluate a Measured Learning Outcome.
+    Evaluate {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Explicitly verify a Measured Learning Outcome (requires actor + reason).
+    Verify {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value_t = false)]
+        override_readiness: bool,
+        #[arg(long)]
+        override_reason: Option<String>,
+    },
+    /// List Measured Learning Outcomes for an Investigation.
+    List {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show one Measured Learning Outcome.
+    Show {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+    },
+    /// Trace Proposal → Implementation → Measured Learning Outcome.
+    Trace {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+    },
+    /// List immutable revisions for a Measured Learning Outcome lineage.
+    History {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+    },
+    /// Withdraw a Measured Learning Outcome.
+    Withdraw {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Export a Measured Learning Outcome.
+    Export {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        outcome: String,
+        #[arg(long, value_enum, default_value = "markdown")]
+        format: LearningExportFormatArg,
+    },
+    /// List Learning Patterns (use --derive to derive first).
+    Patterns {
+        #[arg(long, default_value_t = false)]
+        derive: bool,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Show one Learning Pattern.
+    PatternShow {
+        #[arg(long)]
+        pattern: String,
+    },
+    /// Export a Learning Pattern.
+    PatternExport {
+        #[arg(long)]
+        pattern: String,
+        #[arg(long, value_enum, default_value = "markdown")]
+        format: LearningExportFormatArg,
+    },
+    /// Explain historical Learning Pattern influence for a Proposal.
+    Influence {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        proposal: String,
+    },
+    /// Derive Learning Patterns from verified Measured Outcomes.
+    DerivePatterns {
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum AssistCmd {
     /// List Composite Capability intents.
     Intents,
@@ -636,6 +878,98 @@ enum InvestigationCmd {
     },
     /// Dismiss a Recalled Context record.
     ContextDismiss { id: String, context: String },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ImplementationSourceArg {
+    HumanDeclared,
+    GitCommit,
+    PullRequest,
+    Patch,
+    Deployment,
+    ConfigurationChange,
+    RunbookExecution,
+    ExternalAgent,
+    Other,
+}
+
+impl From<ImplementationSourceArg> for ImplementationSource {
+    fn from(value: ImplementationSourceArg) -> Self {
+        match value {
+            ImplementationSourceArg::HumanDeclared => Self::HumanDeclared,
+            ImplementationSourceArg::GitCommit => Self::GitCommit,
+            ImplementationSourceArg::PullRequest => Self::PullRequest,
+            ImplementationSourceArg::Patch => Self::Patch,
+            ImplementationSourceArg::Deployment => Self::Deployment,
+            ImplementationSourceArg::ConfigurationChange => Self::ConfigurationChange,
+            ImplementationSourceArg::RunbookExecution => Self::RunbookExecution,
+            ImplementationSourceArg::ExternalAgent => Self::ExternalAgent,
+            ImplementationSourceArg::Other => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ImplementationReferenceKindArg {
+    CommitSha,
+    PullRequest,
+    Branch,
+    DeploymentId,
+    BuildId,
+    IncidentId,
+    WorkflowRun,
+    ArtifactPath,
+    ExternalUri,
+    HumanNote,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OutcomeEvidenceRelationArg {
+    SupportsExpectedResult,
+    ContradictsExpectedResult,
+    IndicatesRegression,
+    ConfirmsImplementation,
+    DisputesImplementation,
+    IsBaseline,
+    IsPostChange,
+    IsInconclusive,
+    IsSuperseded,
+    IsDismissed,
+    Baseline,
+    PostChange,
+    Supports,
+    Contradicts,
+    Regression,
+}
+
+impl From<OutcomeEvidenceRelationArg> for OutcomeEvidenceRelation {
+    fn from(value: OutcomeEvidenceRelationArg) -> Self {
+        match value {
+            OutcomeEvidenceRelationArg::SupportsExpectedResult
+            | OutcomeEvidenceRelationArg::Supports => Self::SupportsExpectedResult,
+            OutcomeEvidenceRelationArg::ContradictsExpectedResult
+            | OutcomeEvidenceRelationArg::Contradicts => Self::ContradictsExpectedResult,
+            OutcomeEvidenceRelationArg::IndicatesRegression
+            | OutcomeEvidenceRelationArg::Regression => Self::IndicatesRegression,
+            OutcomeEvidenceRelationArg::ConfirmsImplementation => Self::ConfirmsImplementation,
+            OutcomeEvidenceRelationArg::DisputesImplementation => Self::DisputesImplementation,
+            OutcomeEvidenceRelationArg::IsBaseline | OutcomeEvidenceRelationArg::Baseline => {
+                Self::IsBaseline
+            }
+            OutcomeEvidenceRelationArg::IsPostChange | OutcomeEvidenceRelationArg::PostChange => {
+                Self::IsPostChange
+            }
+            OutcomeEvidenceRelationArg::IsInconclusive => Self::IsInconclusive,
+            OutcomeEvidenceRelationArg::IsSuperseded => Self::IsSuperseded,
+            OutcomeEvidenceRelationArg::IsDismissed => Self::IsDismissed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum LearningExportFormatArg {
+    Markdown,
+    Json,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1407,7 +1741,7 @@ fn run() -> Result<(), String> {
                     .join("\n")
             });
         }
-        Commands::Learn {
+        Commands::RecordOutcome {
             investigation,
             recommendation,
             disposition,
@@ -2394,6 +2728,447 @@ fn run() -> Result<(), String> {
                 });
             }
         },
+        Commands::Implementation { action } => match action {
+            ImplementationCmd::Record {
+                investigation,
+                proposal,
+                source,
+                summary,
+                reference,
+                reference_kind,
+                commit_sha,
+                pr,
+                note,
+                observed_file,
+                observed_component,
+                declared_scope,
+                actor,
+            } => {
+                let mut references = Vec::new();
+                if let Some(sha) = commit_sha {
+                    references.push(ImplementationReference::CommitSha { sha });
+                }
+                if let Some(pr_ref) = pr {
+                    references.push(ImplementationReference::PullRequest { reference: pr_ref });
+                }
+                if let Some(note_text) = note {
+                    references.push(ImplementationReference::HumanNote { note: note_text });
+                }
+                if let (Some(value), Some(kind)) = (reference, reference_kind) {
+                    references.push(build_implementation_reference(kind, value)?);
+                }
+                let record = caps
+                    .record_external_implementation(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                        RecordImplementationRequest {
+                            source: source.into(),
+                            summary,
+                            references,
+                            implemented_at: None,
+                            observed_files: observed_file,
+                            observed_components: observed_component,
+                            declared_scope,
+                        },
+                        actor,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &record, || print_implementation(&record));
+            }
+            ImplementationCmd::List { investigation } => {
+                let listing = caps
+                    .list_implementation_records(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_learning_value(cli.json, &listing, || {
+                    let mut output = if listing.records.is_empty() {
+                        "No Implementation Records.".into()
+                    } else {
+                        listing
+                            .records
+                            .iter()
+                            .map(|record| {
+                                format!(
+                                    "{}  [{} / {}]  {}  (revision {})",
+                                    record.id,
+                                    record.status.as_str(),
+                                    record.source.as_str(),
+                                    record.summary,
+                                    record.revision_number,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    output.push('\n');
+                    output.push_str(LEARNING_BOUNDARY);
+                    output
+                });
+            }
+            ImplementationCmd::Show {
+                investigation,
+                implementation,
+            } => {
+                let record = caps
+                    .get_implementation_record(
+                        parse_inv(&investigation)?,
+                        parse_obj(&implementation)?,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &record, || print_implementation(&record));
+            }
+            ImplementationCmd::Revise {
+                investigation,
+                implementation,
+                summary,
+                reason,
+                actor,
+            } => {
+                let record = caps
+                    .revise_implementation_record(
+                        parse_inv(&investigation)?,
+                        parse_obj(&implementation)?,
+                        ReviseImplementationRequest {
+                            summary,
+                            ..ReviseImplementationRequest::default()
+                        },
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &record, || print_implementation(&record));
+            }
+            ImplementationCmd::EvidenceAdd {
+                investigation,
+                implementation,
+                evidence,
+                reason,
+                actor,
+            } => {
+                let evidence_ids = evidence
+                    .iter()
+                    .map(|value| parse_obj(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let record = caps
+                    .link_implementation_evidence(
+                        parse_inv(&investigation)?,
+                        parse_obj(&implementation)?,
+                        evidence_ids,
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &record, || print_implementation(&record));
+            }
+            ImplementationCmd::Ready {
+                investigation,
+                implementation,
+                reason,
+                actor,
+            } => {
+                let record = caps
+                    .mark_implementation_ready(
+                        parse_inv(&investigation)?,
+                        parse_obj(&implementation)?,
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &record, || print_implementation(&record));
+            }
+            ImplementationCmd::Withdraw {
+                investigation,
+                implementation,
+                reason,
+                actor,
+            } => {
+                let record = caps
+                    .withdraw_implementation(
+                        parse_inv(&investigation)?,
+                        parse_obj(&implementation)?,
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &record, || print_implementation(&record));
+            }
+        },
+        Commands::Learn { action } => match action {
+            LearnCmd::Create {
+                investigation,
+                proposal,
+                implementation,
+                actor,
+            } => {
+                let outcome = caps
+                    .create_measured_learning_outcome(
+                        parse_inv(&investigation)?,
+                        parse_obj(&proposal)?,
+                        parse_obj(&implementation)?,
+                        actor,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &outcome, || print_measured_outcome(&outcome));
+            }
+            LearnCmd::EvidenceAdd {
+                investigation,
+                outcome,
+                evidence,
+                relation,
+                expected_result,
+                reason,
+                actor,
+            } => {
+                let outcome = caps
+                    .collect_outcome_evidence(
+                        parse_inv(&investigation)?,
+                        parse_obj(&outcome)?,
+                        CollectOutcomeEvidenceRequest {
+                            object_id: parse_obj(&evidence)?,
+                            relation: relation.into(),
+                            expected_result_id: expected_result
+                                .as_deref()
+                                .map(parse_obj)
+                                .transpose()?,
+                            reason,
+                        },
+                        actor,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &outcome, || print_measured_outcome(&outcome));
+            }
+            LearnCmd::Evaluate {
+                investigation,
+                outcome,
+                actor,
+            } => {
+                let outcome = caps
+                    .evaluate_measured_learning_outcome(
+                        parse_inv(&investigation)?,
+                        parse_obj(&outcome)?,
+                        actor,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &outcome, || print_measured_outcome(&outcome));
+            }
+            LearnCmd::Verify {
+                investigation,
+                outcome,
+                actor,
+                reason,
+                override_readiness,
+                override_reason,
+            } => {
+                let outcome = caps
+                    .verify_measured_learning_outcome(
+                        parse_inv(&investigation)?,
+                        parse_obj(&outcome)?,
+                        actor,
+                        reason,
+                        override_readiness,
+                        override_reason,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &outcome, || print_measured_outcome(&outcome));
+            }
+            LearnCmd::List { investigation } => {
+                let listing = caps
+                    .list_measured_learning_outcomes(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_learning_value(cli.json, &listing, || {
+                    let mut output = if listing.outcomes.is_empty() {
+                        "No Measured Learning Outcomes.".into()
+                    } else {
+                        listing
+                            .outcomes
+                            .iter()
+                            .map(|outcome| {
+                                format!(
+                                    "{}  [{} / {}]  proposal {}  impl {}  (revision {})",
+                                    outcome.id,
+                                    outcome.status.as_str(),
+                                    outcome.classification.as_str(),
+                                    outcome.proposal_id,
+                                    outcome.implementation_record_id,
+                                    outcome.revision_number,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    output.push('\n');
+                    output.push_str(LEARNING_BOUNDARY);
+                    output
+                });
+            }
+            LearnCmd::Show {
+                investigation,
+                outcome,
+            } => {
+                let outcome = caps
+                    .get_measured_learning_outcome(parse_inv(&investigation)?, parse_obj(&outcome)?)
+                    .map_err(err)?;
+                print_learning_value(cli.json, &outcome, || print_measured_outcome(&outcome));
+            }
+            LearnCmd::Trace {
+                investigation,
+                outcome,
+            } => {
+                let trace = caps
+                    .trace_measured_learning_outcome(
+                        parse_inv(&investigation)?,
+                        parse_obj(&outcome)?,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &trace, || {
+                    format!(
+                        "Proposal {} → Implementation {} → Measured Outcome {}\n  classification: {}\n  status: {}\n  {}\n{}",
+                        trace.proposal_id,
+                        trace.implementation_record_id,
+                        trace.outcome_id,
+                        trace.classification.as_str(),
+                        trace.status.as_str(),
+                        trace.explanation,
+                        LEARNING_BOUNDARY,
+                    )
+                });
+            }
+            LearnCmd::History {
+                investigation,
+                outcome,
+            } => {
+                let current = caps
+                    .get_measured_learning_outcome(parse_inv(&investigation)?, parse_obj(&outcome)?)
+                    .map_err(err)?;
+                let listing = caps
+                    .list_measured_outcome_revisions(parse_inv(&investigation)?, current.lineage_id)
+                    .map_err(err)?;
+                print_learning_value(cli.json, &listing, || {
+                    let mut output = listing
+                        .outcomes
+                        .iter()
+                        .map(|item| {
+                            format!(
+                                "revision {}  {}  [{} / {}]",
+                                item.revision_number,
+                                item.id,
+                                item.status.as_str(),
+                                item.classification.as_str(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    output.push('\n');
+                    output.push_str(LEARNING_BOUNDARY);
+                    output
+                });
+            }
+            LearnCmd::Withdraw {
+                investigation,
+                outcome,
+                reason,
+                actor,
+            } => {
+                let outcome = caps
+                    .withdraw_measured_learning_outcome(
+                        parse_inv(&investigation)?,
+                        parse_obj(&outcome)?,
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_learning_value(cli.json, &outcome, || print_measured_outcome(&outcome));
+            }
+            LearnCmd::Export {
+                investigation,
+                outcome,
+                format,
+            } => {
+                let inv = parse_inv(&investigation)?;
+                let outcome_id = parse_obj(&outcome)?;
+                match format {
+                    LearningExportFormatArg::Markdown => {
+                        let markdown = caps
+                            .export_measured_learning_outcome_markdown(inv, outcome_id)
+                            .map_err(err)?;
+                        println!("{markdown}");
+                    }
+                    LearningExportFormatArg::Json => {
+                        let json = caps
+                            .export_measured_learning_outcome_json(inv, outcome_id)
+                            .map_err(err)?;
+                        println!("{json}");
+                    }
+                }
+            }
+            LearnCmd::Patterns { derive, actor } => {
+                if derive {
+                    let derived = caps.derive_learning_patterns(actor).map_err(err)?;
+                    print_learning_value(cli.json, &derived, || format_learning_patterns(&derived));
+                } else {
+                    let patterns = caps.list_learning_patterns().map_err(err)?;
+                    print_learning_value(cli.json, &patterns, || {
+                        format_learning_patterns(&patterns)
+                    });
+                }
+            }
+            LearnCmd::PatternShow { pattern } => {
+                let pattern = caps
+                    .get_learning_pattern(parse_obj(&pattern)?)
+                    .map_err(err)?;
+                print_learning_value(cli.json, &pattern, || {
+                    format!(
+                        "Pattern {} [{}]\n  {}\n  signature: {}\n  confidence: {:.0}%\n  supporting outcomes: {}\n  contradicting outcomes: {}\n{}",
+                        pattern.id,
+                        pattern.status.as_str(),
+                        pattern.title,
+                        pattern.signature,
+                        pattern.confidence.value() * 100.0,
+                        pattern.supporting_outcome_ids.len(),
+                        pattern.contradicting_outcome_ids.len(),
+                        LEARNING_BOUNDARY,
+                    )
+                });
+            }
+            LearnCmd::PatternExport { pattern, format } => {
+                let pattern_id = parse_obj(&pattern)?;
+                match format {
+                    LearningExportFormatArg::Markdown => {
+                        let markdown = caps
+                            .export_learning_pattern_markdown(pattern_id)
+                            .map_err(err)?;
+                        println!("{markdown}");
+                    }
+                    LearningExportFormatArg::Json => {
+                        let json = caps.export_learning_pattern_json(pattern_id).map_err(err)?;
+                        println!("{json}");
+                    }
+                }
+            }
+            LearnCmd::Influence {
+                investigation,
+                proposal,
+            } => {
+                let influence = caps
+                    .explain_historical_influence(parse_inv(&investigation)?, parse_obj(&proposal)?)
+                    .map_err(err)?;
+                print_learning_value(cli.json, &influence, || {
+                    let mut output = influence.explanation.clone();
+                    for item in &influence.patterns_considered {
+                        output.push_str(&format!(
+                            "\n  • pattern {}  {}  magnitude={:.3} — {}",
+                            item.pattern_id, item.direction, item.magnitude, item.relevance
+                        ));
+                    }
+                    output.push('\n');
+                    output.push_str(LEARNING_BOUNDARY);
+                    output
+                });
+            }
+            LearnCmd::DerivePatterns { actor } => {
+                let derived = caps.derive_learning_patterns(actor).map_err(err)?;
+                print_learning_value(cli.json, &derived, || format_learning_patterns(&derived));
+            }
+        },
     }
 
     Ok(())
@@ -2761,6 +3536,136 @@ fn print_search_results(results: &[SearchResult]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn build_implementation_reference(
+    kind: ImplementationReferenceKindArg,
+    value: String,
+) -> Result<ImplementationReference, String> {
+    Ok(match kind {
+        ImplementationReferenceKindArg::CommitSha => {
+            ImplementationReference::CommitSha { sha: value }
+        }
+        ImplementationReferenceKindArg::PullRequest => {
+            ImplementationReference::PullRequest { reference: value }
+        }
+        ImplementationReferenceKindArg::Branch => ImplementationReference::Branch { name: value },
+        ImplementationReferenceKindArg::DeploymentId => {
+            ImplementationReference::DeploymentId { id: value }
+        }
+        ImplementationReferenceKindArg::BuildId => ImplementationReference::BuildId { id: value },
+        ImplementationReferenceKindArg::IncidentId => {
+            ImplementationReference::IncidentId { id: value }
+        }
+        ImplementationReferenceKindArg::WorkflowRun => {
+            ImplementationReference::WorkflowRun { id: value }
+        }
+        ImplementationReferenceKindArg::ArtifactPath => {
+            ImplementationReference::ArtifactPath { path: value }
+        }
+        ImplementationReferenceKindArg::ExternalUri => {
+            ImplementationReference::ExternalUri { uri: value }
+        }
+        ImplementationReferenceKindArg::HumanNote => {
+            ImplementationReference::HumanNote { note: value }
+        }
+    })
+}
+
+fn print_learning_value<T: serde::Serialize>(
+    json: bool,
+    value: &T,
+    human: impl FnOnce() -> String,
+) {
+    if !json {
+        println!("{}", human());
+        return;
+    }
+    match serde_json::to_value(value) {
+        Ok(mut structured) => {
+            if let Some(object) = structured.as_object_mut() {
+                object.insert(
+                    "boundary".into(),
+                    serde_json::Value::String(LEARNING_BOUNDARY.into()),
+                );
+            }
+            print_value(true, &structured, String::new);
+        }
+        Err(error) => eprintln!("error encoding json: {error}"),
+    }
+}
+
+fn print_implementation(record: &ImplementationRecord) -> String {
+    format!(
+        "Implementation {} revision {} [{} / {}]\n  proposal: {}\n  summary: {}\n  references: {}\n  evidence: {}\n  scope: {}\n{}",
+        record.id,
+        record.revision_number,
+        record.status.as_str(),
+        record.source.as_str(),
+        record.proposal_id,
+        record.summary,
+        record.references.len(),
+        record.evidence_ids.len(),
+        if record.declared_scope.is_empty() {
+            "none declared"
+        } else {
+            record.declared_scope.as_str()
+        },
+        LEARNING_BOUNDARY,
+    )
+}
+
+fn print_measured_outcome(outcome: &MeasuredLearningOutcome) -> String {
+    let report = outcome
+        .evaluation_report
+        .as_ref()
+        .map(|report| {
+            format!(
+                "evaluation: verification_ready={} method={}",
+                report.verification_ready, report.method
+            )
+        })
+        .unwrap_or_else(|| "evaluation: not yet run".into());
+    format!(
+        "Measured Outcome {} revision {} [{} / {}]\n  proposal: {}\n  implementation: {}\n  confidence: {:.0}%\n  expected results: {}\n  assessments: {}\n  evidence links: {}\n  regressions: {}\n  {}\n  historical learning eligible: {}\n{}",
+        outcome.id,
+        outcome.revision_number,
+        outcome.status.as_str(),
+        outcome.classification.as_str(),
+        outcome.proposal_id,
+        outcome.implementation_record_id,
+        outcome.confidence.value() * 100.0,
+        outcome.expected_results.len(),
+        outcome.assessments.len(),
+        outcome.evidence_links.len(),
+        outcome.regressions.len(),
+        report,
+        outcome.historical_learning_eligible,
+        LEARNING_BOUNDARY,
+    )
+}
+
+fn format_learning_patterns(patterns: &[rivora::domain::LearningPattern]) -> String {
+    let mut output = if patterns.is_empty() {
+        "No Learning Patterns.".into()
+    } else {
+        patterns
+            .iter()
+            .map(|pattern| {
+                format!(
+                    "{}  [{}]  {}  (confidence {:.0}%)",
+                    pattern.id,
+                    pattern.status.as_str(),
+                    pattern.signature,
+                    pattern.confidence.value() * 100.0,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    output.push('\n');
+    output.push_str(LEARNING_BOUNDARY);
+    output
 }
 
 fn print_value<T: serde::Serialize>(json: bool, value: &T, human: impl FnOnce() -> String) {

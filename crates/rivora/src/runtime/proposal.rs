@@ -1251,19 +1251,35 @@ impl Runtime {
                 OutcomeDisposition::Accepted | OutcomeDisposition::Ignored => current_neutral += 1,
             }
         }
-        let raw = if successful > unsuccessful {
+        let mut raw = if successful > unsuccessful {
             0.8
         } else if unsuccessful > successful {
             0.3
         } else {
             0.5
         };
-        Ok((
-            raw,
-            format!(
-                "Labeled historical outcomes: {successful} successful, {unsuccessful} unsuccessful/rejected, {neutral} accepted/ignored. Current labeled outcomes: {current_successful} successful, {current_unsuccessful} unsuccessful/rejected, {current_neutral} accepted/ignored."
-            ),
-        ))
+        let mut explanation = format!(
+            "Labeled historical outcomes: {successful} successful, {unsuccessful} unsuccessful/rejected, {neutral} accepted/ignored. Current labeled outcomes: {current_successful} successful, {current_unsuccessful} unsuccessful/rejected, {current_neutral} accepted/ignored."
+        );
+
+        // Bounded advisory adjustment from verified Measured Learning Patterns.
+        // Current Investigation evidence remains primary; never suppress proposals.
+        if let Ok(influence) =
+            self.explain_historical_influence(proposal.investigation_id, proposal.id)
+        {
+            if !influence.patterns_considered.is_empty() {
+                let adjustment = (influence.aggregate_influence * 0.15).clamp(-0.15, 0.15);
+                raw = (raw + adjustment).clamp(0.0, 1.0);
+                explanation.push_str(&format!(
+                    " Measured Learning Pattern influence: considered {} pattern(s), aggregate {:.3}, bounded adjustment {:+.3} (advisory; current evidence remains primary).",
+                    influence.patterns_considered.len(),
+                    influence.aggregate_influence,
+                    adjustment
+                ));
+            }
+        }
+
+        Ok((raw, explanation))
     }
 
     fn current_proposal_input_ids(

@@ -1362,12 +1362,7 @@ mod tests {
         )
         .unwrap();
         let err = record
-            .transitioned(
-                ImplementationStatus::Superseded,
-                "",
-                "no actor",
-                Utc::now(),
-            )
+            .transitioned(ImplementationStatus::Superseded, "", "no actor", Utc::now())
             .unwrap_err();
         assert!(matches!(err, RivoraError::Validation(_)));
     }
@@ -1441,9 +1436,11 @@ mod tests {
             Provenance::now("engineer", "test"),
         )
         .unwrap();
-        record.references.push(ImplementationReference::PullRequest {
-            reference: "https://example.com/pr/1".into(),
-        });
+        record
+            .references
+            .push(ImplementationReference::PullRequest {
+                reference: "https://example.com/pr/1".into(),
+            });
         let json = serde_json::to_string(&record).unwrap();
         let decoded: ImplementationRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, record);

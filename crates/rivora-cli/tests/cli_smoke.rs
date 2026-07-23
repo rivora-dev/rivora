@@ -269,7 +269,7 @@ fn cli_search_and_recall_workflow() {
         &[
             "--data-dir",
             data.to_str().unwrap(),
-            "learn",
+            "record-outcome",
             "--investigation",
             &a,
             "--recommendation",
@@ -643,7 +643,7 @@ fn cli_full_investigation_workflow() {
         .args([
             "--data-dir",
             data.to_str().unwrap(),
-            "learn",
+            "record-outcome",
             "--investigation",
             id,
             "--recommendation",

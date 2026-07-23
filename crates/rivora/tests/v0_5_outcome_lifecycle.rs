@@ -7,13 +7,9 @@ use rivora::domain::{
     OutcomeEvidenceRelation, ProposalCategory, ProposalGenerationMethod, ProposalPriority,
     Provenance,
 };
-use rivora::runtime::outcome::{
-    CollectOutcomeEvidenceRequest, RecordImplementationRequest,
-};
-use rivora::storage::{LocalStore, Store};
-use rivora::{
-    CapabilityService, Confidence, ImprovementProposal, ObjectId, Runtime,
-};
+use rivora::runtime::outcome::{CollectOutcomeEvidenceRequest, RecordImplementationRequest};
+use rivora::storage::LocalStore;
+use rivora::{CapabilityService, Confidence, ImprovementProposal, ObjectId, Runtime};
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -46,10 +42,7 @@ fn setup() -> Fixture {
     proposal.success_criteria = vec!["Malformed config is rejected".into()];
     proposal.verification_plan.success_criteria =
         vec!["Verification observes rejected payloads".into()];
-    caps.runtime()
-        .store()
-        .append_proposal(&proposal)
-        .unwrap();
+    caps.runtime().store().append_proposal(&proposal).unwrap();
 
     let record = caps
         .record_external_implementation(
@@ -94,7 +87,7 @@ fn create_outcome_seeds_expected_results_from_proposal() {
     assert_eq!(outcome.classification, OutcomeClassification::Pending);
     assert_eq!(outcome.proposal_id, fx.proposal_id);
     assert_eq!(outcome.implementation_record_id, fx.impl_id);
-    assert!(outcome.expected_results.len() >= 1);
+    assert!(!outcome.expected_results.is_empty());
     assert!(!outcome.historical_learning_eligible);
 
     let loaded = fx
@@ -171,10 +164,7 @@ fn collect_evidence_evaluate_and_verify() {
         .evaluate_measured_learning_outcome(fx.inv_id, head.id, "runtime")
         .unwrap();
     assert_eq!(evaluated.status, MeasuredOutcomeStatus::Evaluated);
-    assert_eq!(
-        evaluated.classification,
-        OutcomeClassification::Successful
-    );
+    assert_eq!(evaluated.classification, OutcomeClassification::Successful);
     assert!(evaluated.evaluation_report.is_some());
     assert!(
         evaluated
@@ -187,14 +177,7 @@ fn collect_evidence_evaluate_and_verify() {
     // Verify requires actor + reason; cannot auto-verify by confidence alone.
     let err = fx
         .caps
-        .verify_measured_learning_outcome(
-            fx.inv_id,
-            evaluated.id,
-            "",
-            "looks good",
-            false,
-            None,
-        )
+        .verify_measured_learning_outcome(fx.inv_id, evaluated.id, "", "looks good", false, None)
         .unwrap_err();
     assert!(err.to_string().contains("validation") || err.to_string().contains("required"));
 
@@ -212,10 +195,7 @@ fn collect_evidence_evaluate_and_verify() {
     assert_eq!(verified.status, MeasuredOutcomeStatus::Verified);
     assert!(verified.historical_learning_eligible);
     assert!(verified.verification.is_some());
-    assert_eq!(
-        verified.verification.as_ref().unwrap().actor,
-        "reviewer"
-    );
+    assert_eq!(verified.verification.as_ref().unwrap().actor, "reviewer");
 
     // Verified revisions are immutable for content revise.
     let err = fx

@@ -11,10 +11,12 @@ use clap::Parser;
 use console::style;
 use dialoguer::{Confirm, Input, Select};
 use rivora::domain::{
-    Confidence, ImprovementProposal, Investigation, InvestigationId, ObjectId, ObservationKind,
-    OutcomeDisposition, ProposalCategory, ProposalFeedbackCategory, ProposalPriority,
-    ProposalStatus, ProposalTransitionAuthority, RecommendationStatus,
+    Confidence, ImplementationReference, ImplementationSource, ImprovementProposal, Investigation,
+    InvestigationId, ObjectId, ObservationKind, OutcomeDisposition, OutcomeEvidenceRelation,
+    ProposalCategory, ProposalFeedbackCategory, ProposalPriority, ProposalStatus,
+    ProposalTransitionAuthority, RecommendationStatus,
 };
+use rivora::runtime::outcome::{CollectOutcomeEvidenceRequest, RecordImplementationRequest};
 use rivora::runtime::proposal::{
     CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
 };
@@ -270,6 +272,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Recalled Context",
             "Assistance (composites & reports)",
             "Improvement Proposals",
+            "Learning Outcomes",
             "Back",
         ];
         let choice = Select::new()
@@ -494,6 +497,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             19 => context_session(caps, inv.id)?,
             20 => assistance_session(caps, inv.id)?,
             21 => proposal_session(caps, inv.id)?,
+            22 => learning_session(caps, inv.id)?,
             _ => break,
         }
     }
@@ -1897,6 +1901,356 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
         "workspace smoke ok: investigation {} status {}",
         done.id, done.status
     );
+    Ok(())
+}
+
+const LEARNING_BOUNDARY: &str = "Measured Learning Outcome — external implementation recorded, never auto-applied; verified only with explicit actor+reason.";
+
+/// Focused Measured Learning Outcome experience (RFC-022/023/024).
+fn learning_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
+    loop {
+        println!("\n{}", style("Workspace Learning Outcomes").bold());
+        println!("{LEARNING_BOUNDARY}");
+        let actions = vec![
+            "List Measured Learning Outcomes",
+            "Record Implementation",
+            "Create Measured Outcome",
+            "Add Outcome Evidence",
+            "Evaluate Outcome",
+            "Show Outcome Detail",
+            "Verify Outcome",
+            "Trace Outcome",
+            "Derive Learning Patterns",
+            "List Learning Patterns",
+            "Show Learning Pattern",
+            "Explain Historical Influence",
+            "Export Outcome Markdown",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Learning Outcomes")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+        match choice {
+            0 => {
+                let listing = caps.list_measured_learning_outcomes(id).map_err(err)?;
+                if listing.outcomes.is_empty() {
+                    println!("No Measured Learning Outcomes.");
+                } else {
+                    for outcome in &listing.outcomes {
+                        println!(
+                            "  {}  [{} / {}]  proposal {}  impl {}  (revision {})",
+                            outcome.id,
+                            outcome.status.as_str(),
+                            outcome.classification.as_str(),
+                            outcome.proposal_id,
+                            outcome.implementation_record_id,
+                            outcome.revision_number,
+                        );
+                    }
+                }
+            }
+            1 => {
+                let proposal = input_object_id("Proposal id")?;
+                let summary: String = Input::new()
+                    .with_prompt("Implementation summary")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let commit: String = Input::new()
+                    .with_prompt("Commit SHA (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let mut references = Vec::new();
+                if !commit.trim().is_empty() {
+                    references.push(ImplementationReference::CommitSha {
+                        sha: commit.trim().into(),
+                    });
+                }
+                let record = caps
+                    .record_external_implementation(
+                        id,
+                        proposal,
+                        RecordImplementationRequest {
+                            source: if references.is_empty() {
+                                ImplementationSource::HumanDeclared
+                            } else {
+                                ImplementationSource::GitCommit
+                            },
+                            summary,
+                            references,
+                            implemented_at: None,
+                            observed_files: Vec::new(),
+                            observed_components: Vec::new(),
+                            declared_scope: String::new(),
+                        },
+                        "workspace",
+                    )
+                    .map_err(err)?;
+                println!(
+                    "{} Implementation {} [{}]",
+                    style("✓").green(),
+                    record.id,
+                    record.status.as_str()
+                );
+                println!("{LEARNING_BOUNDARY}");
+            }
+            2 => {
+                let proposal = input_object_id("Proposal id")?;
+                let implementation = input_object_id("Implementation id")?;
+                let outcome = caps
+                    .create_measured_learning_outcome(id, proposal, implementation, "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} Measured Outcome {} [{} / {}]",
+                    style("✓").green(),
+                    outcome.id,
+                    outcome.status.as_str(),
+                    outcome.classification.as_str()
+                );
+                println!("{LEARNING_BOUNDARY}");
+            }
+            3 => {
+                let outcome = input_object_id("Outcome id")?;
+                let evidence = input_object_id("Evidence object id")?;
+                let relations = [
+                    OutcomeEvidenceRelation::IsBaseline,
+                    OutcomeEvidenceRelation::IsPostChange,
+                    OutcomeEvidenceRelation::SupportsExpectedResult,
+                    OutcomeEvidenceRelation::ContradictsExpectedResult,
+                    OutcomeEvidenceRelation::IndicatesRegression,
+                    OutcomeEvidenceRelation::ConfirmsImplementation,
+                    OutcomeEvidenceRelation::IsInconclusive,
+                ];
+                let labels: Vec<_> = relations.iter().map(|r| r.as_str()).collect();
+                let idx = Select::new()
+                    .with_prompt("Evidence relation")
+                    .items(&labels)
+                    .default(0)
+                    .interact()
+                    .map_err(|e| e.to_string())?;
+                let expected: String = Input::new()
+                    .with_prompt("Expected result id (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason: String = Input::new()
+                    .with_prompt("Reason (optional)")
+                    .allow_empty(true)
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let expected_result_id = if expected.trim().is_empty() {
+                    None
+                } else {
+                    Some(expected.trim().parse().map_err(err)?)
+                };
+                let updated = caps
+                    .collect_outcome_evidence(
+                        id,
+                        outcome,
+                        CollectOutcomeEvidenceRequest {
+                            object_id: evidence,
+                            relation: relations[idx],
+                            expected_result_id,
+                            reason: (!reason.trim().is_empty()).then_some(reason),
+                        },
+                        "workspace",
+                    )
+                    .map_err(err)?;
+                println!(
+                    "{} Outcome {} now [{}] with {} evidence link(s)",
+                    style("✓").green(),
+                    updated.id,
+                    updated.status.as_str(),
+                    updated.evidence_links.len()
+                );
+            }
+            4 => {
+                let outcome = input_object_id("Outcome id")?;
+                let evaluated = caps
+                    .evaluate_measured_learning_outcome(id, outcome, "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} Evaluated {} as {} (confidence {:.0}%)",
+                    style("✓").green(),
+                    evaluated.id,
+                    evaluated.classification.as_str(),
+                    evaluated.confidence.value() * 100.0
+                );
+                if let Some(report) = &evaluated.evaluation_report {
+                    println!(
+                        "  verification_ready={} method={}",
+                        report.verification_ready, report.method
+                    );
+                }
+                println!("{LEARNING_BOUNDARY}");
+            }
+            5 => {
+                let outcome_id = input_object_id("Outcome id")?;
+                let outcome = caps
+                    .get_measured_learning_outcome(id, outcome_id)
+                    .map_err(err)?;
+                println!(
+                    "Measured Outcome {} revision {} [{} / {}]",
+                    outcome.id,
+                    outcome.revision_number,
+                    outcome.status.as_str(),
+                    outcome.classification.as_str()
+                );
+                println!("  proposal: {}", outcome.proposal_id);
+                println!("  implementation: {}", outcome.implementation_record_id);
+                println!(
+                    "  confidence: {:.0}%  historical learning eligible: {}",
+                    outcome.confidence.value() * 100.0,
+                    outcome.historical_learning_eligible
+                );
+                println!("  expected results: {}", outcome.expected_results.len());
+                for expected in &outcome.expected_results {
+                    println!(
+                        "    • {} [{}]",
+                        expected.description,
+                        expected.kind.as_str()
+                    );
+                }
+                println!("  assessments: {}", outcome.assessments.len());
+                for assessment in &outcome.assessments {
+                    println!(
+                        "    • {} → {}",
+                        assessment.expected_result_id,
+                        assessment.kind.as_str()
+                    );
+                }
+                println!("  regressions: {}", outcome.regressions.len());
+                for regression in &outcome.regressions {
+                    println!(
+                        "    • [{}] {}",
+                        regression.severity.as_str(),
+                        regression.description
+                    );
+                }
+                println!("{LEARNING_BOUNDARY}");
+            }
+            6 => {
+                let outcome = input_object_id("Outcome id")?;
+                let actor: String = Input::new()
+                    .with_prompt("Actor (required)")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason: String = Input::new()
+                    .with_prompt("Reason (required)")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                if actor.trim().is_empty() || reason.trim().is_empty() {
+                    println!(
+                        "{} Verification requires explicit non-empty actor and reason.",
+                        style("!").yellow()
+                    );
+                    continue;
+                }
+                let verified = caps
+                    .verify_measured_learning_outcome(
+                        id,
+                        outcome,
+                        actor.trim(),
+                        reason.trim(),
+                        false,
+                        None,
+                    )
+                    .map_err(err)?;
+                println!(
+                    "{} Verified {} as {}",
+                    style("✓").green(),
+                    verified.id,
+                    verified.classification.as_str()
+                );
+                println!("{LEARNING_BOUNDARY}");
+            }
+            7 => {
+                let outcome = input_object_id("Outcome id")?;
+                let trace = caps
+                    .trace_measured_learning_outcome(id, outcome)
+                    .map_err(err)?;
+                println!(
+                    "Proposal {} → Implementation {} → Measured Outcome {}",
+                    trace.proposal_id, trace.implementation_record_id, trace.outcome_id
+                );
+                println!("  classification: {}", trace.classification.as_str());
+                println!("  status: {}", trace.status.as_str());
+                println!("  {}", trace.explanation);
+                println!("{LEARNING_BOUNDARY}");
+            }
+            8 => {
+                let patterns = caps.derive_learning_patterns("workspace").map_err(err)?;
+                if patterns.is_empty() {
+                    println!("No Learning Patterns derived.");
+                } else {
+                    for pattern in &patterns {
+                        println!(
+                            "  {}  [{}]  {}  (confidence {:.0}%)",
+                            pattern.id,
+                            pattern.status.as_str(),
+                            pattern.signature,
+                            pattern.confidence.value() * 100.0
+                        );
+                    }
+                }
+                println!("{LEARNING_BOUNDARY}");
+            }
+            9 => {
+                let patterns = caps.list_learning_patterns().map_err(err)?;
+                if patterns.is_empty() {
+                    println!("No Learning Patterns.");
+                } else {
+                    for pattern in &patterns {
+                        println!(
+                            "  {}  [{}]  {}",
+                            pattern.id,
+                            pattern.status.as_str(),
+                            pattern.title
+                        );
+                    }
+                }
+            }
+            10 => {
+                let pattern_id = input_object_id("Pattern id")?;
+                let pattern = caps.get_learning_pattern(pattern_id).map_err(err)?;
+                println!("Pattern {} [{}]", pattern.id, pattern.status.as_str());
+                println!("  title: {}", pattern.title);
+                println!("  signature: {}", pattern.signature);
+                println!("  confidence: {:.0}%", pattern.confidence.value() * 100.0);
+                println!(
+                    "  supporting: {}  contradicting: {}",
+                    pattern.supporting_outcome_ids.len(),
+                    pattern.contradicting_outcome_ids.len()
+                );
+                println!("{LEARNING_BOUNDARY}");
+            }
+            11 => {
+                let proposal = input_object_id("Proposal id")?;
+                let influence = caps
+                    .explain_historical_influence(id, proposal)
+                    .map_err(err)?;
+                println!("{}", influence.explanation);
+                for item in &influence.patterns_considered {
+                    println!(
+                        "  • pattern {}  {}  magnitude={:.3}",
+                        item.pattern_id, item.direction, item.magnitude
+                    );
+                }
+                println!("{LEARNING_BOUNDARY}");
+            }
+            12 => {
+                let outcome = input_object_id("Outcome id")?;
+                let markdown = caps
+                    .export_measured_learning_outcome_markdown(id, outcome)
+                    .map_err(err)?;
+                println!("{markdown}");
+            }
+            _ => break,
+        }
+    }
     Ok(())
 }
 

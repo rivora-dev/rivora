@@ -1105,8 +1105,7 @@ impl CapabilityService {
         id: InvestigationId,
         lineage_id: ObjectId,
     ) -> RivoraResult<MeasuredOutcomeListing> {
-        self.runtime
-            .list_measured_outcome_revisions(id, lineage_id)
+        self.runtime.list_measured_outcome_revisions(id, lineage_id)
     }
 
     /// Trace Proposal → Implementation → Measured Learning Outcome.
@@ -1152,10 +1151,7 @@ impl CapabilityService {
     }
 
     /// Show one Learning Pattern.
-    pub fn get_learning_pattern(
-        &self,
-        pattern_id: ObjectId,
-    ) -> RivoraResult<LearningPattern> {
+    pub fn get_learning_pattern(&self, pattern_id: ObjectId) -> RivoraResult<LearningPattern> {
         self.runtime.get_learning_pattern(pattern_id)
     }
 
@@ -1180,18 +1176,12 @@ impl CapabilityService {
     }
 
     /// Export Learning Pattern as Markdown.
-    pub fn export_learning_pattern_markdown(
-        &self,
-        pattern_id: ObjectId,
-    ) -> RivoraResult<String> {
+    pub fn export_learning_pattern_markdown(&self, pattern_id: ObjectId) -> RivoraResult<String> {
         self.runtime.export_learning_pattern_markdown(pattern_id)
     }
 
     /// Export Learning Pattern as JSON.
-    pub fn export_learning_pattern_json(
-        &self,
-        pattern_id: ObjectId,
-    ) -> RivoraResult<String> {
+    pub fn export_learning_pattern_json(&self, pattern_id: ObjectId) -> RivoraResult<String> {
         self.runtime.export_learning_pattern_json(pattern_id)
     }
 }

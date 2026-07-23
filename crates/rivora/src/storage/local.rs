@@ -45,10 +45,9 @@ use crate::domain::{
     ImplementationListing, ImplementationRecord, ImplementationStorageDiagnostic,
     ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
     KnowledgeObject, LearningOutcome, LearningPattern, MeasuredLearningOutcome,
-    MeasuredOutcomeListing, MeasuredOutcomeStorageDiagnostic, MemoryRecord, ObjectId,
-    Observation, ProposalArtifact, ProposalArtifactListing, ProposalListing, RecalledContext,
-    Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
-    VerificationSuggestion,
+    MeasuredOutcomeListing, MeasuredOutcomeStorageDiagnostic, MemoryRecord, ObjectId, Observation,
+    ProposalArtifact, ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation,
+    RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -203,11 +202,7 @@ impl LocalStore {
         self.inv_dir(id).join("learning_outcomes")
     }
 
-    fn measured_outcome_path(
-        &self,
-        investigation_id: &InvestigationId,
-        id: &ObjectId,
-    ) -> PathBuf {
+    fn measured_outcome_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
         self.learning_outcomes_dir(investigation_id)
             .join(format!("{id}.json"))
     }

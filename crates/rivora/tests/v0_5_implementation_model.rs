@@ -40,10 +40,7 @@ fn setup() -> Fixture {
     )
     .unwrap();
     proposal.success_criteria = vec!["Malformed config is rejected".into()];
-    caps.runtime()
-        .store()
-        .append_proposal(&proposal)
-        .unwrap();
+    caps.runtime().store().append_proposal(&proposal).unwrap();
     Fixture {
         _dir: dir,
         caps,
@@ -165,9 +162,7 @@ fn lifecycle_evidence_ready_withdraw() {
             RecordImplementationRequest {
                 source: ImplementationSource::GitCommit,
                 summary: "shipped".into(),
-                references: vec![ImplementationReference::CommitSha {
-                    sha: "abc".into(),
-                }],
+                references: vec![ImplementationReference::CommitSha { sha: "abc".into() }],
                 implemented_at: None,
                 observed_files: vec![],
                 observed_components: vec![],
