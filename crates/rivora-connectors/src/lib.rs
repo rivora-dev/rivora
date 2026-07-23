@@ -1,16 +1,22 @@
 //! Rivora connectors — observe, normalize, produce Observations (RFC-012).
 //!
-//! Connectors never evaluate, verify, recommend, or learn.
+//! Observation connectors never evaluate, verify, recommend, or learn.
+//!
+//! Bounded write adapters live in [`execution`] and implement
+//! `rivora::ExecutionCapability`. They are separate from observation
+//! connectors and are invoked only by the Runtime (RFC-026).
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+pub mod execution;
 pub mod github;
 pub mod github_actions;
 pub mod kubernetes;
 pub mod local;
 pub mod sentry;
 
+pub use execution::register_github_execution_capabilities;
 pub use github_actions::ConnectorStatusReport;
 
 use rivora::domain::{ObservationKind, Provenance};
