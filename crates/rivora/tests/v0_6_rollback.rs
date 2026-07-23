@@ -7,12 +7,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use rivora::domain::{
-    CapabilityExecutionResult, CapabilityExecutionStatus, CapabilityInvocation,
-    CapabilityRiskLevel, CapabilityStateObservation, CapabilityStateQuery, CapabilityTarget,
-    CapabilityVerificationStatus, DryRunResult, ExecutionAction, ExecutionAttemptStatus,
-    ExecutionCapability, ExecutionCapabilityDescriptor, ExecutionPlanStatus,
-    ExecutionPolicyDecision, ExecutionPolicyDecisionKind, ExecutionReceiptResult,
-    MockExecutionCapability, ProposalStatus, ProposalTransitionAuthority, RollbackMetadata,
+    default_accepted_input_types, CapabilityExecutionResult, CapabilityExecutionStatus,
+    CapabilityInvocation, CapabilityRiskLevel, CapabilityStateObservation, CapabilityStateQuery,
+    CapabilityTarget, CapabilityVerificationStatus, DryRunResult, EngineeringLoopParticipation,
+    ExecutionAction, ExecutionAttemptStatus, ExecutionCapability, ExecutionCapabilityDescriptor,
+    ExecutionPlanStatus, ExecutionPolicyDecision, ExecutionPolicyDecisionKind,
+    ExecutionReceiptResult, MockExecutionCapability, ProposalStatus, ProposalTransitionAuthority,
+    RollbackMetadata,
 };
 use rivora::runtime::execution::CreateExecutionPlanRequest;
 use rivora::runtime::proposal::CreateProposalRequest;
@@ -78,6 +79,9 @@ impl ExecutionCapability for InverseProbe {
             ],
             failure_semantics: "fail closed".into(),
             description: "Probe for explicit inverse derivation".into(),
+            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: default_accepted_input_types("probe.inverse"),
+            provider_independent: true,
         }
     }
 

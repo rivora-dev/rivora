@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use rivora::domain::{
-    evaluate_execution_policy, CapabilityRiskLevel, ExecutionAction, ExecutionCapabilityDescriptor,
-    ExecutionPlan, ExecutionPlanStatus, ExecutionPolicyDecisionKind, MockExecutionCapability,
-    ObjectId, ProposalStatus, ProposalTransitionAuthority, Provenance,
+    default_accepted_input_types, evaluate_execution_policy, CapabilityRiskLevel,
+    EngineeringLoopParticipation, ExecutionAction, ExecutionCapabilityDescriptor, ExecutionPlan,
+    ExecutionPlanStatus, ExecutionPolicyDecisionKind, MockExecutionCapability, ObjectId,
+    ProposalStatus, ProposalTransitionAuthority, Provenance,
 };
 use rivora::runtime::execution::CreateExecutionPlanRequest;
 use rivora::runtime::proposal::CreateProposalRequest;
@@ -256,6 +257,9 @@ fn policy_denies_unknown_and_high_risk_capabilities() {
         target_restrictions: vec![],
         failure_semantics: "fail".into(),
         description: "denied".into(),
+        engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+        accepted_input_types: default_accepted_input_types("dangerous"),
+        provider_independent: true,
     };
     let d = evaluate_execution_policy(Some(&high), "dangerous", "production", 1, false);
     assert_eq!(d.decision, ExecutionPolicyDecisionKind::Denied);

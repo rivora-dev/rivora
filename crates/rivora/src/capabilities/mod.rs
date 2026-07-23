@@ -6,16 +6,18 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    AssistedWorkflow, CompositeCapabilityDefinition, DeploymentReadiness, DryRunResult,
-    EngineeringReport, Evaluation, ExecutionApproval, ExecutionAttempt, ExecutionAttemptListing,
-    ExecutionCapabilityDescriptor, ExecutionPlan, ExecutionPlanListing, ExecutionPolicyDecision,
-    ExecutionReceiptListing, ExecutionTrace, ExecutionVerification, HistoricalInfluenceExplanation,
-    Hypothesis, ImplementationListing, ImplementationRecord, ImprovementProposal, Investigation,
-    InvestigationId, InvestigationRelationship, InvestigationSummary, KnowledgeObject,
-    LearningOutcome, LearningPattern, MeasuredLearningOutcome, MeasuredOutcomeListing,
-    MeasuredOutcomeStatus, MemoryRecord, ObjectId, Observation, ObservationKind,
-    OutcomeDisposition, PrioritizedRecommendation, ProposalArtifact, ProposalArtifactListing,
-    ProposalComparison, ProposalFeedbackCategory, ProposalListing, ProposalStatus, ProposalTrace,
+    AssistedWorkflow, CapabilityLifecycleRun, CapabilityLifecycleRunListing,
+    CapabilityLifecycleTrace, CapabilityRoutingDecision, CompositeCapabilityDefinition,
+    DeploymentReadiness, DryRunResult, EngineeringReport, Evaluation, ExecutionApproval,
+    ExecutionAttempt, ExecutionAttemptListing, ExecutionCapabilityDescriptor, ExecutionPlan,
+    ExecutionPlanListing, ExecutionPolicyDecision, ExecutionReceiptListing, ExecutionTrace,
+    ExecutionVerification, HistoricalInfluenceExplanation, Hypothesis, ImplementationListing,
+    ImplementationRecord, ImprovementProposal, Investigation, InvestigationId,
+    InvestigationRelationship, InvestigationSummary, KnowledgeObject, LearningOutcome,
+    LearningPattern, MeasuredLearningOutcome, MeasuredOutcomeListing, MeasuredOutcomeStatus,
+    MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
+    PrioritizedRecommendation, ProposalArtifact, ProposalArtifactListing, ProposalComparison,
+    ProposalFeedbackCategory, ProposalListing, ProposalStatus, ProposalTrace,
     ProposalTransitionAuthority, ProposalVerificationPlan, RecalledContext, Recommendation,
     RetrySafety, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
     VerificationSuggestion,
@@ -1187,6 +1189,58 @@ impl CapabilityService {
     /// Export Learning Pattern as JSON.
     pub fn export_learning_pattern_json(&self, pattern_id: ObjectId) -> RivoraResult<String> {
         self.runtime.export_learning_pattern_json(pattern_id)
+    }
+
+    // -----------------------------------------------------------------------
+    // v0.7 Capability Engineering Loop (RFC-028)
+    // -----------------------------------------------------------------------
+
+    /// Route Observations to compatible registered Capabilities.
+    pub fn route_observations_to_capabilities(
+        &self,
+        investigation_id: InvestigationId,
+        observation_ids: &[ObjectId],
+    ) -> RivoraResult<CapabilityRoutingDecision> {
+        self.runtime
+            .route_observations_to_capabilities(investigation_id, observation_ids)
+    }
+
+    /// Run the Engineering Loop for a completed execution attempt.
+    pub fn run_capability_lifecycle_for_attempt(
+        &self,
+        investigation_id: InvestigationId,
+        attempt_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<CapabilityLifecycleRun> {
+        self.runtime
+            .run_capability_lifecycle_for_attempt(investigation_id, attempt_id, actor)
+    }
+
+    /// List Engineering Loop runs for an Investigation.
+    pub fn list_lifecycle_runs(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<CapabilityLifecycleRunListing> {
+        self.runtime.list_lifecycle_runs(investigation_id)
+    }
+
+    /// Load one Engineering Loop run snapshot.
+    pub fn get_lifecycle_run(
+        &self,
+        investigation_id: InvestigationId,
+        run_id: ObjectId,
+    ) -> RivoraResult<CapabilityLifecycleRun> {
+        self.runtime.get_lifecycle_run(investigation_id, run_id)
+    }
+
+    /// Trace Capability Engineering Loop lineage for an invocation or run id.
+    pub fn trace_capability_lifecycle(
+        &self,
+        investigation_id: InvestigationId,
+        invocation_or_run_id: &str,
+    ) -> RivoraResult<CapabilityLifecycleTrace> {
+        self.runtime
+            .trace_capability_lifecycle(investigation_id, invocation_or_run_id)
     }
 
     // -----------------------------------------------------------------------

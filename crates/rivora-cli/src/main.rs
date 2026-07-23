@@ -244,6 +244,58 @@ enum Commands {
         #[command(subcommand)]
         action: ExecuteCmd,
     },
+    /// Capability descriptors, routing, and Engineering Loop inspection (v0.7).
+    Capability {
+        #[command(subcommand)]
+        action: CapabilityCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CapabilityCmd {
+    /// List registered Capabilities with Engineering Loop participation.
+    List,
+    /// Show one Capability descriptor including loop participation.
+    Show {
+        /// Capability id (e.g. mock.record, github_actions.workflow_dispatch).
+        id: String,
+    },
+    /// Route Observations to compatible Capabilities (typed, deterministic).
+    Route {
+        #[arg(long)]
+        investigation: String,
+        /// Observation ids to route (repeatable).
+        #[arg(long = "observation")]
+        observations: Vec<String>,
+    },
+    /// Run the Engineering Loop for a completed execution attempt.
+    Lifecycle {
+        #[arg(long)]
+        investigation: String,
+        /// Execution Attempt id.
+        #[arg(long)]
+        attempt: String,
+    },
+    /// List Engineering Loop runs for an Investigation.
+    LifecycleList {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show one Engineering Loop run snapshot.
+    LifecycleShow {
+        #[arg(long)]
+        investigation: String,
+        /// Lifecycle run snapshot id.
+        #[arg(long)]
+        run: String,
+    },
+    /// Trace lineage from invocation/attempt through Engineering Loop stages.
+    Trace {
+        #[arg(long)]
+        investigation: String,
+        /// Attempt id, invocation id, or lifecycle run/lineage id.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2981,18 +3033,7 @@ fn run() -> Result<(), String> {
             }
             ExecuteCmd::Capability { id } => {
                 let desc = caps.show_execution_capability(&id).map_err(err)?;
-                print_value(cli.json, &desc, || {
-                    format!(
-                        "{}\n  risk: {}\n  version: {}\n  dry_run: {}\n  actions: {}\n  {}\n{}",
-                        desc.capability_id,
-                        desc.risk_level.as_str(),
-                        desc.version,
-                        desc.supports_dry_run,
-                        desc.supported_actions.join(", "),
-                        desc.description,
-                        EXECUTION_BOUNDARY
-                    )
-                });
+                print_value(cli.json, &desc, || format_capability_descriptor(&desc));
             }
             ExecuteCmd::Plan {
                 investigation,
@@ -3536,6 +3577,119 @@ fn run() -> Result<(), String> {
                         EXECUTION_BOUNDARY
                     )
                 });
+            }
+        },
+        Commands::Capability { action } => match action {
+            CapabilityCmd::List => {
+                let list = caps.list_execution_capabilities();
+                print_value(cli.json, &list, || {
+                    list.iter()
+                        .map(|c| {
+                            format!(
+                                "{}  v{}  risk={}  loop=[M:{} E:{} V:{} I:{} L:{}]\n  {}",
+                                c.capability_id,
+                                c.version,
+                                c.risk_level.as_str(),
+                                c.engineering_loop.memory.as_str(),
+                                c.engineering_loop.evaluation.as_str(),
+                                c.engineering_loop.verification.as_str(),
+                                c.engineering_loop.improvement.as_str(),
+                                c.engineering_loop.learning.as_str(),
+                                c.description
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            CapabilityCmd::Show { id } => {
+                let desc = caps.show_execution_capability(&id).map_err(err)?;
+                print_value(cli.json, &desc, || format_capability_descriptor(&desc));
+            }
+            CapabilityCmd::Route {
+                investigation,
+                observations,
+            } => {
+                let inv = parse_inv(&investigation)?;
+                let obs_ids: Result<Vec<_>, _> =
+                    observations.iter().map(|s| parse_obj(s)).collect();
+                let obs_ids = obs_ids?;
+                let decision = caps
+                    .route_observations_to_capabilities(inv, &obs_ids)
+                    .map_err(err)?;
+                print_value(cli.json, &decision, || {
+                    let mut out = format!(
+                        "Routing decision\n  unsupported: {}\n  ambiguous: {}\n  input_types: [{}]\n",
+                        decision.unsupported,
+                        decision.ambiguous,
+                        decision.input_types.join(", ")
+                    );
+                    for m in &decision.matches {
+                        out.push_str(&format!(
+                            "  match rank={}  {} v{}  types=[{}]\n    {}\n",
+                            m.rank,
+                            m.capability_id,
+                            m.version,
+                            m.matched_input_types.join(", "),
+                            m.reason
+                        ));
+                    }
+                    for r in &decision.reasons {
+                        out.push_str(&format!("  reason: {r}\n"));
+                    }
+                    out
+                });
+            }
+            CapabilityCmd::Lifecycle {
+                investigation,
+                attempt,
+            } => {
+                let run = caps
+                    .run_capability_lifecycle_for_attempt(
+                        parse_inv(&investigation)?,
+                        parse_obj(&attempt)?,
+                        "cli",
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &run, || format_lifecycle_run(&run));
+            }
+            CapabilityCmd::LifecycleList { investigation } => {
+                let listing = caps
+                    .list_lifecycle_runs(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_value(cli.json, &listing, || {
+                    if listing.runs.is_empty() {
+                        return "No Engineering Loop runs.".into();
+                    }
+                    listing
+                        .runs
+                        .iter()
+                        .map(|r| {
+                            format!(
+                                "{}  lineage={} rev={}  [{}]  cap={}  inv={}",
+                                r.id,
+                                r.lineage_id,
+                                r.revision_number,
+                                r.status.as_str(),
+                                r.capability_id,
+                                r.invocation_id
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            CapabilityCmd::LifecycleShow { investigation, run } => {
+                let run = caps
+                    .get_lifecycle_run(parse_inv(&investigation)?, parse_obj(&run)?)
+                    .map_err(err)?;
+                print_value(cli.json, &run, || format_lifecycle_run(&run));
+            }
+            CapabilityCmd::Trace { investigation, id } => {
+                let trace = caps
+                    .trace_capability_lifecycle(parse_inv(&investigation)?, &id)
+                    .map_err(err)?;
+                print_value(cli.json, &trace, || format_lifecycle_trace(&trace));
             }
         },
         Commands::Implementation { action } => match action {
@@ -4486,6 +4640,112 @@ fn format_learning_patterns(patterns: &[rivora::domain::LearningPattern]) -> Str
     output.push('\n');
     output.push_str(LEARNING_BOUNDARY);
     output
+}
+
+fn format_capability_descriptor(desc: &rivora::ExecutionCapabilityDescriptor) -> String {
+    let loop_lines = format!(
+        "  Engineering Loop:\n    Memory        {}\n    Evaluation    {}\n    Verification  {}\n    Improvement   {}\n    Learning      {}",
+        desc.engineering_loop.memory.as_str(),
+        desc.engineering_loop.evaluation.as_str(),
+        desc.engineering_loop.verification.as_str(),
+        desc.engineering_loop.improvement.as_str(),
+        desc.engineering_loop.learning.as_str(),
+    );
+    format!(
+        "{}\n  risk: {}\n  version: {}\n  dry_run: {}\n  actions: {}\n  accepted_input_types: [{}]\n  provider_independent: {}\n  {}\n{}\n{}",
+        desc.capability_id,
+        desc.risk_level.as_str(),
+        desc.version,
+        desc.supports_dry_run,
+        desc.supported_actions.join(", "),
+        desc.accepted_input_types.join(", "),
+        desc.provider_independent,
+        desc.description,
+        loop_lines,
+        EXECUTION_BOUNDARY
+    )
+}
+
+fn format_lifecycle_run(run: &rivora::CapabilityLifecycleRun) -> String {
+    let mut out = format!(
+        "Capability Engineering Loop\n  run: {}\n  lineage: {} rev {}\n  status: {}\n  capability: {}\n  invocation: {}\n  plan: {}\n  attempt: {}\n  stages:\n",
+        run.id,
+        run.lineage_id,
+        run.revision_number,
+        run.status.as_str(),
+        run.capability_id,
+        run.invocation_id,
+        run.plan_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".into()),
+        run.attempt_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".into()),
+    );
+    for stage in &run.stages {
+        out.push_str(&format!(
+            "    {:<12}  status={:<14}  participation={:<14}",
+            stage.stage.as_str(),
+            stage.status.as_str(),
+            stage.participation.as_str(),
+        ));
+        if let Some(detail) = &stage.detail {
+            out.push_str(&format!("  {detail}"));
+        }
+        if let Some(error) = &stage.error {
+            out.push_str(&format!("  error={error}"));
+        }
+        if !stage.artifact_ids.is_empty() {
+            out.push_str(&format!(
+                "  artifacts=[{}]",
+                stage
+                    .artifact_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!("  {}\n", run.explanation));
+    out.push_str(
+        "Connectors provide normalized facts. Capabilities contribute typed context. Runtime owns reasoning.\n",
+    );
+    out
+}
+
+fn format_lifecycle_trace(trace: &rivora::CapabilityLifecycleTrace) -> String {
+    let mut out = format!(
+        "Lifecycle trace\n  capability: {}\n  invocation: {}\n  status: {}\n  plan: {}\n  attempt: {}\n  run: {}\n  stages:\n",
+        trace.capability_id,
+        trace.invocation_id,
+        trace
+            .status
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_else(|| "none".into()),
+        trace
+            .plan_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".into()),
+        trace
+            .attempt_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".into()),
+        trace
+            .run_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "-".into()),
+    );
+    for stage in &trace.stages {
+        out.push_str(&format!(
+            "    {}  {}\n",
+            stage.stage.as_str(),
+            stage.status.as_str()
+        ));
+    }
+    out.push_str(&format!("  {}\n", trace.explanation));
+    out
 }
 
 fn print_value<T: serde::Serialize>(json: bool, value: &T, human: impl FnOnce() -> String) {

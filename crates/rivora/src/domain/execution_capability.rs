@@ -8,13 +8,58 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use super::engineering_loop::{
+    default_accepted_input_types, CapabilityLifecycleContributions, ContributionIdentity,
+    EngineeringLoopParticipation, EvaluationContributionRequest, ImprovementContributionContext,
+    LearningContributionContext, LifecycleParticipation, MemoryContribution, StageContribution,
+    VerificationContributionRequest,
+};
 use super::execution::{
     CapabilityExecutionStatus, CapabilityRiskLevel, CapabilityTarget, CapabilityVerificationStatus,
     DryRunResult, ExecutionCapabilityDescriptor, ExecutionPolicyDecision,
     ExecutionPolicyDecisionKind, RollbackMetadata,
 };
-use super::Confidence;
+use super::{Confidence, InvestigationId, ObjectId};
 use crate::error::{RivoraError, RivoraResult};
+
+/// Context for building lifecycle contributions after Capability execution.
+#[derive(Debug, Clone)]
+pub struct LifecycleContributionContext {
+    /// Investigation.
+    pub investigation_id: InvestigationId,
+    /// Invocation id (typically attempt id).
+    pub invocation_id: String,
+    /// Actor.
+    pub actor: String,
+    /// Idempotency key.
+    pub idempotency_key: String,
+    /// Plan id.
+    pub plan_id: Option<ObjectId>,
+    /// Attempt id.
+    pub attempt_id: Option<ObjectId>,
+    /// Receipt ids.
+    pub receipt_ids: Vec<ObjectId>,
+    /// Proposal id.
+    pub proposal_id: Option<ObjectId>,
+    /// Observation ids.
+    pub observation_ids: Vec<ObjectId>,
+    /// Environment.
+    pub environment: Option<String>,
+    /// Execution verification id when independent verification already ran.
+    pub execution_verification_id: Option<ObjectId>,
+    /// Measured outcome id when present.
+    pub measured_outcome_id: Option<ObjectId>,
+    /// Implementation record id when present.
+    pub implementation_record_id: Option<ObjectId>,
+    /// Action name that was executed.
+    pub action_name: Option<String>,
+    /// External identifiers from receipts.
+    pub external_identifiers: Vec<String>,
+    /// Sanitized request/response summary for Memory.
+    pub result_summary: String,
+    /// Whether API reported success (never treated as verified success).
+    pub api_reported_success: bool,
+}
 
 /// Request to dry-run or execute a single action through a capability.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,6 +146,7 @@ pub struct CapabilityStateQuery {
 /// Typed external mutation adapter.
 ///
 /// Implementations must never own execution policy, approval, or lifecycle decisions.
+/// They may provide typed Engineering Loop contributions; the Runtime owns reasoning.
 pub trait ExecutionCapability: Send + Sync {
     /// Capability descriptor.
     fn descriptor(&self) -> ExecutionCapabilityDescriptor;
@@ -145,6 +191,184 @@ pub trait ExecutionCapability: Send + Sync {
         &self,
         query: &CapabilityStateQuery,
     ) -> RivoraResult<CapabilityStateObservation>;
+
+    /// Typed Engineering Loop contributions for a completed (or partial) execution.
+    ///
+    /// Default: build contributions from descriptor participation without inventing
+    /// Supported payloads for stages the Capability did not customize.
+    fn lifecycle_contributions(
+        &self,
+        _result: &CapabilityExecutionResult,
+        context: &LifecycleContributionContext,
+    ) -> RivoraResult<CapabilityLifecycleContributions> {
+        let descriptor = self.descriptor();
+        let identity = ContributionIdentity {
+            capability_id: descriptor.capability_id.clone(),
+            invocation_id: context.invocation_id.clone(),
+            investigation_id: context.investigation_id,
+            observation_ids: context.observation_ids.clone(),
+            engineering_object_ids: context
+                .receipt_ids
+                .iter()
+                .copied()
+                .chain(context.attempt_id)
+                .chain(context.plan_id)
+                .collect(),
+            plan_id: context.plan_id,
+            attempt_id: context.attempt_id,
+            receipt_ids: context.receipt_ids.clone(),
+            proposal_id: context.proposal_id,
+            correlation_id: context.attempt_id.map(|id| id.to_string()),
+            causation_id: context.plan_id.map(|id| id.to_string()),
+            actor: context.actor.clone(),
+            environment: context.environment.clone(),
+            idempotency_key: context.idempotency_key.clone(),
+            timestamp: chrono::Utc::now(),
+            schema_version: super::engineering_loop::ENGINEERING_LOOP_SCHEMA_VERSION,
+            evidence_refs: context.receipt_ids.clone(),
+            metadata: serde_json::Map::new(),
+        };
+        Ok(default_lifecycle_contributions(
+            identity,
+            &descriptor.engineering_loop,
+            context,
+        ))
+    }
+}
+
+/// Build standard lifecycle contributions for an execution capability.
+pub fn default_lifecycle_contributions(
+    identity: ContributionIdentity,
+    participation: &EngineeringLoopParticipation,
+    context: &LifecycleContributionContext,
+) -> CapabilityLifecycleContributions {
+    let evidence = context.receipt_ids.clone();
+    let memory = match participation.memory {
+        LifecycleParticipation::Supported => StageContribution::Supported {
+            value: MemoryContribution {
+                summary: format!(
+                    "Capability `{}` invocation {}: {}",
+                    identity.capability_id, identity.invocation_id, context.result_summary
+                ),
+                observation_id: context.observation_ids.first().copied(),
+                confidence: if context.api_reported_success {
+                    0.7
+                } else {
+                    0.5
+                },
+                evidence_ids: evidence.clone(),
+            },
+        },
+        other => participation_to_stage(other, "memory"),
+    };
+    let evaluation = match participation.evaluation {
+        LifecycleParticipation::Supported => StageContribution::Supported {
+            value: EvaluationContributionRequest {
+                subject: format!(
+                    "Capability `{}` execution outcome",
+                    identity.capability_id
+                ),
+                expectation: "External action completed as planned; independent verification still required".into(),
+                rationale: "Evaluate the engineering significance of the bounded external action using evidence, not API success alone".into(),
+                evidence_ids: evidence.clone(),
+                suggested_severity: Some(if context.api_reported_success {
+                    "info".into()
+                } else {
+                    "medium".into()
+                }),
+            },
+        },
+        other => participation_to_stage(other, "evaluation"),
+    };
+    let verification = match participation.verification {
+        LifecycleParticipation::Supported => StageContribution::Supported {
+            value: VerificationContributionRequest {
+                strategy: "Independent state observation; do not trust capability execution result as proof".into(),
+                required_evidence: vec![
+                    "Independent external state observation".into(),
+                    "Correlation of external identifiers".into(),
+                ],
+                execution_verification_id: context.execution_verification_id,
+                requires_independent_observation: context.execution_verification_id.is_none(),
+                evidence_ids: evidence.clone(),
+            },
+        },
+        other => participation_to_stage(other, "verification"),
+    };
+    let improvement = match participation.improvement {
+        LifecycleParticipation::Supported => StageContribution::Supported {
+            value: ImprovementContributionContext {
+                summary: format!(
+                    "Improvement context after `{}` invocation",
+                    identity.capability_id
+                ),
+                focus_areas: vec!["follow-up hardening".into()],
+                generate_proposal: false,
+                evidence_ids: evidence.clone(),
+            },
+        },
+        LifecycleParticipation::Deferred => StageContribution::Deferred {
+            reason: "Improvement deferred until verification and optional measured outcome context"
+                .into(),
+        },
+        other => participation_to_stage(other, "improvement"),
+    };
+    let learning = match participation.learning {
+        LifecycleParticipation::Supported if context.measured_evidence_available() => {
+            StageContribution::Supported {
+                value: LearningContributionContext {
+                    summary: format!(
+                        "Learning context for `{}` after measured evidence",
+                        identity.capability_id
+                    ),
+                    measured_outcome_id: context.measured_outcome_id,
+                    implementation_record_id: context.implementation_record_id,
+                    measured_evidence_available: true,
+                    evidence_ids: evidence,
+                },
+            }
+        }
+        LifecycleParticipation::Supported => StageContribution::Deferred {
+            reason: "Learning declared supported but measured evidence is not yet available".into(),
+        },
+        LifecycleParticipation::Deferred => StageContribution::Deferred {
+            reason:
+                "Learning deferred — awaiting measured outcome; API success is not Outcome success"
+                    .into(),
+        },
+        other => participation_to_stage(other, "learning"),
+    };
+    CapabilityLifecycleContributions {
+        identity,
+        memory,
+        evaluation,
+        verification,
+        improvement,
+        learning,
+    }
+}
+
+fn participation_to_stage<T>(p: LifecycleParticipation, stage: &str) -> StageContribution<T> {
+    match p {
+        LifecycleParticipation::Supported => StageContribution::Deferred {
+            reason: format!("{stage} declared supported but no contribution produced"),
+        },
+        LifecycleParticipation::NotApplicable => StageContribution::NotApplicable {
+            reason: format!("{stage} does not apply to this capability"),
+        },
+        LifecycleParticipation::Unsupported => StageContribution::Unsupported {
+            reason: format!("{stage} is not implemented for this capability"),
+        },
+        LifecycleParticipation::Deferred => StageContribution::Deferred {
+            reason: format!("{stage} is intentionally deferred"),
+        },
+    }
+}
+
+impl LifecycleContributionContext {
+    fn measured_evidence_available(&self) -> bool {
+        self.measured_outcome_id.is_some()
+    }
 }
 
 /// Registry of execution capabilities available to the Runtime.
@@ -294,6 +518,9 @@ impl ExecutionCapability for MockExecutionCapability {
             target_restrictions: vec!["mock".into(), "sandbox".into()],
             failure_semantics: "failed actions leave prior state unchanged".into(),
             description: "In-process mock mutation for tests".into(),
+            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: default_accepted_input_types("mock.record"),
+            provider_independent: true,
         }
     }
 

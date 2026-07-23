@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.0 — Engineering Loop Integration
+
+### Phase 1–2 — Capability lifecycle contract and typed contributions (RFC-028)
+
+- Every registered Capability declares explicit Engineering Loop participation (`Supported` / `NotApplicable` / `Unsupported` / `Deferred`) for Memory, Evaluation, Verification, Improvement, and Learning
+- Typed `CapabilityLifecycleContributions` carry provenance, correlation, evidence refs, and stage payloads without Capabilities writing Memory or creating Evaluations directly
+- Extended `ExecutionCapabilityDescriptor` with `engineering_loop`, `accepted_input_types`, and `provider_independent` (serde-default safe for older records)
+
+### Phase 3–4 — Routing and Runtime orchestration
+
+- Deterministic Observation → Capability routing on stable input type identifiers (not human names alone)
+- Runtime-owned `run_capability_lifecycle_for_attempt` validates contributions against declared participation, applies existing Memory/Evaluation/Verification engines, and records durable `CapabilityLifecycleRun` snapshots
+- Explicit stage statuses (Completed / Failed / Deferred / Unsupported / NotApplicable / Blocked); partial progress never misrepresented as full success
+- Idempotent replay on lifecycle idempotency keys; append-only history preserved
+
+### Phase 5–7 — Vertical slice, CLI, Workspace
+
+- Vertical slice: `mock.record` (and GitHub workflow dispatch descriptors) through Plan → Approval → Attempt → Receipt → independent verification → Engineering Loop
+- CLI: `rivora capability list|show|route|lifecycle|lifecycle-list|lifecycle-show|trace` with `--json`
+- Workspace: Capability Engineering Loop surface plus status counts; smoke exercises loop replay
+
+### Phase 8–10 — Persistence, tests, documentation
+
+- Lazy `lifecycle_runs/` storage with corruption isolation; v0.1–v0.6 stores open unchanged
+- Unit, integration, architecture, CLI, and Workspace tests for contracts, routing, replay, and boundaries
+- RFC-011 / RFC-012 / RFC-028, README, ROADMAP, and architectural invariants updated for v0.7
+
 ## 0.6.0 — Execution Through External Systems
 
 ### Phase 1 — Execution Plans and Authority (RFC-025)

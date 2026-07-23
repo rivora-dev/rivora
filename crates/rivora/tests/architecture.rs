@@ -367,11 +367,68 @@ fn observation_connectors_remain_read_only_separate_from_execution() {
 }
 
 /// High-risk and prohibited capabilities are denied by centralized policy.
+/// Capabilities must not write Engineering Loop artifacts outside Runtime orchestration.
+#[test]
+fn execution_capabilities_do_not_write_loop_artifacts_directly() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    let connectors_src = workspace_root.join("crates/rivora-connectors/src");
+    let mut stack = vec![connectors_src];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                let content = std::fs::read_to_string(&path).unwrap();
+                for forbidden in [
+                    "append_memory(",
+                    "append_evaluation(",
+                    "append_verification(",
+                    "append_learning(",
+                    "generate_improvement_proposals(",
+                    "append_measured_learning_outcome(",
+                    "process_lifecycle_contributions(",
+                ] {
+                    assert!(
+                        !content.contains(forbidden),
+                        "{} must not call Runtime loop write API `{forbidden}`",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Every ExecutionCapabilityDescriptor construction in connectors declares loop fields.
+#[test]
+fn registered_capabilities_expose_engineering_loop_participation() {
+    use rivora::domain::MockExecutionCapability;
+    use rivora::ExecutionCapability;
+    let mock = MockExecutionCapability::new();
+    let desc = mock.descriptor();
+    assert_eq!(
+        desc.engineering_loop.memory,
+        rivora::LifecycleParticipation::Supported
+    );
+    assert_eq!(
+        desc.engineering_loop.learning,
+        rivora::LifecycleParticipation::Deferred
+    );
+    assert!(!desc.accepted_input_types.is_empty());
+    assert!(desc.provider_independent);
+}
+
 #[test]
 fn policy_denies_high_risk_and_prohibited() {
     use rivora::domain::{
-        evaluate_execution_policy, CapabilityRiskLevel, ExecutionCapabilityDescriptor,
-        ExecutionPolicyDecisionKind,
+        default_accepted_input_types, evaluate_execution_policy, CapabilityRiskLevel,
+        EngineeringLoopParticipation, ExecutionCapabilityDescriptor, ExecutionPolicyDecisionKind,
     };
     let prohibited = ExecutionCapabilityDescriptor {
         capability_id: "force_push".into(),
@@ -387,6 +444,9 @@ fn policy_denies_high_risk_and_prohibited() {
         target_restrictions: vec![],
         failure_semantics: "denied".into(),
         description: "prohibited".into(),
+        engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+        accepted_input_types: default_accepted_input_types("force_push"),
+        provider_independent: true,
     };
     let d = evaluate_execution_policy(Some(&prohibited), "force_push", "production", 1, false);
     assert_eq!(d.decision, ExecutionPolicyDecisionKind::Denied);

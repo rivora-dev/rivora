@@ -7,5 +7,15 @@
 .idea/
 .vscode/
 
-# Internal working docs (local only; not tracked)
+# Accidental / non-Rust dependency trees (not part of Rivora)
+node_modules/
+# Local JS tooling experiments (e.g. wrangler) — not Rivora release artifacts
+/package.json
+/bun.lock
+/package-lock.json
+/yarn.lock
+
+# Internal working docs (local only; not tracked).
+# Authoritative architectural invariants for contributors live at:
+#   docs/ARCHITECTURAL_INVARIANTS.md
 docs/internal/

@@ -12,28 +12,29 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Development: v0.6 — Execution Through External Systems
+## Current Development: v0.7 — Engineering Loop Integration
 
-Rivora v0.6 answers: **May Rivora execute an explicitly approved engineering action through a bounded external capability while preserving authority, provenance, verification, reversibility, and auditability?**
-
-It inserts controlled execution between accepted Proposals and measured Outcomes:
+Rivora v0.7 answers: **Can every Capability participate consistently in the Engineering Loop while the Runtime remains the single source of engineering reasoning?**
 
 ```text
-Observe → Remember → Understand → Assist → Propose → Accept
-    → Execution Plan → Approve → Execute → Receipt → Verify
-    → Implementation Record → Measured Outcome → Learn
+Connectors → Normalized facts
+      ↓
+Capabilities → Intent + typed lifecycle contributions
+      ↓
+Runtime → Memory → Evaluation → Verification → Improvement → Learning
 ```
 
-Implemented for v0.6:
+Built on v0.1–v0.6 (Memory, Knowledge, Evaluation, Verification, Proposals, Learning, Observation Connectors, bounded Execution Capabilities, Plans, Approvals, Attempts, Receipts):
 
-- **Execution Plans and Approvals** (RFC-025) — durable plans, immutable revisions, exact-revision approval, immutable target snapshots, centralized policy
-- **Bounded Execution Capabilities** (RFC-026) — typed write adapters separate from observation connectors; risk levels; dry-run; idempotency
-- **Attempts, Receipts, Verification** (RFC-027) — durable started attempts, explicit uncertainty, capability-specific independent verification, separate rollback plans, v0.5 linkage
-- **CLI and Workspace** — `rivora execute …` and Workspace Execution surface over shared CapabilityService
+- **Lifecycle contract** (RFC-028) — every Capability declares `Supported` / `NotApplicable` / `Unsupported` / `Deferred` for each loop stage
+- **Typed contributions** — Capabilities never write Memory or create Evaluations/Verifications themselves; Runtime orchestrates existing engines
+- **Typed routing** — Observations route to Capabilities by stable input type ids, not vendor names
+- **Durable lineage** — `CapabilityLifecycleRun` snapshots with explicit partial/failed/deferred stages and idempotent replay
+- **CLI / Workspace** — `rivora capability …` and Workspace Engineering Loop surface
 
-**Rivora executes only explicitly approved, bounded capabilities.** It is not a self-healing agent. Proposal acceptance never starts execution. External API success is not Outcome success.
+**Connectors provide normalized engineering data. Capabilities express engineering intent. The Runtime produces engineering knowledge through the Engineering Loop.**
 
-Initial capabilities: `mock.record` (tests), GitHub issue comment/label/create, draft PR from an existing branch, and named workflow dispatch. Each approval binds the provider, owner, repository, environment, capability, plan revision, and branch/ref where applicable. Runtime target drift invalidates approval. High-risk and prohibited actions are denied.
+Execution safety from v0.6 is preserved: only explicitly approved, bounded capabilities mutate external systems. Proposal acceptance never starts execution. External API success is not verified success or Outcome success.
 
 ---
 
@@ -91,7 +92,7 @@ Execution adapters ──► bounded mutations (Runtime-invoked only)
 - Connectors only observe and normalize.
 - Workspace and CLI share the same Capabilities and Runtime.
 
-See `docs/internal/ARCHITECTURAL_INVARIANTS.md` and `docs/rfc/`.
+See `docs/ARCHITECTURAL_INVARIANTS.md` and `docs/rfc/`.
 
 ---
 
@@ -192,6 +193,13 @@ Binaries:
   --idempotency-key example-live-1 \
   --confirm
 ./target/release/rivora execute verify --investigation <ID> --attempt <ATTEMPT_ID>
+
+# Engineering Loop (v0.7)
+./target/release/rivora capability list
+./target/release/rivora capability show mock.record
+./target/release/rivora capability lifecycle --investigation <ID> --attempt <ATTEMPT_ID>
+./target/release/rivora capability trace --investigation <ID> <ATTEMPT_ID>
+./target/release/rivora capability lifecycle-list --investigation <ID>
 ```
 
 Global flags:
@@ -240,6 +248,10 @@ Global flags:
 | `execute run` / `attempts` / `verify` | Execute only an approved target, inspect durable attempts, and independently verify effects |
 | `execute receipts` / `export-receipt` / `trace` | Inspect and export sanitized evidence and trace the complete execution lineage |
 | `execute rollback-plan` | Generate a separate draft rollback plan from explicit inverse metadata; never auto-roll back |
+| `capability list` / `show` | List registered Capabilities and Engineering Loop participation |
+| `capability route` | Deterministic Observation → Capability routing |
+| `capability lifecycle` / `lifecycle-list` / `lifecycle-show` | Run and inspect Engineering Loop stage status |
+| `capability trace` | Trace Observation/execution → Memory → … → Learning lineage |
 
 ---
 
@@ -398,18 +410,18 @@ Follow Red → Green → Refactor. See `.agents/skills/build-rivora/SKILL.md`.
 
 | Document | Purpose |
 | --- | --- |
-| `docs/internal/VISION.md` | Product vision |
-| `docs/internal/PRINCIPLES.md` | Engineering principles |
-| `docs/internal/ARCHITECTURAL_INVARIANTS.md` | Non-negotiable invariants |
-| `docs/internal/IMPLEMENTATION_PLAN.md` | Current release implementation plan |
+| `docs/ARCHITECTURAL_INVARIANTS.md` | Non-negotiable architectural invariants (tracked source of truth) |
+| `docs/internal/` | Local working notes only (gitignored; not required for contributors) |
 | `ROADMAP.md` | Release progression and future boundary |
-| `docs/rfc/RFC-000` … `RFC-027` | Architecture and feature RFCs, including v0.6 authority, bounded execution, receipts, and verification |
+| `docs/rfc/RFC-000` … `RFC-028` | Architecture and feature RFCs, including v0.6 execution and v0.7 Engineering Loop (RFC-028) |
 
 ---
 
-## v0.6 execution boundary
+## v0.6–v0.7 execution and loop boundary
 
-Rivora v0.6 can invoke only registered, typed, bounded capabilities after exact-revision approval and policy evaluation. It does not run unrestricted shell commands, merge or force-push, delete branches/repositories/infrastructure, edit workflow definitions, auto-execute accepted Proposals, retry hiddenly, or perform automatic rollback/remediation. A successful mutation response is a Receipt, not proof of the expected effect or a successful Measured Outcome. See `ROADMAP.md` and RFC-025 through RFC-027.
+Rivora can invoke only registered, typed, bounded capabilities after exact-revision approval and policy evaluation. It does not run unrestricted shell commands, merge or force-push, delete branches/repositories/infrastructure, edit workflow definitions, auto-execute accepted Proposals, retry hiddenly, or perform automatic rollback/remediation. A successful mutation response is a Receipt, not proof of the expected effect or a successful Measured Outcome.
+
+v0.7 adds formal Engineering Loop participation and inspection; it does not add marketplaces, SDKs, or autonomous remediation. See `ROADMAP.md`, RFC-025 through RFC-027, and RFC-028.
 
 ---
 

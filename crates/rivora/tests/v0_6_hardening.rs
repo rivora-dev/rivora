@@ -150,6 +150,9 @@ impl ExecutionCapability for ProbeCapability {
             ],
             failure_semantics: "timeouts are uncertain".into(),
             description: "Hardening test probe".into(),
+            engineering_loop: rivora::EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: vec![],
+            provider_independent: true,
         }
     }
 

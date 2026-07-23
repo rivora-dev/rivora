@@ -9,11 +9,11 @@ use std::io::Read;
 use std::time::Duration;
 
 use rivora::{
-    CapabilityExecutionResult, CapabilityExecutionStatus, CapabilityInvocation,
-    CapabilityRiskLevel, CapabilityStateObservation, CapabilityStateQuery, CapabilityTarget,
-    CapabilityVerificationStatus, DryRunResult, ExecutionCapability, ExecutionCapabilityDescriptor,
-    ExecutionPolicyDecision, ExecutionPolicyDecisionKind, RivoraError, RivoraResult,
-    RollbackMetadata,
+    default_accepted_input_types, CapabilityExecutionResult, CapabilityExecutionStatus,
+    CapabilityInvocation, CapabilityRiskLevel, CapabilityStateObservation, CapabilityStateQuery,
+    CapabilityTarget, CapabilityVerificationStatus, DryRunResult, EngineeringLoopParticipation,
+    ExecutionCapability, ExecutionCapabilityDescriptor, ExecutionPolicyDecision,
+    ExecutionPolicyDecisionKind, RivoraError, RivoraResult, RollbackMetadata,
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -427,6 +427,9 @@ impl ExecutionCapability for GitHubIssueCommentCapability {
             target_restrictions: vec![self.repository.clone()],
             failure_semantics: "API errors fail the action; no partial comment".into(),
             description: "Post a comment on a GitHub issue".into(),
+            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: default_accepted_input_types("github.issue.comment"),
+            provider_independent: true,
         }
     }
 
@@ -699,6 +702,9 @@ impl ExecutionCapability for GitHubIssueLabelCapability {
             target_restrictions: vec![self.repository.clone()],
             failure_semantics: "failed label ops leave prior labels".into(),
             description: "Add or remove a label on a GitHub issue".into(),
+            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: default_accepted_input_types("github.issue.label"),
+            provider_independent: true,
         }
     }
 
@@ -1007,6 +1013,9 @@ impl ExecutionCapability for GitHubIssueCreateCapability {
             target_restrictions: vec![self.repository.clone()],
             failure_semantics: "failed create leaves no issue".into(),
             description: "Create a GitHub issue".into(),
+            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: default_accepted_input_types("github.issue.create"),
+            provider_independent: true,
         }
     }
 
@@ -1286,6 +1295,9 @@ impl ExecutionCapability for GitHubDraftPrCapability {
             target_restrictions: vec![self.repository.clone()],
             failure_semantics: "failed create leaves no PR".into(),
             description: "Create a draft pull request from an existing branch".into(),
+            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: default_accepted_input_types("github.pull_request.create_draft"),
+            provider_independent: true,
         }
     }
 
@@ -1621,6 +1633,9 @@ impl ExecutionCapability for GitHubWorkflowDispatchCapability {
             target_restrictions: vec![self.repository.clone()],
             failure_semantics: "failed dispatch starts no run".into(),
             description: "Trigger an explicitly named GitHub Actions workflow".into(),
+            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+            accepted_input_types: default_accepted_input_types("github_actions.workflow_dispatch"),
+            provider_independent: true,
         }
     }
 

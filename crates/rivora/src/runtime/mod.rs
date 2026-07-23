@@ -6,6 +6,8 @@ pub mod assistance;
 pub mod context;
 /// Local-first embedding abstraction for semantic recall (RFC-016).
 pub mod embedding;
+/// Capability Engineering Loop orchestration (RFC-028 / v0.7).
+pub mod engineering_loop;
 mod evaluation;
 /// Controlled external execution (RFC-025/026/027).
 pub mod execution;

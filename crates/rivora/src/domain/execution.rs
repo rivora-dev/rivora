@@ -1244,6 +1244,23 @@ pub struct ExecutionCapabilityDescriptor {
     pub failure_semantics: String,
     /// Human description.
     pub description: String,
+    /// Engineering Loop stage participation (RFC-028 / v0.7).
+    ///
+    /// Explicit for every stage; defaults to Deferred for legacy descriptors.
+    #[serde(default)]
+    pub engineering_loop: super::EngineeringLoopParticipation,
+    /// Canonical provider-independent input type identifiers accepted for routing.
+    #[serde(default)]
+    pub accepted_input_types: Vec<String>,
+    /// Whether the Capability is independent of a specific provider/connector API.
+    ///
+    /// True means it consumes canonical Runtime types, not vendor-specific payloads.
+    #[serde(default = "default_provider_independent_true")]
+    pub provider_independent: bool,
+}
+
+fn default_provider_independent_true() -> bool {
+    true
 }
 
 /// End-to-end execution trace.

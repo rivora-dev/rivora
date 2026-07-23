@@ -5,15 +5,15 @@ mod local;
 pub use local::LocalStore;
 
 use crate::domain::{
-    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, ExecutionApproval,
-    ExecutionApprovalListing, ExecutionAttempt, ExecutionAttemptListing, ExecutionPlan,
-    ExecutionPlanListing, ExecutionReceipt, ExecutionReceiptListing, ExecutionVerification,
-    ExecutionVerificationListing, Hypothesis, ImplementationListing, ImplementationRecord,
-    ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
-    KnowledgeObject, LearningOutcome, LearningPattern, MeasuredLearningOutcome,
-    MeasuredOutcomeListing, MemoryRecord, ObjectId, Observation, ProposalArtifact,
-    ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
-    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    AssistedWorkflow, CapabilityLifecycleRun, CapabilityLifecycleRunListing, DeploymentReadiness,
+    EngineeringReport, Evaluation, ExecutionApproval, ExecutionApprovalListing, ExecutionAttempt,
+    ExecutionAttemptListing, ExecutionPlan, ExecutionPlanListing, ExecutionReceipt,
+    ExecutionReceiptListing, ExecutionVerification, ExecutionVerificationListing, Hypothesis,
+    ImplementationListing, ImplementationRecord, ImprovementProposal, Investigation,
+    InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome, LearningPattern,
+    MeasuredLearningOutcome, MeasuredOutcomeListing, MemoryRecord, ObjectId, Observation,
+    ProposalArtifact, ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation,
+    RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 
@@ -362,4 +362,27 @@ pub trait Store: Send + Sync {
 
     /// Atomically consume one-time approval authority.
     fn try_consume_execution_approval(&self, approval: &ExecutionApproval) -> RivoraResult<bool>;
+
+    /// Append one immutable Capability Engineering Loop run snapshot (v0.7).
+    fn append_lifecycle_run(&self, run: &CapabilityLifecycleRun) -> RivoraResult<()>;
+
+    /// Load one Capability Engineering Loop run snapshot.
+    fn load_lifecycle_run(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<CapabilityLifecycleRun>;
+
+    /// List Capability Engineering Loop runs for an Investigation (with isolation).
+    fn list_lifecycle_runs(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<CapabilityLifecycleRunListing>;
+
+    /// Find a lifecycle run by idempotency key (returns latest revision if any).
+    fn find_lifecycle_run_by_idempotency(
+        &self,
+        investigation_id: &InvestigationId,
+        key: &str,
+    ) -> RivoraResult<Option<CapabilityLifecycleRun>>;
 }

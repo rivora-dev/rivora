@@ -29,6 +29,7 @@
 //!     execution_attempts/{object_id}.json
 //!     execution_receipts/{object_id}.json
 //!     execution_verifications/{object_id}.json
+//!     lifecycle_runs/{object_id}.json
 //!   graph/
 //!     relationships/{object_id}.json
 //!   learning/
@@ -42,22 +43,24 @@
 //! v0.5 `implementations/`, `learning_outcomes/`, and root
 //! `learning/patterns/` are also lazy and additive.
 //! v0.6 execution directories are lazy and additive.
+//! v0.7 `lifecycle_runs/` is lazy and additive.
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
-    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, ExecutionApproval,
-    ExecutionApprovalListing, ExecutionAttempt, ExecutionAttemptListing, ExecutionPlan,
-    ExecutionPlanListing, ExecutionReceipt, ExecutionReceiptListing, ExecutionStorageDiagnostic,
-    ExecutionVerification, ExecutionVerificationListing, Hypothesis, ImplementationListing,
-    ImplementationRecord, ImplementationStorageDiagnostic, ImprovementProposal, Investigation,
-    InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome, LearningPattern,
-    MeasuredLearningOutcome, MeasuredOutcomeListing, MeasuredOutcomeStorageDiagnostic,
-    MemoryRecord, ObjectId, Observation, ProposalArtifact, ProposalArtifactListing,
-    ProposalListing, RecalledContext, Recommendation, RiskForecast, RootCauseGuidance,
-    TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    AssistedWorkflow, CapabilityLifecycleRun, CapabilityLifecycleRunListing, DeploymentReadiness,
+    EngineeringReport, Evaluation, ExecutionApproval, ExecutionApprovalListing, ExecutionAttempt,
+    ExecutionAttemptListing, ExecutionPlan, ExecutionPlanListing, ExecutionReceipt,
+    ExecutionReceiptListing, ExecutionStorageDiagnostic, ExecutionVerification,
+    ExecutionVerificationListing, Hypothesis, ImplementationListing, ImplementationRecord,
+    ImplementationStorageDiagnostic, ImprovementProposal, Investigation, InvestigationId,
+    InvestigationRelationship, KnowledgeObject, LearningOutcome, LearningPattern,
+    LifecycleStorageDiagnostic, MeasuredLearningOutcome, MeasuredOutcomeListing,
+    MeasuredOutcomeStorageDiagnostic, MemoryRecord, ObjectId, Observation, ProposalArtifact,
+    ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
+    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -1556,6 +1559,107 @@ impl Store for LocalStore {
             .execution_approvals_dir(&approval.investigation_id)
             .join(format!("{}.consumed", approval.id));
         self.write_json_new(&marker, &serde_json::json!({"approval_id": approval.id}))
+    }
+
+    fn append_lifecycle_run(&self, run: &CapabilityLifecycleRun) -> RivoraResult<()> {
+        let path = self.lifecycle_run_path(&run.investigation_id, &run.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "lifecycle run snapshot {} already exists (immutable)",
+                run.id
+            )));
+        }
+        self.write_json(&path, run)
+    }
+
+    fn load_lifecycle_run(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<CapabilityLifecycleRun> {
+        let path = self.lifecycle_run_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let run: CapabilityLifecycleRun = self.read_json(&path)?;
+        if run.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "lifecycle run investigation ownership mismatch",
+            ));
+        }
+        Ok(run)
+    }
+
+    fn list_lifecycle_runs(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<CapabilityLifecycleRunListing> {
+        let dir = self.lifecycle_runs_dir(id);
+        if !dir.exists() {
+            return Ok(CapabilityLifecycleRunListing::default());
+        }
+        let mut listing = CapabilityLifecycleRunListing::default();
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<CapabilityLifecycleRun>(&path) {
+                Ok(run) if run.investigation_id == *id => listing.runs.push(run),
+                Ok(_) => listing.diagnostics.push(LifecycleStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "lifecycle run investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(LifecycleStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.runs.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.lineage_id.to_string().cmp(&b.lineage_id.to_string()))
+                .then_with(|| a.revision_number.cmp(&b.revision_number))
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(listing)
+    }
+
+    fn find_lifecycle_run_by_idempotency(
+        &self,
+        investigation_id: &InvestigationId,
+        key: &str,
+    ) -> RivoraResult<Option<CapabilityLifecycleRun>> {
+        let listing = self.list_lifecycle_runs(investigation_id)?;
+        let mut matches: Vec<_> = listing
+            .runs
+            .into_iter()
+            .filter(|r| r.idempotency_key == key)
+            .collect();
+        matches.sort_by(|a, b| {
+            a.revision_number
+                .cmp(&b.revision_number)
+                .then_with(|| a.created_at.cmp(&b.created_at))
+        });
+        Ok(matches.pop())
+    }
+}
+
+impl LocalStore {
+    fn lifecycle_runs_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("lifecycle_runs")
+    }
+
+    fn lifecycle_run_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
+        self.lifecycle_runs_dir(investigation_id)
+            .join(format!("{id}.json"))
     }
 }
 

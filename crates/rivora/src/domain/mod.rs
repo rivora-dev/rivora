@@ -2,6 +2,7 @@
 
 mod assistance;
 mod context;
+mod engineering_loop;
 mod evaluation;
 mod execution;
 mod execution_capability;
@@ -23,6 +24,7 @@ mod workflow;
 
 pub use assistance::*;
 pub use context::*;
+pub use engineering_loop::*;
 pub use evaluation::*;
 pub use execution::*;
 pub use execution_capability::*;

@@ -281,6 +281,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Improvement Proposals",
             "Learning Outcomes",
             "Execution (v0.6)",
+            "Capability Engineering Loop (v0.7)",
             "Back",
         ];
         let choice = Select::new()
@@ -507,6 +508,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             21 => proposal_session(caps, inv.id)?,
             22 => learning_session(caps, inv.id)?,
             23 => execution_session(caps, inv.id)?,
+            24 => lifecycle_session(caps, inv.id)?,
             _ => break,
         }
     }
@@ -1558,6 +1560,20 @@ fn show_status(caps: &CapabilityService, id: InvestigationId) -> Result<(), Stri
         "Recalled context: {}",
         caps.list_recalled_context(id).map_err(err)?.len()
     );
+    println!(
+        "Execution plans: {}",
+        caps.list_execution_plans(id).map_err(err)?.plans.len()
+    );
+    let lifecycle = caps.list_lifecycle_runs(id).map_err(err)?;
+    println!("Engineering Loop runs: {}", lifecycle.runs.len());
+    if let Some(latest) = lifecycle.runs.last() {
+        println!(
+            "  latest loop: {} [{}] {}",
+            latest.id,
+            latest.status.as_str(),
+            latest.capability_id
+        );
+    }
     Ok(())
 }
 
@@ -1895,6 +1911,93 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
         "Workspace Execution cancellation: {}",
         cancelled.status.as_str()
     );
+
+    // v0.7 Engineering Loop vertical slice (mock capability).
+    let loop_plan = caps
+        .create_execution_plan(
+            assist_inv.id,
+            CreateExecutionPlanRequest {
+                proposal_id: accepted.id,
+                capability_id: "mock.record".into(),
+                target_system: "mock".into(),
+                target_environment: "sandbox".into(),
+                actions: vec![ExecutionAction {
+                    action_id: "loop1".into(),
+                    action_name: "record_mutation".into(),
+                    inputs: serde_json::json!({
+                        "resource_key": "workspace/lifecycle",
+                        "field": "status",
+                        "value": "looped"
+                    }),
+                    continue_on_failure: false,
+                }],
+                inputs: serde_json::json!({}),
+                expected_effects: vec![],
+                preconditions: vec![],
+                supports_dry_run: true,
+            },
+            "workspace",
+        )
+        .map_err(err)?;
+    let loop_plan = caps
+        .validate_execution_plan(
+            assist_inv.id,
+            loop_plan.id,
+            "workspace",
+            "lifecycle smoke validation",
+        )
+        .map_err(err)?;
+    let (loop_plan, loop_approval) = caps
+        .approve_execution_plan(
+            assist_inv.id,
+            loop_plan.id,
+            "workspace",
+            "lifecycle smoke approval",
+            vec![],
+            vec![],
+            None,
+            true,
+        )
+        .map_err(err)?;
+    let attempt = caps
+        .execute_plan(
+            assist_inv.id,
+            loop_plan.id,
+            loop_approval.id,
+            "workspace",
+            "workspace-lifecycle-smoke",
+            false,
+        )
+        .map_err(err)?;
+    let _ = caps
+        .verify_execution_attempt(assist_inv.id, attempt.id, "workspace")
+        .map_err(err)?;
+    let lifecycle = caps
+        .run_capability_lifecycle_for_attempt(assist_inv.id, attempt.id, "workspace")
+        .map_err(err)?;
+    print_lifecycle_run(&lifecycle);
+    let replay = caps
+        .run_capability_lifecycle_for_attempt(assist_inv.id, attempt.id, "workspace")
+        .map_err(err)?;
+    assert_eq!(
+        replay.lineage_id, lifecycle.lineage_id,
+        "lifecycle replay must be idempotent"
+    );
+    println!(
+        "Workspace Engineering Loop: {} [{}]",
+        lifecycle.id,
+        lifecycle.status.as_str()
+    );
+    let caps_listed = caps.list_execution_capabilities();
+    assert!(
+        caps_listed.iter().any(|c| {
+            c.capability_id == "mock.record"
+                && c.engineering_loop.memory == rivora::LifecycleParticipation::Supported
+                && c.engineering_loop.learning == rivora::LifecycleParticipation::Deferred
+        }),
+        "mock.record must declare Engineering Loop participation"
+    );
+    println!("Workspace Capability Engineering Loop surface verified.");
 
     let alternatives = caps
         .generate_proposal_alternatives(assist_inv.id, "workspace")
@@ -2359,6 +2462,7 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
             "Create rollback plan",
             "List receipts",
             "Export receipt JSON",
+            "Run Engineering Loop for attempt",
             "Back",
         ];
         let choice = Select::new()
@@ -2371,10 +2475,15 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
             0 => {
                 for c in caps.list_execution_capabilities() {
                     println!(
-                        "  • {} [{}] dry_run={}",
+                        "  • {} [{}] dry_run={}  loop M/E/V/I/L={}/{}/{}/{}/{}",
                         c.capability_id,
                         c.risk_level.as_str(),
-                        c.supports_dry_run
+                        c.supports_dry_run,
+                        c.engineering_loop.memory.as_str(),
+                        c.engineering_loop.evaluation.as_str(),
+                        c.engineering_loop.verification.as_str(),
+                        c.engineering_loop.improvement.as_str(),
+                        c.engineering_loop.learning.as_str(),
                     );
                 }
             }
@@ -2754,10 +2863,188 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                 let json = caps.export_execution_receipt(id, receipt).map_err(err)?;
                 println!("{json}");
             }
+            17 => {
+                let attempt = input_object_id("Attempt id")?;
+                let run = caps
+                    .run_capability_lifecycle_for_attempt(id, attempt, "workspace")
+                    .map_err(err)?;
+                print_lifecycle_run(&run);
+            }
             _ => break,
         }
     }
     Ok(())
+}
+
+/// Capability Engineering Loop inspection (v0.7 / RFC-028).
+fn lifecycle_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
+    loop {
+        println!("\n{}", style("Capability Engineering Loop (v0.7)").bold());
+        println!(
+            "Connectors provide normalized facts. Capabilities contribute typed context. Runtime owns reasoning."
+        );
+        let actions = vec![
+            "List registered Capabilities",
+            "Show Capability descriptor + loop stages",
+            "List Engineering Loop runs",
+            "Show Engineering Loop run",
+            "Trace invocation / attempt",
+            "Run Engineering Loop for attempt",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Engineering Loop")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+        match choice {
+            0 => {
+                for c in caps.list_execution_capabilities() {
+                    println!(
+                        "  • {} v{} [{}]",
+                        c.capability_id,
+                        c.version,
+                        c.risk_level.as_str()
+                    );
+                    println!(
+                        "      Memory={} Evaluation={} Verification={} Improvement={} Learning={}",
+                        c.engineering_loop.memory.as_str(),
+                        c.engineering_loop.evaluation.as_str(),
+                        c.engineering_loop.verification.as_str(),
+                        c.engineering_loop.improvement.as_str(),
+                        c.engineering_loop.learning.as_str(),
+                    );
+                }
+            }
+            1 => {
+                let cap_id: String = Input::new()
+                    .with_prompt("Capability id")
+                    .default("mock.record".into())
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let desc = caps.show_execution_capability(&cap_id).map_err(err)?;
+                println!("{}", desc.description);
+                println!(
+                    "  accepted_input_types=[{}] provider_independent={}",
+                    desc.accepted_input_types.join(", "),
+                    desc.provider_independent
+                );
+                println!(
+                    "  Engineering Loop: M={} E={} V={} I={} L={}",
+                    desc.engineering_loop.memory.as_str(),
+                    desc.engineering_loop.evaluation.as_str(),
+                    desc.engineering_loop.verification.as_str(),
+                    desc.engineering_loop.improvement.as_str(),
+                    desc.engineering_loop.learning.as_str(),
+                );
+            }
+            2 => {
+                let listing = caps.list_lifecycle_runs(id).map_err(err)?;
+                if listing.runs.is_empty() {
+                    println!("No Engineering Loop runs.");
+                }
+                for run in listing.runs {
+                    println!(
+                        "  • {} rev {} [{}] {} inv={}",
+                        run.id,
+                        run.revision_number,
+                        run.status.as_str(),
+                        run.capability_id,
+                        run.invocation_id
+                    );
+                }
+                for d in listing.diagnostics {
+                    println!(
+                        "  {} corrupt lifecycle run isolated: {} ({})",
+                        style("!").yellow(),
+                        d.path,
+                        d.error
+                    );
+                }
+            }
+            3 => {
+                let run_id = input_object_id("Lifecycle run id")?;
+                let run = caps.get_lifecycle_run(id, run_id).map_err(err)?;
+                print_lifecycle_run(&run);
+            }
+            4 => {
+                let inv_id: String = Input::new()
+                    .with_prompt("Attempt / invocation / run id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let trace = caps.trace_capability_lifecycle(id, &inv_id).map_err(err)?;
+                println!("  capability={}", trace.capability_id);
+                println!("  invocation={}", trace.invocation_id);
+                println!(
+                    "  status={}",
+                    trace
+                        .status
+                        .map(|s| s.as_str().to_string())
+                        .unwrap_or_else(|| "none".into())
+                );
+                for stage in &trace.stages {
+                    println!(
+                        "    {}  {}  {}",
+                        stage.stage.as_str(),
+                        stage.status.as_str(),
+                        stage.detail.clone().unwrap_or_default()
+                    );
+                }
+                println!("  {}", trace.explanation);
+            }
+            5 => {
+                let attempt = input_object_id("Attempt id")?;
+                let run = caps
+                    .run_capability_lifecycle_for_attempt(id, attempt, "workspace")
+                    .map_err(err)?;
+                print_lifecycle_run(&run);
+            }
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+fn print_lifecycle_run(run: &rivora::CapabilityLifecycleRun) {
+    println!(
+        "Engineering Loop {} rev {} [{}]",
+        run.id,
+        run.revision_number,
+        run.status.as_str()
+    );
+    println!(
+        "  capability={} invocation={}",
+        run.capability_id, run.invocation_id
+    );
+    for stage in &run.stages {
+        let artifacts = if stage.artifact_ids.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " artifacts=[{}]",
+                stage
+                    .artifact_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        println!(
+            "  {:<12}  {:<14}  ({}){}{}",
+            stage.stage.as_str(),
+            stage.status.as_str(),
+            stage.participation.as_str(),
+            stage
+                .detail
+                .as_ref()
+                .map(|d| format!("  {d}"))
+                .unwrap_or_default(),
+            artifacts
+        );
+    }
+    println!("  {}", run.explanation);
 }
 
 fn live_execution_confirmation(
