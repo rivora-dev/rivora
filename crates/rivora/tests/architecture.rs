@@ -196,3 +196,146 @@ fn measured_outcome_is_not_recommendation_disposition_learning_outcome() {
         "Measured outcomes must not reuse Recommendation disposition enum as their classification"
     );
 }
+
+/// v0.6 execution requires explicit approval; proposal acceptance must not execute.
+#[test]
+fn execution_requires_approval_and_not_proposal_acceptance() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let execution = std::fs::read_to_string(manifest_dir.join("src/runtime/execution.rs")).unwrap();
+    assert!(
+        execution.contains("approve_execution_plan") && execution.contains("execute_plan"),
+        "execution runtime must expose approve and execute as separate operations"
+    );
+    assert!(
+        execution.contains("Accepted") && execution.contains("execution plans require an accepted"),
+        "plans require accepted proposals but acceptance alone must not execute"
+    );
+    assert!(
+        !execution.contains("std::process::Command"),
+        "execution runtime must not spawn arbitrary shell commands"
+    );
+    // No autonomous loop primitives.
+    for forbidden in [
+        "loop {",
+        "schedule_execution",
+        "auto_remediate",
+        "daemon",
+        "hidden_retry",
+    ] {
+        assert!(
+            !execution.contains(forbidden),
+            "execution runtime must not contain autonomous primitive `{forbidden}`"
+        );
+    }
+}
+
+/// CLI and Workspace must not call GitHub mutation APIs directly.
+#[test]
+fn interfaces_do_not_call_github_mutation_http_directly() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    for crate_name in ["rivora-cli", "rivora-workspace"] {
+        let src = workspace_root.join("crates").join(crate_name).join("src");
+        let mut stack = vec![src];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    let content = std::fs::read_to_string(&path).unwrap();
+                    for forbidden in [
+                        "api.github.com",
+                        ".post(\"/repos",
+                        "create_pull_request(",
+                        "reqwest::blocking",
+                    ] {
+                        assert!(
+                            !content.contains(forbidden),
+                            "{} must not call external mutation APIs directly (`{forbidden}`)",
+                            path.display()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Observation connectors remain free of write methods; execution is a separate module.
+#[test]
+fn observation_connectors_remain_read_only_separate_from_execution() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    for file in [
+        "github.rs",
+        "github_actions.rs",
+        "local.rs",
+        "kubernetes.rs",
+        "sentry.rs",
+    ] {
+        let path = workspace_root
+            .join("crates/rivora-connectors/src")
+            .join(file);
+        let content = std::fs::read_to_string(&path).unwrap();
+        for forbidden in [".post(", ".patch(", ".put(", ".delete("] {
+            assert!(
+                !content.contains(forbidden),
+                "{} observation connector must remain read-only (found `{forbidden}`)",
+                path.display()
+            );
+        }
+    }
+    let execution =
+        std::fs::read_to_string(workspace_root.join("crates/rivora-connectors/src/execution.rs"))
+            .unwrap();
+    assert!(
+        execution.contains("ExecutionCapability"),
+        "execution adapters must implement ExecutionCapability"
+    );
+    assert!(
+        execution.contains("github.issue.comment")
+            || execution.contains("GitHubIssueCommentCapability"),
+        "bounded GitHub write capabilities must be declared"
+    );
+}
+
+/// High-risk and prohibited capabilities are denied by centralized policy.
+#[test]
+fn policy_denies_high_risk_and_prohibited() {
+    use rivora::domain::{
+        evaluate_execution_policy, CapabilityRiskLevel, ExecutionCapabilityDescriptor,
+        ExecutionPolicyDecisionKind,
+    };
+    let prohibited = ExecutionCapabilityDescriptor {
+        capability_id: "force_push".into(),
+        version: "1".into(),
+        risk_level: CapabilityRiskLevel::Prohibited,
+        supported_actions: vec!["force_push".into()],
+        required_inputs: vec![],
+        supports_dry_run: false,
+        idempotency_behavior: "none".into(),
+        reversibility: "none".into(),
+        verification_method: "none".into(),
+        credential_requirements: vec![],
+        target_restrictions: vec![],
+        failure_semantics: "denied".into(),
+        description: "prohibited".into(),
+    };
+    let d = evaluate_execution_policy(Some(&prohibited), "force_push", "production", 1, false);
+    assert_eq!(d.decision, ExecutionPolicyDecisionKind::Denied);
+    let high = ExecutionCapabilityDescriptor {
+        risk_level: CapabilityRiskLevel::HighRiskWrite,
+        capability_id: "merge".into(),
+        ..prohibited
+    };
+    let d2 = evaluate_execution_policy(Some(&high), "merge", "production", 1, false);
+    assert_eq!(d2.decision, ExecutionPolicyDecisionKind::Denied);
+}

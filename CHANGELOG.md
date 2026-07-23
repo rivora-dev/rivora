@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.0 — Execution Through External Systems
+
+### Phase 1 — Execution Plans and Authority (RFC-025)
+
+- Durable Execution Plans convert accepted Proposals into ordered external actions
+- Immutable plan revisions; exact-revision Execution Approvals with actor, reason, scope, environment
+- Centralized Execution Policy (`Allowed` / `AllowedWithApproval` / `AllowedDryRunOnly` / `Denied`)
+- Lifecycle: Draft → ReadyForReview → Approved → Executing → Executed → Verified → Closed (plus exceptional states)
+- Proposal Accepted ≠ Execution Approved ≠ Execution Started ≠ Verified ≠ Outcome Successful
+
+### Phase 2 — Bounded External Capabilities (RFC-026)
+
+- Distinct `ExecutionCapability` contract separate from read-only observation connectors
+- Risk levels; v0.6 supports ReadOnly / LowRiskWrite / BoundedWrite only (HighRiskWrite and Prohibited denied)
+- Dry-run / plan validation, idempotency keys, retry safety classification, preconditions
+- Initial adapters: `mock.record`, GitHub issue comment/label/create, draft PR, workflow dispatch
+- No arbitrary shell, force-push, merge, or autonomous remediation
+
+### Phase 3 — Receipts, Verification, CLI/Workspace (RFC-027)
+
+- Execution Attempts, Receipts, and independent Verification records with partial-failure modeling
+- Rollback metadata only (no automatic rollback); linkage to v0.5 Implementation Records / Outcomes
+- CLI `execute` command tree and Workspace Execution surface over shared CapabilityService
+- Architecture tests enforce approval requirements, connector boundaries, and policy denial
+
 ## 0.5.0 — Learning Outcomes
 
 ### Phase 1–2 — Implementation Records, Measured Outcomes, Patterns (RFC-022/023/024)

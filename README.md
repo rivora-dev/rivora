@@ -12,24 +12,28 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Development: v0.5 — Measure and Learn
+## Current Development: v0.6 — Execution Through External Systems
 
-Rivora v0.5 answers: **Which improvements worked, which failed, and why—using durable evidence without applying changes?**
+Rivora v0.6 answers: **May Rivora execute an explicitly approved engineering action through a bounded external capability while preserving authority, provenance, verification, reversibility, and auditability?**
 
-It closes the feedback loop after a Proposal is implemented *outside* Rivora by recording external work, measuring outcomes, verifying conclusions, and deriving historical patterns.
+It inserts controlled execution between accepted Proposals and measured Outcomes:
 
 ```text
-Observe → Remember → Understand → Assist → Propose → Measure → Learn
+Observe → Remember → Understand → Assist → Propose → Accept
+    → Execution Plan → Approve → Execute → Receipt → Verify
+    → Implementation Record → Measured Outcome → Learn
 ```
 
-Implemented for v0.5:
+Implemented for v0.6:
 
-- **Implementation Records** (RFC-022) — durable, revisioned records of external work linked to exact Proposal snapshots
-- **Measured Learning Outcomes** (RFC-022/023) — expected results, typed evidence, deterministic evaluation, explicit verification with actor + reason
-- **Learning Patterns and influence** (RFC-024) — patterns from verified Outcomes; bounded advisory influence on Proposal ranking
-- **CLI and Workspace learning experience** — `implementation` / `learn` commands, Learning Outcomes surface, exports, and shared CapabilityService flows
+- **Execution Plans and Approvals** (RFC-025) — durable plans, immutable revisions, exact-revision approval, centralized policy
+- **Bounded Execution Capabilities** (RFC-026) — typed write adapters separate from observation connectors; risk levels; dry-run; idempotency
+- **Attempts, Receipts, Verification** (RFC-027) — partial failure, independent verification, rollback metadata, v0.5 linkage
+- **CLI and Workspace** — `rivora execute …` and Workspace Execution surface over shared CapabilityService
 
-v0.1–v0.4 foundations remain operational. Accepted Proposal ≠ Implementation Record ≠ Verified Measured Outcome ≠ Learning Pattern. Connectors remain read-only and no external system is mutated. Interfaces (Workspace and CLI) invoke the same Capability layer over the same Runtime.
+**Rivora executes only explicitly approved, bounded capabilities.** It is not a self-healing agent. Proposal acceptance never starts execution. External API success is not Outcome success.
+
+Initial capabilities: `mock.record` (tests), GitHub issue comment/label/create, draft PR from existing branch, named workflow dispatch. High-risk and prohibited actions are denied.
 
 ---
 
@@ -57,13 +61,14 @@ Runtime       (single source of reasoning)
       ├── Assisted Workflows
       ├── Engineering Assistance
       ├── Improvement Proposals
-      └── Implementation Records / Measured Outcomes / Patterns
+      ├── Implementation Records / Measured Outcomes / Patterns
+      └── Execution Plans / Approvals / Attempts / Receipts / Verification
       │
       ▼
 Local Store   (.rivora/data)
 
-Connectors ──► Observations only ──► Runtime
-  (local, GitHub, GitHub Actions, Kubernetes, Sentry)
+Observation connectors ──► Observations only ──► Runtime
+Execution adapters ──► bounded mutations (Runtime-invoked only)
 ```
 
 ### Architectural invariants
@@ -75,9 +80,11 @@ Connectors ──► Observations only ──► Runtime
 - Verification produces durable receipts (pass / fail / inconclusive).
 - Recommendations are directional assistance, never auto-applied.
 - Improvement Proposals are durable suggestions, never implementations.
-- Proposal acceptance is explicit and never implies implementation or verification.
-- Implementation Records record external work only; they never apply changes.
+- Proposal acceptance is explicit and never implies implementation, execution, or verification.
+- Implementation Records record external work only; they never apply changes alone.
 - Measured Learning Outcomes require explicit evaluation and verification authority.
+- Execution requires an explicit plan, exact-revision approval, and centralized policy.
+- Observation connectors remain read-only; mutation uses separate ExecutionCapability adapters.
 - Learning records outcomes without rewriting history.
 - Investigations remain independent historical records; relationships do not merge them.
 - Recalled historical context is labeled and distinct from current evidence.

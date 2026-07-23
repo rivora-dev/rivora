@@ -10,20 +10,31 @@ engineering-system mutation boundaries.
 * v0.3 — Engineering Assistance: composite workflows, hypotheses, risk, readiness, reports
 * v0.4 — Improvement Proposals: durable candidate changes, comparison, refinement, proposed plans, export
 * v0.5 — Measure and Learn: Implementation Records, Measured Learning Outcomes, patterns, and influence
-* v0.6 — Execute through external systems (future)
+* v0.6 — Execute through external systems: approved bounded capabilities, plans, receipts, verification
 
 ## Current boundary
 
-v0.5 can record external implementations, measure outcomes against Proposal
-expectations, verify conclusions with explicit authority, and derive historical
-learning patterns that advisory-rank future Proposals. It cannot apply a
-Proposal, edit a repository, invoke a coding agent, mutate an external system,
-or auto-verify Outcomes. Acceptance remains a human lifecycle decision only;
-implementation and verification are separate explicit steps.
+v0.6 can create Execution Plans from accepted Proposals, evaluate centralized
+execution policy, require exact-revision human approval, dry-run when supported,
+invoke bounded external capabilities through Runtime-owned adapters, record
+Receipts, independently verify immediate postconditions, and link to v0.5
+Implementation Records / Measured Outcomes.
+
+v0.6 cannot: run unrestricted shell commands; auto-execute accepted Proposals;
+perform high-risk writes (merge, force-push, infrastructure delete); autonomously
+remediate, schedule, or roll back; or treat external API success as Outcome success.
+
+```text
+Proposal Accepted
+  ≠ Execution Approved
+  ≠ Execution Started
+  ≠ Execution Completed
+  ≠ Execution Verified
+  ≠ Outcome Successful
+```
 
 ## Future backlog
 
-v0.6 execution through external systems, autonomous remediation, inferred
-implementation tracking, collaboration, SDKs, marketplaces, hosted control
-planes, multi-tenancy, and enterprise administration remain future work. They
-are not part of v0.5.
+Autonomous remediation, inferred implementation tracking, collaboration, SDKs,
+marketplaces, hosted control planes, multi-tenancy, multi-user approval workflows,
+and enterprise administration remain future work. They are not part of v0.6.
