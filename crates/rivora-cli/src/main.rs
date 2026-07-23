@@ -16,6 +16,7 @@ use rivora::domain::{
     ProposalFeedbackCategory, ProposalPriority, ProposalStatus, ProposalTransitionAuthority,
     RelationshipKind, VerificationResult,
 };
+use rivora::runtime::execution::{CreateExecutionPlanRequest, ReviseExecutionPlanRequest};
 use rivora::runtime::outcome::{
     CollectOutcomeEvidenceRequest, RecordImplementationRequest, ReviseImplementationRequest,
 };
@@ -24,16 +25,18 @@ use rivora::runtime::proposal::{
 };
 use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
 use rivora::storage::LocalStore;
-use rivora::{CapabilityService, Runtime};
+use rivora::{CapabilityService, ExecutionAction, MockExecutionCapability, Runtime};
 use rivora_connectors::github::GitHubConnector;
 use rivora_connectors::github_actions::{ConnectorStatusReport, GitHubActionsConnector};
 use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
+use rivora_connectors::register_github_execution_capabilities;
 use rivora_connectors::sentry::SentryConnector;
 use rivora_connectors::NormalizedObservation;
 
 const PROPOSAL_BOUNDARY: &str = "Proposal only — not applied, not implemented, not verified.";
 const LEARNING_BOUNDARY: &str = "Measured Learning Outcome — external implementation recorded, never auto-applied; verified only with explicit actor+reason.";
+const EXECUTION_BOUNDARY: &str = "Execution Through External Systems — only explicitly approved, bounded capabilities; Proposal acceptance ≠ execution approval.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -233,6 +236,183 @@ enum Commands {
     Proposal {
         #[command(subcommand)]
         action: ProposalCmd,
+    },
+    /// Controlled external execution (v0.6) — requires explicit plan approval.
+    Execute {
+        #[command(subcommand)]
+        action: ExecuteCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ExecuteCmd {
+    /// List registered execution capabilities.
+    Capabilities,
+    /// Show one execution capability.
+    Capability {
+        /// Capability id (e.g. mock.record, github.issue.comment).
+        id: String,
+    },
+    /// Create a draft Execution Plan for an accepted Proposal.
+    Plan {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        proposal: String,
+        #[arg(long)]
+        capability: String,
+        #[arg(long, default_value = "mock")]
+        target_system: String,
+        #[arg(long, default_value = "sandbox")]
+        environment: String,
+        /// Action name supported by the capability.
+        #[arg(long)]
+        action: String,
+        /// JSON object of action inputs (never secrets).
+        #[arg(long, default_value = "{}")]
+        inputs: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Validate a draft plan (→ ready_for_review).
+    Validate {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Preview / dry-run a plan (never mutates).
+    Preview {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+    },
+    /// Approve an exact plan revision for live execution.
+    Approve {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+        /// One-time approval (default true).
+        #[arg(long, default_value_t = true)]
+        one_time: bool,
+    },
+    /// Reject a plan.
+    Reject {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Execute an approved plan. Requires --confirm for live runs.
+    Run {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+        #[arg(long)]
+        approval: String,
+        #[arg(long)]
+        idempotency_key: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+        /// Dry-run only (no external mutation).
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Required for live execution.
+        #[arg(long, default_value_t = false)]
+        confirm: bool,
+    },
+    /// List execution plans for an Investigation.
+    Plans {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show one execution plan.
+    Show {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+    },
+    /// List execution attempts.
+    Attempts {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Show one attempt.
+    Attempt {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        attempt: String,
+    },
+    /// Independently verify an attempt.
+    Verify {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        attempt: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Trace plan → approval → attempt → receipt → verification.
+    Trace {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+    },
+    /// Explain policy for a plan.
+    Policy {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+    },
+    /// Export plan JSON.
+    Export {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+    },
+    /// Link attempt to Implementation Record.
+    LinkImplementation {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        attempt: String,
+        #[arg(long)]
+        summary: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Revise plan inputs (invalidates prior approval).
+    Revise {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "{}")]
+        inputs: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
     },
 }
 
@@ -2728,6 +2908,435 @@ fn run() -> Result<(), String> {
                 });
             }
         },
+        Commands::Execute { action } => match action {
+            ExecuteCmd::Capabilities => {
+                let list = caps.list_execution_capabilities();
+                print_value(cli.json, &list, || {
+                    let mut out = list
+                        .iter()
+                        .map(|c| {
+                            format!(
+                                "{}  risk={}  dry_run={}  actions=[{}]\n  {}",
+                                c.capability_id,
+                                c.risk_level.as_str(),
+                                c.supports_dry_run,
+                                c.supported_actions.join(", "),
+                                c.description
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    out.push('\n');
+                    out.push_str(EXECUTION_BOUNDARY);
+                    out
+                });
+            }
+            ExecuteCmd::Capability { id } => {
+                let desc = caps.show_execution_capability(&id).map_err(err)?;
+                print_value(cli.json, &desc, || {
+                    format!(
+                        "{}\n  risk: {}\n  version: {}\n  dry_run: {}\n  actions: {}\n  {}\n{}",
+                        desc.capability_id,
+                        desc.risk_level.as_str(),
+                        desc.version,
+                        desc.supports_dry_run,
+                        desc.supported_actions.join(", "),
+                        desc.description,
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Plan {
+                investigation,
+                proposal,
+                capability,
+                target_system,
+                environment,
+                action,
+                inputs,
+                actor,
+            } => {
+                let inputs_val: serde_json::Value = serde_json::from_str(&inputs).map_err(err)?;
+                let plan = caps
+                    .create_execution_plan(
+                        parse_inv(&investigation)?,
+                        CreateExecutionPlanRequest {
+                            proposal_id: parse_obj(&proposal)?,
+                            capability_id: capability,
+                            target_system,
+                            target_environment: environment,
+                            actions: vec![ExecutionAction {
+                                action_id: "a1".into(),
+                                action_name: action,
+                                inputs: inputs_val,
+                                continue_on_failure: false,
+                            }],
+                            inputs: serde_json::json!({}),
+                            expected_effects: vec![],
+                            preconditions: vec![],
+                            supports_dry_run: true,
+                        },
+                        actor,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &plan, || {
+                    format!(
+                        "Execution Plan {} rev {} [{}]\n  capability: {}\n  env: {}\n  proposal: {}\n{}",
+                        plan.id,
+                        plan.revision_number,
+                        plan.status.as_str(),
+                        plan.capability_id,
+                        plan.target_environment,
+                        plan.proposal_id,
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Validate {
+                investigation,
+                plan,
+                reason,
+                actor,
+            } => {
+                let plan = caps
+                    .validate_execution_plan(
+                        parse_inv(&investigation)?,
+                        parse_obj(&plan)?,
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &plan, || {
+                    format!(
+                        "Plan {} → {} (rev {})\n{}",
+                        plan.id,
+                        plan.status.as_str(),
+                        plan.revision_number,
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Preview {
+                investigation,
+                plan,
+            } => {
+                let preview = caps
+                    .preview_execution_plan(parse_inv(&investigation)?, parse_obj(&plan)?)
+                    .map_err(err)?;
+                print_value(cli.json, &preview, || {
+                    format!(
+                        "Preview target: {}\n  mutations: {}\n  simulated: {}\n  policy: {}\n{}",
+                        preview.target,
+                        preview.expected_mutations.join("; "),
+                        preview.simulated,
+                        preview.policy_decision.decision.as_str(),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Approve {
+                investigation,
+                plan,
+                reason,
+                actor,
+                one_time,
+            } => {
+                let (plan, approval) = caps
+                    .approve_execution_plan(
+                        parse_inv(&investigation)?,
+                        parse_obj(&plan)?,
+                        actor,
+                        reason,
+                        vec![],
+                        vec![],
+                        None,
+                        one_time,
+                    )
+                    .map_err(err)?;
+                print_value(
+                    cli.json,
+                    &serde_json::json!({"plan": plan, "approval": approval}),
+                    || {
+                        format!(
+                            "Approved plan {} rev {}\n  approval: {}\n  one_time: {}\n{}",
+                            plan.id,
+                            plan.revision_number,
+                            approval.id,
+                            approval.one_time,
+                            EXECUTION_BOUNDARY
+                        )
+                    },
+                );
+            }
+            ExecuteCmd::Reject {
+                investigation,
+                plan,
+                reason,
+                actor,
+            } => {
+                let plan = caps
+                    .reject_execution_plan(
+                        parse_inv(&investigation)?,
+                        parse_obj(&plan)?,
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &plan, || {
+                    format!(
+                        "Plan {} → {}\n{}",
+                        plan.id,
+                        plan.status.as_str(),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Run {
+                investigation,
+                plan,
+                approval,
+                idempotency_key,
+                actor,
+                dry_run,
+                confirm,
+            } => {
+                if !dry_run && !confirm {
+                    return Err("live execution requires --confirm (or pass --dry-run)".into());
+                }
+                let attempt = caps
+                    .execute_plan(
+                        parse_inv(&investigation)?,
+                        parse_obj(&plan)?,
+                        parse_obj(&approval)?,
+                        actor,
+                        idempotency_key,
+                        dry_run,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &attempt, || {
+                    format!(
+                        "Attempt {} [{}] dry_run={}\n  completed: {:?}\n  failed: {:?}\n  retry_safety: {}\n{}",
+                        attempt.id,
+                        attempt.status.as_str(),
+                        attempt.dry_run,
+                        attempt.completed_actions,
+                        attempt.failed_actions,
+                        attempt.retry_safety.as_str(),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Plans { investigation } => {
+                let listing = caps
+                    .list_execution_plans(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_value(cli.json, &listing, || {
+                    let mut out = listing
+                        .plans
+                        .iter()
+                        .map(|p| {
+                            format!(
+                                "{} rev {} [{}] {}",
+                                p.id,
+                                p.revision_number,
+                                p.status.as_str(),
+                                p.capability_id
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    out.push('\n');
+                    out.push_str(EXECUTION_BOUNDARY);
+                    out
+                });
+            }
+            ExecuteCmd::Show {
+                investigation,
+                plan,
+            } => {
+                let plan = caps
+                    .get_execution_plan(parse_inv(&investigation)?, parse_obj(&plan)?)
+                    .map_err(err)?;
+                print_value(cli.json, &plan, || {
+                    format!(
+                        "Plan {} rev {} [{}]\n  capability: {}\n  env: {}\n  actions: {}\n{}",
+                        plan.id,
+                        plan.revision_number,
+                        plan.status.as_str(),
+                        plan.capability_id,
+                        plan.target_environment,
+                        plan.actions
+                            .iter()
+                            .map(|a| a.action_name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Attempts { investigation } => {
+                let listing = caps
+                    .list_execution_attempts(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_value(cli.json, &listing, || {
+                    listing
+                        .attempts
+                        .iter()
+                        .map(|a| {
+                            format!(
+                                "{} [{}] plan={} key={}",
+                                a.id,
+                                a.status.as_str(),
+                                a.plan_id,
+                                a.idempotency_key
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+            ExecuteCmd::Attempt {
+                investigation,
+                attempt,
+            } => {
+                let attempt = caps
+                    .get_execution_attempt(parse_inv(&investigation)?, parse_obj(&attempt)?)
+                    .map_err(err)?;
+                print_value(cli.json, &attempt, || {
+                    format!(
+                        "Attempt {} [{}]\n  receipts: {}\n  errors: {}\n{}",
+                        attempt.id,
+                        attempt.status.as_str(),
+                        attempt.receipt_ids.len(),
+                        attempt.errors.join("; "),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Verify {
+                investigation,
+                attempt,
+                actor,
+            } => {
+                let v = caps
+                    .verify_execution_attempt(
+                        parse_inv(&investigation)?,
+                        parse_obj(&attempt)?,
+                        actor,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &v, || {
+                    format!(
+                        "Verification {} [{}] confidence={:.2}\n  contradictions: {}\n{}",
+                        v.id,
+                        v.status.as_str(),
+                        v.confidence.value(),
+                        v.contradictions.join("; "),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Trace {
+                investigation,
+                plan,
+            } => {
+                let trace = caps
+                    .trace_execution(parse_inv(&investigation)?, parse_obj(&plan)?)
+                    .map_err(err)?;
+                print_value(cli.json, &trace, || {
+                    format!(
+                        "Plan {} rev {} [{}]\n  approvals: {}\n  attempts: {}\n  receipts: {}\n  {}\n{}",
+                        trace.plan_id,
+                        trace.plan_revision_number,
+                        trace.plan_status.as_str(),
+                        trace.approval_ids.len(),
+                        trace.attempt_ids.len(),
+                        trace.receipt_ids.len(),
+                        trace.explanation,
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Policy {
+                investigation,
+                plan,
+            } => {
+                let policy = caps
+                    .explain_execution_policy(parse_inv(&investigation)?, parse_obj(&plan)?)
+                    .map_err(err)?;
+                print_value(cli.json, &policy, || {
+                    format!(
+                        "Policy: {} (risk {})\n  dry_run: {} live: {}\n  {}\n{}",
+                        policy.decision.as_str(),
+                        policy.risk_level.as_str(),
+                        policy.dry_run_permitted,
+                        policy.live_execution_permitted,
+                        policy.reasons.join("; "),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Export {
+                investigation,
+                plan,
+            } => {
+                let json = caps
+                    .export_execution_plan(parse_inv(&investigation)?, parse_obj(&plan)?)
+                    .map_err(err)?;
+                println!("{json}");
+            }
+            ExecuteCmd::LinkImplementation {
+                investigation,
+                attempt,
+                summary,
+                actor,
+            } => {
+                let record = caps
+                    .link_execution_to_implementation(
+                        parse_inv(&investigation)?,
+                        parse_obj(&attempt)?,
+                        actor,
+                        summary,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &record, || {
+                    format!(
+                        "Implementation Record {} linked from execution\n{}",
+                        record.id, EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Revise {
+                investigation,
+                plan,
+                reason,
+                inputs,
+                actor,
+            } => {
+                let inputs_val: serde_json::Value = serde_json::from_str(&inputs).map_err(err)?;
+                let plan = caps
+                    .revise_execution_plan(
+                        parse_inv(&investigation)?,
+                        parse_obj(&plan)?,
+                        ReviseExecutionPlanRequest {
+                            inputs: Some(inputs_val),
+                            ..Default::default()
+                        },
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &plan, || {
+                    format!(
+                        "Revised plan {} rev {} [{}]\n{}",
+                        plan.id,
+                        plan.revision_number,
+                        plan.status.as_str(),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+        },
         Commands::Implementation { action } => match action {
             ImplementationCmd::Record {
                 investigation,
@@ -3418,6 +4027,13 @@ fn connector_collect(
 fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     let store = LocalStore::open(data_dir).map_err(err)?;
     let runtime = Arc::new(Runtime::new(Arc::new(store)));
+    // Always register the in-process mock capability for local/tests.
+    runtime.register_execution_capability(Arc::new(MockExecutionCapability::new()));
+    // Optional GitHub bounded execution adapters (token from env; live still needs approval).
+    if let Ok(repo) = std::env::var("RIVORA_GITHUB_REPO") {
+        let token = std::env::var("GITHUB_TOKEN").ok();
+        register_github_execution_capabilities(runtime.execution_registry(), repo, token);
+    }
     Ok(CapabilityService::new(runtime))
 }
 

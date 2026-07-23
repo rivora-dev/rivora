@@ -16,16 +16,20 @@ use rivora::domain::{
     ProposalCategory, ProposalFeedbackCategory, ProposalPriority, ProposalStatus,
     ProposalTransitionAuthority, RecommendationStatus,
 };
+use rivora::runtime::execution::CreateExecutionPlanRequest;
 use rivora::runtime::outcome::{CollectOutcomeEvidenceRequest, RecordImplementationRequest};
 use rivora::runtime::proposal::{
     CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
 };
 use rivora::storage::LocalStore;
-use rivora::{CapabilityService, Runtime};
+use rivora::{CapabilityService, ExecutionAction, MockExecutionCapability, Runtime};
 use rivora_connectors::github_actions::GitHubActionsConnector;
 use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
+use rivora_connectors::register_github_execution_capabilities;
 use rivora_connectors::sentry::SentryConnector;
+
+const EXECUTION_BOUNDARY: &str = "Execution Through External Systems — only explicitly approved, bounded capabilities; Proposal acceptance ≠ execution approval.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -273,6 +277,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Assistance (composites & reports)",
             "Improvement Proposals",
             "Learning Outcomes",
+            "Execution (v0.6)",
             "Back",
         ];
         let choice = Select::new()
@@ -498,6 +503,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             20 => assistance_session(caps, inv.id)?,
             21 => proposal_session(caps, inv.id)?,
             22 => learning_session(caps, inv.id)?,
+            23 => execution_session(caps, inv.id)?,
             _ => break,
         }
     }
@@ -2254,9 +2260,290 @@ fn learning_session(caps: &CapabilityService, id: InvestigationId) -> Result<(),
     Ok(())
 }
 
+/// Controlled external execution surface (RFC-025/026/027).
+fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
+    loop {
+        println!("\n{}", style("Execution (v0.6)").bold());
+        println!("{EXECUTION_BOUNDARY}");
+        let actions = vec![
+            "List execution capabilities",
+            "List execution plans",
+            "Create plan from accepted proposal (mock)",
+            "Validate plan",
+            "Preview plan (dry-run)",
+            "Approve plan",
+            "Run plan (dry-run)",
+            "Run plan (live, requires confirm)",
+            "List attempts",
+            "Verify attempt",
+            "Trace plan",
+            "Explain policy",
+            "Back",
+        ];
+        let choice = Select::new()
+            .with_prompt("Execution")
+            .items(&actions)
+            .default(0)
+            .interact()
+            .map_err(|e| e.to_string())?;
+        match choice {
+            0 => {
+                for c in caps.list_execution_capabilities() {
+                    println!(
+                        "  • {} [{}] dry_run={}",
+                        c.capability_id,
+                        c.risk_level.as_str(),
+                        c.supports_dry_run
+                    );
+                }
+            }
+            1 => {
+                let listing = caps.list_execution_plans(id).map_err(err)?;
+                if listing.plans.is_empty() {
+                    println!("No execution plans.");
+                }
+                for p in listing.plans {
+                    println!(
+                        "  • {} rev {} [{}] {}",
+                        p.id,
+                        p.revision_number,
+                        p.status.as_str(),
+                        p.capability_id
+                    );
+                }
+            }
+            2 => {
+                let proposal: String = Input::new()
+                    .with_prompt("Accepted proposal id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let value: String = Input::new()
+                    .with_prompt("Mock field value")
+                    .default("workspace".into())
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let plan = caps
+                    .create_execution_plan(
+                        id,
+                        CreateExecutionPlanRequest {
+                            proposal_id: proposal.parse().map_err(err)?,
+                            capability_id: "mock.record".into(),
+                            target_system: "mock".into(),
+                            target_environment: "sandbox".into(),
+                            actions: vec![ExecutionAction {
+                                action_id: "a1".into(),
+                                action_name: "record_mutation".into(),
+                                inputs: serde_json::json!({
+                                    "resource_key": "workspace/demo",
+                                    "field": "label",
+                                    "value": value
+                                }),
+                                continue_on_failure: false,
+                            }],
+                            inputs: serde_json::json!({}),
+                            expected_effects: vec![],
+                            preconditions: vec![],
+                            supports_dry_run: true,
+                        },
+                        "workspace",
+                    )
+                    .map_err(err)?;
+                println!(
+                    "Created plan {} (draft). Validate and approve before live run.",
+                    plan.id
+                );
+            }
+            3 => {
+                let plan: String = Input::new()
+                    .with_prompt("Plan id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason: String = Input::new()
+                    .with_prompt("Reason")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let plan = caps
+                    .validate_execution_plan(id, plan.parse().map_err(err)?, "workspace", reason)
+                    .map_err(err)?;
+                println!("Plan {} → {}", plan.id, plan.status.as_str());
+            }
+            4 => {
+                let plan: String = Input::new()
+                    .with_prompt("Plan id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let preview = caps
+                    .preview_execution_plan(id, plan.parse().map_err(err)?)
+                    .map_err(err)?;
+                println!(
+                    "Preview: {} | policy={} | simulated={}",
+                    preview.target,
+                    preview.policy_decision.decision.as_str(),
+                    preview.simulated
+                );
+            }
+            5 => {
+                let plan: String = Input::new()
+                    .with_prompt("Plan id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let reason: String = Input::new()
+                    .with_prompt("Approval reason")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let (plan, approval) = caps
+                    .approve_execution_plan(
+                        id,
+                        plan.parse().map_err(err)?,
+                        "workspace",
+                        reason,
+                        vec![],
+                        vec![],
+                        None,
+                        true,
+                    )
+                    .map_err(err)?;
+                println!(
+                    "Approved plan {} rev {} with approval {}",
+                    plan.id, plan.revision_number, approval.id
+                );
+            }
+            6 => {
+                let plan: String = Input::new()
+                    .with_prompt("Plan id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let approval: String = Input::new()
+                    .with_prompt("Approval id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let key: String = Input::new()
+                    .with_prompt("Idempotency key")
+                    .default(format!("ws-dry-{}", chrono::Utc::now().timestamp()))
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let attempt = caps
+                    .execute_plan(
+                        id,
+                        plan.parse().map_err(err)?,
+                        approval.parse().map_err(err)?,
+                        "workspace",
+                        key,
+                        true,
+                    )
+                    .map_err(err)?;
+                println!(
+                    "Dry-run attempt {} [{}]",
+                    attempt.id,
+                    attempt.status.as_str()
+                );
+            }
+            7 => {
+                let confirm = Confirm::new()
+                    .with_prompt("Live execution mutates external systems. Continue?")
+                    .default(false)
+                    .interact()
+                    .map_err(|e| e.to_string())?;
+                if !confirm {
+                    println!("Cancelled.");
+                    continue;
+                }
+                let plan: String = Input::new()
+                    .with_prompt("Plan id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let approval: String = Input::new()
+                    .with_prompt("Approval id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let key: String = Input::new()
+                    .with_prompt("Idempotency key")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let attempt = caps
+                    .execute_plan(
+                        id,
+                        plan.parse().map_err(err)?,
+                        approval.parse().map_err(err)?,
+                        "workspace",
+                        key,
+                        false,
+                    )
+                    .map_err(err)?;
+                println!(
+                    "Live attempt {} [{}] completed={:?} failed={:?}",
+                    attempt.id,
+                    attempt.status.as_str(),
+                    attempt.completed_actions,
+                    attempt.failed_actions
+                );
+            }
+            8 => {
+                let listing = caps.list_execution_attempts(id).map_err(err)?;
+                for a in listing.attempts {
+                    println!("  • {} [{}] plan={}", a.id, a.status.as_str(), a.plan_id);
+                }
+            }
+            9 => {
+                let attempt: String = Input::new()
+                    .with_prompt("Attempt id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let v = caps
+                    .verify_execution_attempt(id, attempt.parse().map_err(err)?, "workspace")
+                    .map_err(err)?;
+                println!(
+                    "Verification {} [{}] contradictions={}",
+                    v.id,
+                    v.status.as_str(),
+                    v.contradictions.len()
+                );
+            }
+            10 => {
+                let plan: String = Input::new()
+                    .with_prompt("Plan id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let trace = caps
+                    .trace_execution(id, plan.parse().map_err(err)?)
+                    .map_err(err)?;
+                println!("{}", trace.explanation);
+                println!(
+                    "approvals={} attempts={} receipts={}",
+                    trace.approval_ids.len(),
+                    trace.attempt_ids.len(),
+                    trace.receipt_ids.len()
+                );
+            }
+            11 => {
+                let plan: String = Input::new()
+                    .with_prompt("Plan id")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let policy = caps
+                    .explain_execution_policy(id, plan.parse().map_err(err)?)
+                    .map_err(err)?;
+                println!(
+                    "{} risk={} reasons={}",
+                    policy.decision.as_str(),
+                    policy.risk_level.as_str(),
+                    policy.reasons.join("; ")
+                );
+            }
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
 fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     let store = LocalStore::open(data_dir).map_err(err)?;
     let runtime = Arc::new(Runtime::new(Arc::new(store)));
+    runtime.register_execution_capability(Arc::new(MockExecutionCapability::new()));
+    if let Ok(repo) = std::env::var("RIVORA_GITHUB_REPO") {
+        let token = std::env::var("GITHUB_TOKEN").ok();
+        register_github_execution_capabilities(runtime.execution_registry(), repo, token);
+    }
     Ok(CapabilityService::new(runtime))
 }
 
