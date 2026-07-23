@@ -389,11 +389,9 @@ impl Runtime {
             ));
         }
         let expected = seed_expected_results(&proposal);
-        if expected.is_empty() {
-            return Err(RivoraError::validation(
-                "proposal has no success criteria or verification plan success criteria to seed expected results",
-            ));
-        }
+        // Empty expected results are allowed: evaluation may still classify as
+        // Inconclusive / Pending with explicit unresolved questions rather than
+        // blocking Outcome creation for human-authored Proposals without criteria.
         let outcome = MeasuredLearningOutcome::draft(
             investigation_id,
             proposal.id,
@@ -1113,8 +1111,12 @@ pub struct EvaluationResult {
 }
 
 /// Seed expected results from Proposal success criteria and verification plan.
+///
+/// When a human-authored Proposal has no explicit criteria, fall back to
+/// `expected_impact` and then a single human-assessment criterion derived from
+/// the Proposal summary so Outcome creation is never blocked for empty plans.
 pub fn seed_expected_results(proposal: &ImprovementProposal) -> Vec<ExpectedResultSpec> {
-    let mut results = Vec::new();
+    let mut criteria: Vec<(String, bool)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for criterion in proposal
         .success_criteria
@@ -1125,22 +1127,47 @@ pub fn seed_expected_results(proposal: &ImprovementProposal) -> Vec<ExpectedResu
         if key.is_empty() || !seen.insert(key) {
             continue;
         }
-        let kind = infer_result_kind(criterion);
-        results.push(ExpectedResultSpec {
-            id: ObjectId::new(),
-            description: criterion.trim().into(),
-            kind,
-            metric: None,
-            target: None,
-            tolerance: None,
-            requires_baseline: requires_baseline_for(kind),
-            weight: 1.0,
-            required: true,
-            verification_method: None,
-            source_text: criterion.trim().into(),
-        });
+        criteria.push((criterion.trim().into(), true));
     }
-    results
+    if criteria.is_empty() && !proposal.expected_impact.trim().is_empty() {
+        let key = proposal.expected_impact.trim().to_lowercase();
+        if seen.insert(key) {
+            criteria.push((proposal.expected_impact.trim().into(), true));
+        }
+    }
+    if criteria.is_empty() {
+        let fallback = if proposal.summary.trim().is_empty() {
+            format!(
+                "Observe whether the Proposal '{}' produced the intended improvement",
+                proposal.title.trim()
+            )
+        } else {
+            format!(
+                "Observe whether the intended improvement occurred: {}",
+                proposal.summary.trim()
+            )
+        };
+        criteria.push((fallback, false));
+    }
+    criteria
+        .into_iter()
+        .map(|(description, required)| {
+            let kind = infer_result_kind(&description);
+            ExpectedResultSpec {
+                id: ObjectId::new(),
+                description: description.clone(),
+                kind,
+                metric: None,
+                target: None,
+                tolerance: None,
+                requires_baseline: requires_baseline_for(kind),
+                weight: 1.0,
+                required,
+                verification_method: None,
+                source_text: description,
+            }
+        })
+        .collect()
 }
 
 fn infer_result_kind(text: &str) -> ExpectedResultKind {
@@ -1490,16 +1517,17 @@ pub fn evaluate_outcome_deterministic(
     let lessons = derive_lessons(classification, &assessments);
     let recommended_follow_up = derive_follow_up(classification, &unresolved, &regressions);
 
-    // Blocked only when entirely unmeasured and no classification path.
-    let all_not_measured = assessments
-        .iter()
-        .all(|a| a.kind == ResultAssessmentKind::NotMeasured);
-    let blocked = all_not_measured && classification == OutcomeClassification::Inconclusive;
+    // Evaluation always produces a conclusion. Inconclusive and NotImplemented are
+    // valid Evaluated classifications — they are not "blocked mid-flight".
+    // Only Pending means the run failed to classify.
+    let blocked = classification == OutcomeClassification::Pending;
 
     let verification_ready = !blocked
         && !matches!(
             classification,
-            OutcomeClassification::Pending | OutcomeClassification::NotImplemented
+            OutcomeClassification::Pending
+                | OutcomeClassification::NotImplemented
+                | OutcomeClassification::Inconclusive
         )
         && confidence_breakdown.final_confidence.value() >= 0.4
         && contradictions
@@ -1961,6 +1989,28 @@ mod tests {
         let seeded = seed_expected_results(&proposal);
         assert_eq!(seeded.len(), 2);
         assert!(seeded.iter().any(|e| e.source_text.contains("Malformed")));
+    }
+
+    #[test]
+    fn seed_expected_results_falls_back_for_human_proposals_without_criteria() {
+        let inv = InvestigationId::new();
+        let proposal = ImprovementProposal::generated(
+            inv,
+            "Isolate retries",
+            "Bound retry isolation for flaky tests",
+            "Flaky failures need isolation",
+            crate::domain::ProposalCategory::Testing,
+            crate::domain::ProposalPriority::High,
+            Confidence::new(0.8),
+            crate::domain::ProposalGenerationMethod::Human,
+            Provenance::now("test", "test"),
+        )
+        .unwrap();
+        assert!(proposal.success_criteria.is_empty());
+        let seeded = seed_expected_results(&proposal);
+        assert_eq!(seeded.len(), 1);
+        assert!(!seeded[0].required);
+        assert!(seeded[0].description.contains("Bound retry isolation"));
     }
 
     #[test]
