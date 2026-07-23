@@ -5,7 +5,9 @@ mod local;
 pub use local::LocalStore;
 
 use crate::domain::{
-    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
+    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, ExecutionApproval,
+    ExecutionAttempt, ExecutionAttemptListing, ExecutionPlan, ExecutionPlanListing,
+    ExecutionReceipt, ExecutionReceiptListing, ExecutionVerification, Hypothesis,
     ImplementationListing, ImplementationRecord, ImprovementProposal, Investigation,
     InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome, LearningPattern,
     MeasuredLearningOutcome, MeasuredOutcomeListing, MemoryRecord, ObjectId, Observation,
@@ -266,4 +268,91 @@ pub trait Store: Send + Sync {
 
     /// List all Learning Patterns at the store root.
     fn list_learning_patterns(&self) -> RivoraResult<Vec<LearningPattern>>;
+
+    /// Append one immutable Execution Plan snapshot.
+    fn append_execution_plan(&self, plan: &ExecutionPlan) -> RivoraResult<()>;
+
+    /// Load one Execution Plan snapshot.
+    fn load_execution_plan(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionPlan>;
+
+    /// List valid Execution Plans and diagnostics.
+    fn list_execution_plans(&self, id: &InvestigationId) -> RivoraResult<ExecutionPlanListing>;
+
+    /// List Execution Plan revisions for a lineage.
+    fn list_execution_plan_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<ExecutionPlanListing>;
+
+    /// Persist an Execution Approval (create or update consumption/invalidation flags).
+    fn save_execution_approval(&self, approval: &ExecutionApproval) -> RivoraResult<()>;
+
+    /// Load one Execution Approval.
+    fn load_execution_approval(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionApproval>;
+
+    /// List Execution Approvals for an Investigation.
+    fn list_execution_approvals(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<ExecutionApproval>>;
+
+    /// Append one Execution Attempt.
+    fn append_execution_attempt(&self, attempt: &ExecutionAttempt) -> RivoraResult<()>;
+
+    /// Load one Execution Attempt.
+    fn load_execution_attempt(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionAttempt>;
+
+    /// List Execution Attempts.
+    fn list_execution_attempts(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ExecutionAttemptListing>;
+
+    /// Append one Execution Receipt.
+    fn append_execution_receipt(&self, receipt: &ExecutionReceipt) -> RivoraResult<()>;
+
+    /// Load one Execution Receipt.
+    fn load_execution_receipt(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionReceipt>;
+
+    /// List Execution Receipts.
+    fn list_execution_receipts(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ExecutionReceiptListing>;
+
+    /// Append one Execution Verification.
+    fn append_execution_verification(
+        &self,
+        verification: &ExecutionVerification,
+    ) -> RivoraResult<()>;
+
+    /// Load one Execution Verification.
+    fn load_execution_verification(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionVerification>;
+
+    /// List Execution Verifications.
+    fn list_execution_verifications(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<ExecutionVerification>>;
 }

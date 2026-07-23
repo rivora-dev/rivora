@@ -3,6 +3,8 @@
 mod assistance;
 mod context;
 mod evaluation;
+mod execution;
+mod execution_capability;
 mod hypothesis;
 mod ids;
 mod investigation;
@@ -22,6 +24,8 @@ mod workflow;
 pub use assistance::*;
 pub use context::*;
 pub use evaluation::*;
+pub use execution::*;
+pub use execution_capability::*;
 pub use hypothesis::*;
 pub use ids::*;
 pub use investigation::*;

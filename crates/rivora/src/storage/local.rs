@@ -24,6 +24,11 @@
 //!     proposal_artifacts/{object_id}.json
 //!     implementations/{object_id}.json
 //!     learning_outcomes/{object_id}.json
+//!     execution_plans/{object_id}.json
+//!     execution_approvals/{object_id}.json
+//!     execution_attempts/{object_id}.json
+//!     execution_receipts/{object_id}.json
+//!     execution_verifications/{object_id}.json
 //!   graph/
 //!     relationships/{object_id}.json
 //!   learning/
@@ -36,13 +41,16 @@
 //! New v0.3+ directories are created lazily for the same reason.
 //! v0.5 `implementations/`, `learning_outcomes/`, and root
 //! `learning/patterns/` are also lazy and additive.
+//! v0.6 execution directories are lazy and additive.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
-    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
-    ImplementationListing, ImplementationRecord, ImplementationStorageDiagnostic,
+    AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, ExecutionApproval,
+    ExecutionAttempt, ExecutionAttemptListing, ExecutionPlan, ExecutionPlanListing,
+    ExecutionReceipt, ExecutionReceiptListing, ExecutionStorageDiagnostic, ExecutionVerification,
+    Hypothesis, ImplementationListing, ImplementationRecord, ImplementationStorageDiagnostic,
     ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
     KnowledgeObject, LearningOutcome, LearningPattern, MeasuredLearningOutcome,
     MeasuredOutcomeListing, MeasuredOutcomeStorageDiagnostic, MemoryRecord, ObjectId, Observation,
@@ -213,6 +221,180 @@ impl LocalStore {
 
     fn learning_pattern_path(&self, id: &ObjectId) -> PathBuf {
         self.learning_patterns_dir().join(format!("{id}.json"))
+    }
+
+    fn execution_plans_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("execution_plans")
+    }
+
+    fn execution_plan_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
+        self.execution_plans_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn execution_approvals_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("execution_approvals")
+    }
+
+    fn execution_approval_path(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> PathBuf {
+        self.execution_approvals_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn execution_attempts_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("execution_attempts")
+    }
+
+    fn execution_attempt_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
+        self.execution_attempts_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn execution_receipts_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("execution_receipts")
+    }
+
+    fn execution_receipt_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
+        self.execution_receipts_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn execution_verifications_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("execution_verifications")
+    }
+
+    fn execution_verification_path(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> PathBuf {
+        self.execution_verifications_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn list_execution_plans_isolated(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ExecutionPlanListing> {
+        let dir = self.execution_plans_dir(id);
+        if !dir.exists() {
+            return Ok(ExecutionPlanListing::default());
+        }
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        let mut listing = ExecutionPlanListing::default();
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<ExecutionPlan>(&path) {
+                Ok(plan) if plan.investigation_id == *id => listing.plans.push(plan),
+                Ok(_) => listing.diagnostics.push(ExecutionStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "execution plan investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(ExecutionStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.plans.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.revision_number.cmp(&b.revision_number))
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(listing)
+    }
+
+    fn list_execution_attempts_isolated(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ExecutionAttemptListing> {
+        let dir = self.execution_attempts_dir(id);
+        if !dir.exists() {
+            return Ok(ExecutionAttemptListing::default());
+        }
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        let mut listing = ExecutionAttemptListing::default();
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<ExecutionAttempt>(&path) {
+                Ok(attempt) if attempt.investigation_id == *id => listing.attempts.push(attempt),
+                Ok(_) => listing.diagnostics.push(ExecutionStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "execution attempt investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(ExecutionStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.attempts.sort_by(|a, b| {
+            a.started_at
+                .cmp(&b.started_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(listing)
+    }
+
+    fn list_execution_receipts_isolated(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ExecutionReceiptListing> {
+        let dir = self.execution_receipts_dir(id);
+        if !dir.exists() {
+            return Ok(ExecutionReceiptListing::default());
+        }
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        let mut listing = ExecutionReceiptListing::default();
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<ExecutionReceipt>(&path) {
+                Ok(receipt) if receipt.investigation_id == *id => listing.receipts.push(receipt),
+                Ok(_) => listing.diagnostics.push(ExecutionStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "execution receipt investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(ExecutionStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.receipts.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(listing)
     }
 
     fn list_proposals_isolated(&self, id: &InvestigationId) -> RivoraResult<ProposalListing> {
@@ -1065,6 +1247,248 @@ impl Store for LocalStore {
                 .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
         });
         Ok(patterns)
+    }
+
+    fn append_execution_plan(&self, plan: &ExecutionPlan) -> RivoraResult<()> {
+        let path = self.execution_plan_path(&plan.investigation_id, &plan.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "execution plan snapshot {} already exists (immutable)",
+                plan.id
+            )));
+        }
+        self.write_json(&path, plan)
+    }
+
+    fn load_execution_plan(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionPlan> {
+        let path = self.execution_plan_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let plan: ExecutionPlan = self.read_json(&path)?;
+        if plan.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "execution plan investigation ownership mismatch",
+            ));
+        }
+        Ok(plan)
+    }
+
+    fn list_execution_plans(&self, id: &InvestigationId) -> RivoraResult<ExecutionPlanListing> {
+        self.list_execution_plans_isolated(id)
+    }
+
+    fn list_execution_plan_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<ExecutionPlanListing> {
+        let mut listing = self.list_execution_plans_isolated(id)?;
+        listing.plans.retain(|p| p.lineage_id == *lineage_id);
+        listing.plans.sort_by(|a, b| {
+            a.revision_number
+                .cmp(&b.revision_number)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(listing)
+    }
+
+    fn save_execution_approval(&self, approval: &ExecutionApproval) -> RivoraResult<()> {
+        let path = self.execution_approval_path(&approval.investigation_id, &approval.id);
+        self.write_json(&path, approval)
+    }
+
+    fn load_execution_approval(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionApproval> {
+        let path = self.execution_approval_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let approval: ExecutionApproval = self.read_json(&path)?;
+        if approval.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "execution approval investigation ownership mismatch",
+            ));
+        }
+        Ok(approval)
+    }
+
+    fn list_execution_approvals(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<ExecutionApproval>> {
+        let dir = self.execution_approvals_dir(id);
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut items: Vec<ExecutionApproval> = Vec::new();
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(approval) = self.read_json::<ExecutionApproval>(&path) {
+                if approval.investigation_id == *id {
+                    items.push(approval);
+                }
+            }
+        }
+        items.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(items)
+    }
+
+    fn append_execution_attempt(&self, attempt: &ExecutionAttempt) -> RivoraResult<()> {
+        let path = self.execution_attempt_path(&attempt.investigation_id, &attempt.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "execution attempt {} already exists (immutable)",
+                attempt.id
+            )));
+        }
+        self.write_json(&path, attempt)
+    }
+
+    fn load_execution_attempt(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionAttempt> {
+        let path = self.execution_attempt_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let attempt: ExecutionAttempt = self.read_json(&path)?;
+        if attempt.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "execution attempt investigation ownership mismatch",
+            ));
+        }
+        Ok(attempt)
+    }
+
+    fn list_execution_attempts(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ExecutionAttemptListing> {
+        self.list_execution_attempts_isolated(id)
+    }
+
+    fn append_execution_receipt(&self, receipt: &ExecutionReceipt) -> RivoraResult<()> {
+        let path = self.execution_receipt_path(&receipt.investigation_id, &receipt.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "execution receipt {} already exists (immutable)",
+                receipt.id
+            )));
+        }
+        self.write_json(&path, receipt)
+    }
+
+    fn load_execution_receipt(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionReceipt> {
+        let path = self.execution_receipt_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let receipt: ExecutionReceipt = self.read_json(&path)?;
+        if receipt.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "execution receipt investigation ownership mismatch",
+            ));
+        }
+        Ok(receipt)
+    }
+
+    fn list_execution_receipts(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ExecutionReceiptListing> {
+        self.list_execution_receipts_isolated(id)
+    }
+
+    fn append_execution_verification(
+        &self,
+        verification: &ExecutionVerification,
+    ) -> RivoraResult<()> {
+        let path =
+            self.execution_verification_path(&verification.investigation_id, &verification.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "execution verification {} already exists (immutable)",
+                verification.id
+            )));
+        }
+        self.write_json(&path, verification)
+    }
+
+    fn load_execution_verification(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ExecutionVerification> {
+        let path = self.execution_verification_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let verification: ExecutionVerification = self.read_json(&path)?;
+        if verification.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "execution verification investigation ownership mismatch",
+            ));
+        }
+        Ok(verification)
+    }
+
+    fn list_execution_verifications(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<Vec<ExecutionVerification>> {
+        let dir = self.execution_verifications_dir(id);
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut items: Vec<ExecutionVerification> = Vec::new();
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(v) = self.read_json::<ExecutionVerification>(&path) {
+                if v.investigation_id == *id {
+                    items.push(v);
+                }
+            }
+        }
+        items.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(items)
     }
 }
 

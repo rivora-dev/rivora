@@ -6,19 +6,23 @@
 use std::sync::Arc;
 
 use crate::domain::{
-    AssistedWorkflow, CompositeCapabilityDefinition, DeploymentReadiness, EngineeringReport,
-    Evaluation, HistoricalInfluenceExplanation, Hypothesis, ImplementationListing,
-    ImplementationRecord, ImprovementProposal, Investigation, InvestigationId,
-    InvestigationRelationship, InvestigationSummary, KnowledgeObject, LearningOutcome,
-    LearningPattern, MeasuredLearningOutcome, MeasuredOutcomeListing, MeasuredOutcomeStatus,
-    MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
-    PrioritizedRecommendation, ProposalArtifact, ProposalArtifactListing, ProposalComparison,
-    ProposalFeedbackCategory, ProposalListing, ProposalStatus, ProposalTrace,
+    AssistedWorkflow, CompositeCapabilityDefinition, DeploymentReadiness, DryRunResult,
+    EngineeringReport, Evaluation, ExecutionApproval, ExecutionAttempt, ExecutionAttemptListing,
+    ExecutionCapabilityDescriptor, ExecutionPlan, ExecutionPlanListing, ExecutionPolicyDecision,
+    ExecutionReceiptListing, ExecutionTrace, ExecutionVerification, HistoricalInfluenceExplanation,
+    Hypothesis, ImplementationListing, ImplementationRecord, ImprovementProposal, Investigation,
+    InvestigationId, InvestigationRelationship, InvestigationSummary, KnowledgeObject,
+    LearningOutcome, LearningPattern, MeasuredLearningOutcome, MeasuredOutcomeListing,
+    MeasuredOutcomeStatus, MemoryRecord, ObjectId, Observation, ObservationKind,
+    OutcomeDisposition, PrioritizedRecommendation, ProposalArtifact, ProposalArtifactListing,
+    ProposalComparison, ProposalFeedbackCategory, ProposalListing, ProposalStatus, ProposalTrace,
     ProposalTransitionAuthority, ProposalVerificationPlan, RecalledContext, Recommendation,
-    RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    RetrySafety, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
+    VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 use crate::runtime::context::{DetectedPattern, HistoricalTrend};
+use crate::runtime::execution::{CreateExecutionPlanRequest, ReviseExecutionPlanRequest};
 use crate::runtime::graph::{RelatedInvestigation, RelationshipExplanation};
 use crate::runtime::learning::RecordOutcomeRequest;
 use crate::runtime::observation::IngestObservationRequest;
@@ -1183,6 +1187,295 @@ impl CapabilityService {
     /// Export Learning Pattern as JSON.
     pub fn export_learning_pattern_json(&self, pattern_id: ObjectId) -> RivoraResult<String> {
         self.runtime.export_learning_pattern_json(pattern_id)
+    }
+
+    // -----------------------------------------------------------------------
+    // v0.6 Execution Through External Systems (RFC-025/026/027)
+    // -----------------------------------------------------------------------
+
+    /// Register an execution capability adapter on the Runtime.
+    pub fn register_execution_capability(
+        &self,
+        capability: std::sync::Arc<dyn crate::domain::ExecutionCapability>,
+    ) {
+        self.runtime.register_execution_capability(capability);
+    }
+
+    /// List registered execution capabilities.
+    pub fn list_execution_capabilities(&self) -> Vec<ExecutionCapabilityDescriptor> {
+        self.runtime.list_execution_capabilities()
+    }
+
+    /// Show one execution capability.
+    pub fn show_execution_capability(
+        &self,
+        capability_id: &str,
+    ) -> RivoraResult<ExecutionCapabilityDescriptor> {
+        self.runtime.show_execution_capability(capability_id)
+    }
+
+    /// Create an Execution Plan for an accepted Proposal.
+    pub fn create_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        request: CreateExecutionPlanRequest,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime
+            .create_execution_plan(investigation_id, request, actor)
+    }
+
+    /// Revise an Execution Plan.
+    pub fn revise_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+        request: ReviseExecutionPlanRequest,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime
+            .revise_execution_plan(investigation_id, plan_id, request, actor, reason)
+    }
+
+    /// Validate an Execution Plan (Draft → ReadyForReview).
+    pub fn validate_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime
+            .validate_execution_plan(investigation_id, plan_id, actor, reason)
+    }
+
+    /// Preview / dry-run an Execution Plan.
+    pub fn preview_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+    ) -> RivoraResult<DryRunResult> {
+        self.runtime
+            .preview_execution_plan(investigation_id, plan_id)
+    }
+
+    /// Approve an exact Execution Plan revision.
+    #[allow(clippy::too_many_arguments)]
+    pub fn approve_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+        approved_actions: Vec<String>,
+        denied_actions: Vec<String>,
+        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+        one_time: bool,
+    ) -> RivoraResult<(ExecutionPlan, ExecutionApproval)> {
+        self.runtime.approve_execution_plan(
+            investigation_id,
+            plan_id,
+            actor,
+            reason,
+            approved_actions,
+            denied_actions,
+            expires_at,
+            one_time,
+        )
+    }
+
+    /// Reject an Execution Plan.
+    pub fn reject_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime
+            .reject_execution_plan(investigation_id, plan_id, actor, reason)
+    }
+
+    /// Cancel an Execution Plan.
+    pub fn cancel_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime
+            .cancel_execution_plan(investigation_id, plan_id, actor, reason)
+    }
+
+    /// Execute an approved plan (or dry-run).
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+        approval_id: ObjectId,
+        actor: impl Into<String>,
+        idempotency_key: impl Into<String>,
+        dry_run: bool,
+    ) -> RivoraResult<ExecutionAttempt> {
+        self.runtime.execute_plan(
+            investigation_id,
+            plan_id,
+            approval_id,
+            actor,
+            idempotency_key,
+            dry_run,
+        )
+    }
+
+    /// List execution plans.
+    pub fn list_execution_plans(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<ExecutionPlanListing> {
+        self.runtime.list_execution_plans(investigation_id)
+    }
+
+    /// Get one execution plan.
+    pub fn get_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime.get_execution_plan(investigation_id, plan_id)
+    }
+
+    /// List execution plan revisions.
+    pub fn list_execution_plan_revisions(
+        &self,
+        investigation_id: InvestigationId,
+        lineage_id: ObjectId,
+    ) -> RivoraResult<ExecutionPlanListing> {
+        self.runtime
+            .list_execution_plan_revisions(investigation_id, lineage_id)
+    }
+
+    /// List execution attempts.
+    pub fn list_execution_attempts(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<ExecutionAttemptListing> {
+        self.runtime.list_execution_attempts(investigation_id)
+    }
+
+    /// Get one execution attempt.
+    pub fn get_execution_attempt(
+        &self,
+        investigation_id: InvestigationId,
+        attempt_id: ObjectId,
+    ) -> RivoraResult<ExecutionAttempt> {
+        self.runtime
+            .get_execution_attempt(investigation_id, attempt_id)
+    }
+
+    /// Verify an execution attempt independently.
+    pub fn verify_execution_attempt(
+        &self,
+        investigation_id: InvestigationId,
+        attempt_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ExecutionVerification> {
+        self.runtime
+            .verify_execution_attempt(investigation_id, attempt_id, actor)
+    }
+
+    /// List execution receipts.
+    pub fn list_execution_receipts(
+        &self,
+        investigation_id: InvestigationId,
+    ) -> RivoraResult<ExecutionReceiptListing> {
+        self.runtime.list_execution_receipts(investigation_id)
+    }
+
+    /// Close a verified execution plan.
+    pub fn close_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime
+            .close_execution_plan(investigation_id, plan_id, actor, reason)
+    }
+
+    /// Link execution attempt to an Implementation Record.
+    pub fn link_execution_to_implementation(
+        &self,
+        investigation_id: InvestigationId,
+        attempt_id: ObjectId,
+        actor: impl Into<String>,
+        summary: impl Into<String>,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime
+            .link_execution_to_implementation(investigation_id, attempt_id, actor, summary)
+    }
+
+    /// Create a rollback plan draft from attempt metadata.
+    pub fn create_rollback_plan(
+        &self,
+        investigation_id: InvestigationId,
+        attempt_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ExecutionPlan> {
+        self.runtime
+            .create_rollback_plan(investigation_id, attempt_id, actor)
+    }
+
+    /// Explain execution policy for a plan.
+    pub fn explain_execution_policy(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+    ) -> RivoraResult<ExecutionPolicyDecision> {
+        self.runtime
+            .explain_execution_policy(investigation_id, plan_id)
+    }
+
+    /// Trace execution lineage.
+    pub fn trace_execution(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+    ) -> RivoraResult<ExecutionTrace> {
+        self.runtime.trace_execution(investigation_id, plan_id)
+    }
+
+    /// Export execution plan JSON.
+    pub fn export_execution_plan(
+        &self,
+        investigation_id: InvestigationId,
+        plan_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime
+            .export_execution_plan(investigation_id, plan_id)
+    }
+
+    /// Export execution receipt JSON.
+    pub fn export_execution_receipt(
+        &self,
+        investigation_id: InvestigationId,
+        receipt_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime
+            .export_execution_receipt(investigation_id, receipt_id)
+    }
+
+    /// Classify retry safety for an attempt.
+    pub fn classify_retry_safety(
+        &self,
+        investigation_id: InvestigationId,
+        attempt_id: ObjectId,
+    ) -> RivoraResult<RetrySafety> {
+        self.runtime
+            .classify_retry_safety(investigation_id, attempt_id)
     }
 }
 

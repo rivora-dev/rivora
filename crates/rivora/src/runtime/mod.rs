@@ -7,6 +7,8 @@ pub mod context;
 /// Local-first embedding abstraction for semantic recall (RFC-016).
 pub mod embedding;
 mod evaluation;
+/// Controlled external execution (RFC-025/026/027).
+pub mod execution;
 /// Investigation Graph subsystem (RFC-015).
 pub mod graph;
 mod investigation;
@@ -29,6 +31,7 @@ pub mod workflow;
 
 use std::sync::Arc;
 
+use crate::domain::ExecutionCapabilityRegistry;
 use crate::runtime::embedding::{EmbeddingProvider, TokenHashEmbedding};
 use crate::storage::Store;
 
@@ -39,6 +42,7 @@ use crate::storage::Store;
 pub struct Runtime {
     store: Arc<dyn Store>,
     embedding: Arc<dyn EmbeddingProvider>,
+    execution_registry: ExecutionCapabilityRegistry,
 }
 
 impl Runtime {
@@ -48,6 +52,7 @@ impl Runtime {
         Self {
             store,
             embedding: Arc::new(TokenHashEmbedding::new()),
+            execution_registry: ExecutionCapabilityRegistry::new(),
         }
     }
 
@@ -62,6 +67,19 @@ impl Runtime {
         Self {
             store,
             embedding: provider,
+            execution_registry: ExecutionCapabilityRegistry::new(),
+        }
+    }
+
+    /// Create a Runtime with a pre-populated execution capability registry.
+    pub fn with_execution_registry(
+        store: Arc<dyn Store>,
+        execution_registry: ExecutionCapabilityRegistry,
+    ) -> Self {
+        Self {
+            store,
+            embedding: Arc::new(TokenHashEmbedding::new()),
+            execution_registry,
         }
     }
 
