@@ -1084,8 +1084,15 @@ fn valid_measured_outcome_transition(
 ) -> bool {
     use MeasuredOutcomeStatus::*;
     match from {
-        Draft => matches!(to, EvidenceCollection | Withdrawn | Superseded),
-        EvidenceCollection => matches!(to, UnderEvaluation | Withdrawn | Superseded),
+        Draft => {
+            matches!(
+                to,
+                EvidenceCollection | UnderEvaluation | Evaluated | Withdrawn | Superseded
+            )
+        }
+        EvidenceCollection => {
+            matches!(to, UnderEvaluation | Evaluated | Withdrawn | Superseded)
+        }
         UnderEvaluation => matches!(to, Evaluated | Withdrawn | Superseded),
         Evaluated => matches!(to, Archived | Superseded),
         Verified => matches!(to, Archived | Superseded),

@@ -799,10 +799,14 @@ impl Runtime {
         let mut groups: std::collections::BTreeMap<String, Vec<MeasuredLearningOutcome>> =
             std::collections::BTreeMap::new();
         for outcome in by_lineage.into_values() {
-            let proposal = self
+            let proposal = match self
                 .store
                 .load_proposal(&outcome.investigation_id, &outcome.proposal_id)
-                .ok();
+            {
+                Ok(p) => Some(p),
+                Err(RivoraError::ObjectNotFound(_)) => None,
+                Err(e) => return Err(e),
+            };
             let category = proposal
                 .as_ref()
                 .map(|p| p.category.as_str().to_string())
@@ -819,8 +823,15 @@ impl Runtime {
         }
 
         let mut derived = Vec::new();
+        let existing_signatures: std::collections::HashSet<String> = self
+            .store
+            .list_learning_patterns()?
+            .into_iter()
+            .filter(|p| !matches!(p.status, PatternStatus::Retired))
+            .map(|p| p.signature)
+            .collect();
         for (signature, outcomes) in groups {
-            if outcomes.is_empty() {
+            if outcomes.is_empty() || existing_signatures.contains(&signature) {
                 continue;
             }
             let category = signature.split(':').next().map(|s| s.to_string());

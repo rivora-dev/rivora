@@ -373,3 +373,108 @@ fn trace_explains_boundaries() {
     assert_eq!(trace.implementation_record_id, fx.impl_id);
     assert!(trace.explanation.contains("Accepted Proposal"));
 }
+
+#[test]
+fn pattern_derivation_is_idempotent() {
+    let fx = setup();
+    let outcome = fx
+        .caps
+        .create_measured_learning_outcome(fx.inv_id, fx.proposal_id, fx.impl_id, "engineer")
+        .unwrap();
+    let mut head = outcome;
+    for expected in head.expected_results.clone() {
+        head = fx
+            .caps
+            .collect_outcome_evidence(
+                fx.inv_id,
+                head.id,
+                CollectOutcomeEvidenceRequest {
+                    object_id: ObjectId::new(),
+                    relation: OutcomeEvidenceRelation::IsBaseline,
+                    expected_result_id: Some(expected.id),
+                    reason: None,
+                },
+                "engineer",
+            )
+            .unwrap();
+        head = fx
+            .caps
+            .collect_outcome_evidence(
+                fx.inv_id,
+                head.id,
+                CollectOutcomeEvidenceRequest {
+                    object_id: ObjectId::new(),
+                    relation: OutcomeEvidenceRelation::IsPostChange,
+                    expected_result_id: Some(expected.id),
+                    reason: None,
+                },
+                "engineer",
+            )
+            .unwrap();
+        head = fx
+            .caps
+            .collect_outcome_evidence(
+                fx.inv_id,
+                head.id,
+                CollectOutcomeEvidenceRequest {
+                    object_id: ObjectId::new(),
+                    relation: OutcomeEvidenceRelation::SupportsExpectedResult,
+                    expected_result_id: Some(expected.id),
+                    reason: Some("ok".into()),
+                },
+                "engineer",
+            )
+            .unwrap();
+    }
+    let evaluated = fx
+        .caps
+        .evaluate_measured_learning_outcome(fx.inv_id, head.id, "runtime")
+        .unwrap();
+    let _verified = fx
+        .caps
+        .verify_measured_learning_outcome(
+            fx.inv_id,
+            evaluated.id,
+            "reviewer",
+            "verified for idempotency",
+            false,
+            None,
+        )
+        .unwrap();
+
+    let first = fx.caps.derive_learning_patterns("runtime").unwrap();
+    let first_count = fx.caps.list_learning_patterns().unwrap().len();
+    assert!(!first.is_empty());
+
+    let second = fx.caps.derive_learning_patterns("runtime").unwrap();
+    let second_count = fx.caps.list_learning_patterns().unwrap().len();
+    assert!(
+        second.is_empty(),
+        "second derivation must not create duplicates"
+    );
+    assert_eq!(first_count, second_count);
+}
+
+#[test]
+fn evaluation_shortcut_transitions_are_domain_valid() {
+    use rivora::domain::MeasuredOutcomeStatus;
+    let fx = setup();
+    let outcome = fx
+        .caps
+        .create_measured_learning_outcome(fx.inv_id, fx.proposal_id, fx.impl_id, "engineer")
+        .unwrap();
+    assert_eq!(outcome.status, MeasuredOutcomeStatus::Draft);
+
+    let evaluated = fx
+        .caps
+        .evaluate_measured_learning_outcome(fx.inv_id, outcome.id, "runtime")
+        .unwrap();
+    assert!(
+        evaluated.status == MeasuredOutcomeStatus::Evaluated
+            || evaluated.status == MeasuredOutcomeStatus::UnderEvaluation
+    );
+    let has_eval_transition = evaluated.transitions.iter().any(|t| {
+        t.to == MeasuredOutcomeStatus::Evaluated || t.to == MeasuredOutcomeStatus::UnderEvaluation
+    });
+    assert!(has_eval_transition);
+}
