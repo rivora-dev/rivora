@@ -12,17 +12,31 @@ engineering-system mutation boundaries.
 * v0.5 — Measure and Learn: Implementation Records, Measured Learning Outcomes, patterns, and influence
 * v0.6 — Execute through external systems: approved bounded capabilities, plans, receipts, verification
 * v0.7 — Engineering Loop Integration: formal Capability participation in Memory → Evaluation → Verification → Improvement → Learning
+* v0.8 — Capability Coverage: every first-party Capability and Connector participates consistently in the Engineering Loop
 
 ## Current boundary
 
-v0.7 connects existing subsystems into one Capability Engineering Loop. Every
-registered Capability declares loop participation; typed contributions are
-processed only by the Runtime; Observation → Capability routing is deterministic
-and provider-independent; CLI and Workspace expose lifecycle inspection.
+v0.8 expands the Capability Engineering Loop from a validated vertical slice into
+the standard model for all first-party Capabilities and Connectors.
 
-v0.6 execution authority remains intact: Execution Plans, exact-revision
-approval, dry-run, bounded adapters, Receipts, independent verification, and
-v0.5 Implementation / Measured Outcome linkage.
+Every registered first-party Capability:
+
+* exposes a complete descriptor (identity, provider, operation, risk, permissions,
+  inputs/outputs, limitations, lifecycle participation)
+* uses shared Runtime orchestration for Memory → Evaluation → Verification →
+  Improvement → Learning
+* never writes lifecycle artifacts directly
+* routes via canonical, provider-independent input type identifiers
+
+Every first-party Connector:
+
+* authenticates, collects, normalizes, sanitizes, preserves provenance, and delivers
+* emits canonical Observation kinds as Runtime inputs
+* never evaluates, verifies, recommends, improves, or learns
+
+CLI and Workspace always expose the same registered first-party set and a shared
+coverage/health report. Live mutation still requires plan, policy, exact-revision
+approval, confirmation, and independent verification.
 
 ```text
 Connectors provide normalized facts
@@ -40,12 +54,13 @@ Proposal Accepted
   ≠ Learning complete
 ```
 
-v0.7 cannot: Capability marketplace/SDK, automatic Proposal acceptance, automatic
-execution or rollback, connector reasoning, or treating API success as verified
-Outcome success.
+v0.8 cannot: Capability marketplace/SDK, automatic Proposal acceptance, automatic
+execution or rollback, connector reasoning, dynamic plugins, cloud control plane,
+or production-hardening work reserved for v0.9.
 
 ## Future backlog
 
 Autonomous remediation, inferred implementation tracking, collaboration, SDKs,
 marketplaces, hosted control planes, multi-tenancy, multi-user approval workflows,
-and enterprise administration remain future work. They are not part of v0.7.
+production hardening (v0.9), and enterprise administration remain future work.
+They are not part of v0.8.

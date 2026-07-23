@@ -422,6 +422,92 @@ fn registered_capabilities_expose_engineering_loop_participation() {
     );
     assert!(!desc.accepted_input_types.is_empty());
     assert!(desc.provider_independent);
+    assert!(desc.is_complete(), "mock.record must be v0.8-complete");
+    assert!(!desc.name.is_empty());
+    assert!(!desc.provider.is_empty());
+    assert!(!desc.operation.is_empty());
+}
+
+/// v0.8: first-party catalog, complete descriptors, and no connector health reasoning.
+#[test]
+fn v0_8_capability_coverage_architecture_gates() {
+    use rivora::domain::{
+        build_capability_coverage_report, first_party_connector_coverage, MockExecutionCapability,
+        FIRST_PARTY_CONNECTOR_IDS, FIRST_PARTY_EXECUTION_CAPABILITY_IDS,
+    };
+    use rivora::ExecutionCapability;
+    use rivora_connectors::{
+        register_github_execution_capabilities, DEFAULT_GITHUB_EXECUTION_REPO,
+    };
+    use std::sync::Arc;
+
+    assert_eq!(FIRST_PARTY_EXECUTION_CAPABILITY_IDS.len(), 6);
+    assert_eq!(FIRST_PARTY_CONNECTOR_IDS.len(), 5);
+    assert_eq!(first_party_connector_coverage().len(), 5);
+
+    let registry = rivora::ExecutionCapabilityRegistry::new();
+    registry
+        .register(Arc::new(MockExecutionCapability::new()) as Arc<dyn ExecutionCapability>)
+        .unwrap();
+    register_github_execution_capabilities(&registry, DEFAULT_GITHUB_EXECUTION_REPO, None).unwrap();
+    let descriptors = registry.list();
+    assert_eq!(descriptors.len(), 6);
+    for desc in &descriptors {
+        assert!(
+            desc.is_complete(),
+            "{} incomplete: {:?}",
+            desc.capability_id,
+            desc.completeness_gaps()
+        );
+        assert!(desc.lifecycle_fully_declared());
+        assert!(!desc.accepted_input_types.is_empty());
+        assert_eq!(
+            desc.engineering_loop.memory,
+            rivora::LifecycleParticipation::Supported
+        );
+        assert_eq!(
+            desc.engineering_loop.evaluation,
+            rivora::LifecycleParticipation::Supported
+        );
+        assert_eq!(
+            desc.engineering_loop.verification,
+            rivora::LifecycleParticipation::Supported
+        );
+        assert_eq!(
+            desc.engineering_loop.improvement,
+            rivora::LifecycleParticipation::Deferred
+        );
+        assert_eq!(
+            desc.engineering_loop.learning,
+            rivora::LifecycleParticipation::Deferred
+        );
+    }
+    let report = build_capability_coverage_report(&descriptors);
+    assert!(report.all_first_party_registered);
+    assert!(report.all_descriptors_complete);
+    assert!(report.all_lifecycle_declared);
+    assert!(report.gaps.is_empty(), "gaps: {:?}", report.gaps);
+
+    // Observation connectors must not invent health classifications.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    let k8s =
+        std::fs::read_to_string(workspace_root.join("crates/rivora-connectors/src/kubernetes.rs"))
+            .unwrap();
+    assert!(
+        !k8s.contains("health=healthy") && !k8s.contains("\"unhealthy\""),
+        "kubernetes connector must not classify health"
+    );
+    let local =
+        std::fs::read_to_string(workspace_root.join("crates/rivora-connectors/src/local.rs"))
+            .unwrap();
+    assert!(
+        !local.contains("indicates_failure"),
+        "local connector must not invent failure conclusions"
+    );
 }
 
 #[test]
@@ -432,10 +518,15 @@ fn policy_denies_high_risk_and_prohibited() {
     };
     let prohibited = ExecutionCapabilityDescriptor {
         capability_id: "force_push".into(),
+        name: "Force Push".into(),
         version: "1".into(),
+        provider: "test".into(),
+        operation: "force_push".into(),
         risk_level: CapabilityRiskLevel::Prohibited,
+        mutating: true,
         supported_actions: vec!["force_push".into()],
         required_inputs: vec![],
+        permissions: vec![],
         supports_dry_run: false,
         idempotency_behavior: "none".into(),
         reversibility: "none".into(),
@@ -444,6 +535,8 @@ fn policy_denies_high_risk_and_prohibited() {
         target_restrictions: vec![],
         failure_semantics: "denied".into(),
         description: "prohibited".into(),
+        output_types: vec![],
+        limitations: vec!["policy denied".into()],
         engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
         accepted_input_types: default_accepted_input_types("force_push"),
         provider_independent: true,

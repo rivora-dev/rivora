@@ -29,7 +29,7 @@ use rivora::{
 use rivora_connectors::github_actions::GitHubActionsConnector;
 use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
-use rivora_connectors::register_github_execution_capabilities;
+use rivora_connectors::register_first_party_github_execution_capabilities;
 use rivora_connectors::sentry::SentryConnector;
 
 const EXECUTION_BOUNDARY: &str = "Execution Through External Systems — only explicitly approved, bounded capabilities; Proposal acceptance ≠ execution approval.";
@@ -281,7 +281,7 @@ fn investigation_session(caps: &CapabilityService, mut inv: Investigation) -> Re
             "Improvement Proposals",
             "Learning Outcomes",
             "Execution (v0.6)",
-            "Capability Engineering Loop (v0.7)",
+            "Capability Engineering Loop (v0.8)",
             "Back",
         ];
         let choice = Select::new()
@@ -1994,9 +1994,22 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
             c.capability_id == "mock.record"
                 && c.engineering_loop.memory == rivora::LifecycleParticipation::Supported
                 && c.engineering_loop.learning == rivora::LifecycleParticipation::Deferred
+                && c.is_complete()
         }),
-        "mock.record must declare Engineering Loop participation"
+        "mock.record must declare Engineering Loop participation with complete descriptor"
     );
+    let coverage = caps.capability_coverage_report();
+    assert!(
+        coverage.all_first_party_registered,
+        "v0.8 workspace must register all first-party capabilities: {}",
+        coverage.gaps.join("; ")
+    );
+    assert!(
+        coverage.all_descriptors_complete,
+        "all first-party descriptors must be complete: {}",
+        coverage.gaps.join("; ")
+    );
+    println!("Workspace Capability coverage: {}", coverage.summary);
     println!("Workspace Capability Engineering Loop surface verified.");
 
     let alternatives = caps
@@ -2876,16 +2889,17 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
     Ok(())
 }
 
-/// Capability Engineering Loop inspection (v0.7 / RFC-028).
+/// Capability Engineering Loop inspection and coverage (v0.8 / RFC-028).
 fn lifecycle_session(caps: &CapabilityService, id: InvestigationId) -> Result<(), String> {
     loop {
-        println!("\n{}", style("Capability Engineering Loop (v0.7)").bold());
+        println!("\n{}", style("Capability Engineering Loop (v0.8)").bold());
         println!(
             "Connectors provide normalized facts. Capabilities contribute typed context. Runtime owns reasoning."
         );
         let actions = vec![
             "List registered Capabilities",
             "Show Capability descriptor + loop stages",
+            "Capability coverage / health",
             "List Engineering Loop runs",
             "Show Engineering Loop run",
             "Trace invocation / attempt",
@@ -2902,13 +2916,17 @@ fn lifecycle_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
             0 => {
                 for c in caps.list_execution_capabilities() {
                     println!(
-                        "  • {} v{} [{}]",
+                        "  • {} ({}) v{} [{}] complete={}",
                         c.capability_id,
+                        c.display_name(),
                         c.version,
-                        c.risk_level.as_str()
+                        c.risk_level.as_str(),
+                        c.is_complete()
                     );
                     println!(
-                        "      Memory={} Evaluation={} Verification={} Improvement={} Learning={}",
+                        "      provider={} operation={} Memory={} Evaluation={} Verification={} Improvement={} Learning={}",
+                        c.provider,
+                        c.operation,
                         c.engineering_loop.memory.as_str(),
                         c.engineering_loop.evaluation.as_str(),
                         c.engineering_loop.verification.as_str(),
@@ -2924,11 +2942,20 @@ fn lifecycle_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                     .interact_text()
                     .map_err(|e| e.to_string())?;
                 let desc = caps.show_execution_capability(&cap_id).map_err(err)?;
-                println!("{}", desc.description);
+                println!("{} — {}", desc.display_name(), desc.description);
                 println!(
-                    "  accepted_input_types=[{}] provider_independent={}",
+                    "  provider={} operation={} mutating={} risk={}",
+                    desc.provider,
+                    desc.operation,
+                    desc.mutating,
+                    desc.risk_level.as_str()
+                );
+                println!(
+                    "  accepted_input_types=[{}] output_types=[{}] provider_independent={} complete={}",
                     desc.accepted_input_types.join(", "),
-                    desc.provider_independent
+                    desc.output_types.join(", "),
+                    desc.provider_independent,
+                    desc.is_complete()
                 );
                 println!(
                     "  Engineering Loop: M={} E={} V={} I={} L={}",
@@ -2938,8 +2965,52 @@ fn lifecycle_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                     desc.engineering_loop.improvement.as_str(),
                     desc.engineering_loop.learning.as_str(),
                 );
+                if !desc.limitations.is_empty() {
+                    println!("  limitations:");
+                    for lim in &desc.limitations {
+                        println!("    - {lim}");
+                    }
+                }
             }
             2 => {
+                let report = caps.capability_coverage_report();
+                println!("{}", report.summary);
+                println!(
+                    "  first_party={}/{}  descriptors_complete={}  lifecycle_declared={}",
+                    report.first_party_registered,
+                    report.first_party_expected,
+                    report.all_descriptors_complete,
+                    report.all_lifecycle_declared
+                );
+                for c in &report.capabilities {
+                    println!(
+                        "  • {}  complete={}  loop=[M:{} E:{} V:{} I:{} L:{}]",
+                        c.capability_id,
+                        c.descriptor_complete,
+                        c.memory,
+                        c.evaluation,
+                        c.verification,
+                        c.improvement,
+                        c.learning
+                    );
+                }
+                println!("Connectors:");
+                for conn in &report.connectors {
+                    println!(
+                        "  • {}  kinds=[{}]  fixture={}",
+                        conn.connector_id,
+                        conn.emitted_kinds.join(", "),
+                        conn.fixture_support
+                    );
+                }
+                if !report.gaps.is_empty() {
+                    println!("Gaps:");
+                    for g in &report.gaps {
+                        println!("  - {g}");
+                    }
+                }
+            }
+            3 => {
                 let listing = caps.list_lifecycle_runs(id).map_err(err)?;
                 if listing.runs.is_empty() {
                     println!("No Engineering Loop runs.");
@@ -2963,12 +3034,12 @@ fn lifecycle_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                     );
                 }
             }
-            3 => {
+            4 => {
                 let run_id = input_object_id("Lifecycle run id")?;
                 let run = caps.get_lifecycle_run(id, run_id).map_err(err)?;
                 print_lifecycle_run(&run);
             }
-            4 => {
+            5 => {
                 let inv_id: String = Input::new()
                     .with_prompt("Attempt / invocation / run id")
                     .interact_text()
@@ -2993,7 +3064,7 @@ fn lifecycle_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                 }
                 println!("  {}", trace.explanation);
             }
-            5 => {
+            6 => {
                 let attempt = input_object_id("Attempt id")?;
                 let run = caps
                     .run_capability_lifecycle_for_attempt(id, attempt, "workspace")
@@ -3093,11 +3164,9 @@ fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     runtime
         .register_execution_capability(Arc::new(MockExecutionCapability::new()))
         .map_err(err)?;
-    if let Ok(repo) = std::env::var("RIVORA_GITHUB_REPO") {
-        let token = std::env::var("GITHUB_TOKEN").ok();
-        register_github_execution_capabilities(runtime.execution_registry(), repo, token)
-            .map_err(err)?;
-    }
+    // v0.8: always register first-party GitHub adapters for Capability Coverage.
+    register_first_party_github_execution_capabilities(runtime.execution_registry())
+        .map_err(err)?;
     Ok(CapabilityService::new(runtime))
 }
 

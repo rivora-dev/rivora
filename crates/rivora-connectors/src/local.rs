@@ -59,6 +59,16 @@ impl LocalConnector {
         Ok(out)
     }
 
+    /// Observe from a fixture directory layout (v0.8 offline parity).
+    ///
+    /// Expects the same files as live mode under `root` (optional
+    /// `.rivora/events/*.json`, optional `test-output.txt`). Does not require git.
+    pub fn observe_from_fixture(
+        root: impl Into<PathBuf>,
+    ) -> ConnectorResult<Vec<NormalizedObservation>> {
+        LocalConnector::new(root).observe()
+    }
+
     fn observe_repository(&self) -> ConnectorResult<NormalizedObservation> {
         let root = self
             .root
@@ -188,19 +198,25 @@ impl LocalConnector {
             if path.is_file() {
                 let content =
                     fs::read_to_string(&path).map_err(|e| ConnectorError::Io(e.to_string()))?;
-                let failed = content.to_lowercase().contains("fail")
-                    || content.to_lowercase().contains("error");
+                let truncated: String = content.chars().take(4000).collect();
+                // Emit raw token presence facts only — Evaluation owns pass/fail reasoning.
+                let lower = truncated.to_lowercase();
+                let contains_fail_token = lower.contains("fail");
+                let contains_error_token = lower.contains("error");
                 return Ok(NormalizedObservation::new(
                     ObservationKind::TestOutput,
-                    if failed {
-                        "Local test output indicates failures"
-                    } else {
-                        "Local test output captured"
-                    },
+                    format!(
+                        "Local test output captured from `{}` ({} bytes)",
+                        path.display(),
+                        content.len()
+                    ),
                     json!({
+                        "canonical_type": "test_output",
                         "path": path.display().to_string(),
-                        "content": content.chars().take(4000).collect::<String>(),
-                        "indicates_failure": failed,
+                        "content": truncated,
+                        "byte_length": content.len(),
+                        "contains_fail_token": contains_fail_token,
+                        "contains_error_token": contains_error_token,
                     }),
                     "local",
                     Utc::now(),

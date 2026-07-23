@@ -1,7 +1,7 @@
 # RFC-012: Connectors
 
-**Status:** Foundational (boundary clarified with RFC-028 / v0.7)\
-**Target Version:** Foundation → v0.1; Connector/Capability boundary formalized in v0.7
+**Status:** Foundational (boundary clarified with RFC-028 / v0.7; canonical coverage in v0.8)\
+**Target Version:** Foundation → v0.1; Connector/Capability boundary formalized in v0.7; first-party connector inventory and non-reasoning gates in v0.8
 
 ------------------------------------------------------------------------
 

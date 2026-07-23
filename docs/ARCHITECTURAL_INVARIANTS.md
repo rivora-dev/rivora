@@ -80,6 +80,10 @@
   silent absence (`None`).
 - **Replay of lifecycle processing is idempotent** (no duplicate artifacts for
   the same idempotency key / lineage head).
+- **No built-in Capability may bypass standard Runtime orchestration** (v0.8).
+- **First-party Capability descriptors must be complete** (identity, provider,
+  operation, risk, permissions, accepted inputs, lifecycle participation,
+  limitations) and inventoriable via the shared coverage report (v0.8).
 
 ## Connectors
 
@@ -89,11 +93,13 @@
 - **Observation Connectors remain read-only.**
 - Vendor-specific API types stay inside Connectors; Capabilities consume
   canonical Runtime types.
+- Connectors must not invent health, failure, or quality conclusions from
+  raw provider signals; Evaluation owns that reasoning (v0.8).
 - External mutation occurs only through bounded Execution Capabilities (or
   adapters) invoked by the Runtime after policy and approval — never from
   Observation Connectors.
 
-## Execution Safety (v0.6+, preserved in v0.7)
+## Execution Safety (v0.6+, preserved in v0.7–v0.8)
 
 - **Execution requires an Execution Plan, centralized policy evaluation,
   exact-revision human approval, and explicit live confirmation.**

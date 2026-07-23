@@ -171,19 +171,22 @@ impl KubernetesConnector {
             });
         let mut payload = resource.clone();
         redact_object(&mut payload);
-
-        let health = if phase == "Running" || phase == "Succeeded" {
-            "healthy"
-        } else if phase == "Failed" || phase == "Unknown" {
-            "unhealthy"
-        } else {
-            "degraded"
-        };
+        // Emit only observed facts — never classify health (Runtime/Evaluation owns that).
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("canonical_type".into(), json!("infrastructure"));
+            obj.insert("namespace".into(), json!(namespace));
+            obj.insert("resource_kind".into(), json!(kind));
+            obj.insert("resource_name".into(), json!(name));
+            obj.insert("phase".into(), json!(phase));
+            if let Some(ready_count) = ready {
+                obj.insert("ready_container_count".into(), json!(ready_count));
+            }
+        }
 
         Ok(vec![NormalizedObservation::new(
             ObservationKind::Infrastructure,
             format!(
-                "Kubernetes {kind} `{name}` in `{namespace}` phase={phase} health={health}{}",
+                "Kubernetes {kind} `{name}` in `{namespace}` phase={phase}{}",
                 ready
                     .map(|r| format!(" ready_containers={r}"))
                     .unwrap_or_default()
@@ -264,7 +267,9 @@ mod tests {
         let obs = KubernetesConnector::observe_from_fixture(&fixture).unwrap();
         assert_eq!(obs.len(), 1);
         assert!(matches!(obs[0].kind, ObservationKind::Infrastructure));
-        assert!(obs[0].summary.contains("unhealthy") || obs[0].summary.contains("Failed"));
+        assert!(obs[0].summary.contains("phase=Failed"));
+        assert!(!obs[0].summary.contains("health="));
+        assert_eq!(obs[0].payload["canonical_type"], json!("infrastructure"));
         assert_eq!(
             obs[0].payload["spec"]["serviceAccountToken"],
             json!("[redacted]")

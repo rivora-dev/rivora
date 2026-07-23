@@ -96,6 +96,12 @@ impl Runtime {
             })
     }
 
+    /// Build a first-party Capability Coverage report for registered adapters (v0.8).
+    pub fn capability_coverage_report(&self) -> crate::domain::CapabilityCoverageReport {
+        let descriptors = self.list_execution_capabilities();
+        crate::domain::build_capability_coverage_report(&descriptors)
+    }
+
     /// Create a draft Execution Plan for an accepted Proposal.
     pub fn create_execution_plan(
         &self,

@@ -1,6 +1,7 @@
 # RFC-011: Capabilities
 
-**Status:** Foundational (extended by v0.7 Engineering Loop) **Target Version:** Foundation → v0.1; Engineering Loop participation in v0.7
+**Status:** Foundational (extended by v0.7 Engineering Loop; first-party coverage in v0.8)  
+**Target Version:** Foundation → v0.1; Engineering Loop participation in v0.7; complete first-party descriptors and coverage surface in v0.8
 
 ------------------------------------------------------------------------
 

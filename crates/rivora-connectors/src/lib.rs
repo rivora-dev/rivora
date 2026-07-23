@@ -16,7 +16,10 @@ pub mod kubernetes;
 pub mod local;
 pub mod sentry;
 
-pub use execution::register_github_execution_capabilities;
+pub use execution::{
+    register_first_party_github_execution_capabilities, register_github_execution_capabilities,
+    DEFAULT_GITHUB_EXECUTION_REPO,
+};
 pub use github_actions::ConnectorStatusReport;
 
 use rivora::domain::{ObservationKind, Provenance};

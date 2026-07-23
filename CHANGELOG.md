@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.8.0 — Capability Coverage
+
+### Phase 0–1 — Inventory and standard lifecycle for every first-party Capability
+
+- Complete first-party inventory: `mock.record` plus five GitHub execution Capabilities
+- Extended `ExecutionCapabilityDescriptor` with `name`, `provider`, `operation`, `mutating`, `permissions`, `output_types`, and `limitations` (additive serde defaults)
+- Every first-party Capability declares explicit Engineering Loop participation and emits typed contributions through shared Runtime orchestration
+- Capability-aware Memory / Evaluation / Verification contribution semantics (not generic API echoes)
+- Improvement and Learning remain explicitly **Deferred** until measured evidence exists
+
+### Phase 2–3 — Connector canonical inputs and honest boundaries
+
+- All five observation connectors inventoryed with emitted kinds, fixture support, and limitations
+- Kubernetes and Local connectors no longer invent health/failure conclusions; they emit observed facts only
+- Local connector gains fixture-parity helper; payloads include `canonical_type` where useful
+- Connectors remain read-only and never write lifecycle artifacts
+
+### Phase 4–7 — Multi-Capability coverage surface
+
+- CLI and Workspace always register all first-party execution Capabilities (default sandbox target when `RIVORA_GITHUB_REPO` unset; live still needs token + approval)
+- Deterministic zero / one / many Observation → Capability routing validated across the full registry
+- `rivora capability coverage` and Workspace **Capability coverage / health** surface
+- Shared `CapabilityCoverageReport` with completeness gaps, connector inventory, and first-party registration checks
+
+### Phase 8–10 — Gates, tests, documentation
+
+- Architecture gates enforce complete first-party descriptors, connector non-reasoning, and coverage inventory
+- v0.8 unit/integration/CLI coverage tests; v0.7 Engineering Loop regressions retained
+- Capability guide, Connector guide, first-party Capability catalog, and lifecycle coverage matrix
+- RFC-011 / RFC-012 / RFC-028 status updated for platform-wide validation; version `0.8.0`
+
 ## 0.7.0 — Engineering Loop Integration
 
 ### Phase 1–2 — Capability lifecycle contract and typed contributions (RFC-028)

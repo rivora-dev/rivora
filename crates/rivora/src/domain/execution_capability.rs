@@ -237,19 +237,21 @@ pub trait ExecutionCapability: Send + Sync {
 }
 
 /// Build standard lifecycle contributions for an execution capability.
+///
+/// Memory and Evaluation summaries are capability-aware so Engineering Loop
+/// artifacts record durable engineering facts rather than generic API echoes.
 pub fn default_lifecycle_contributions(
     identity: ContributionIdentity,
     participation: &EngineeringLoopParticipation,
     context: &LifecycleContributionContext,
 ) -> CapabilityLifecycleContributions {
     let evidence = context.receipt_ids.clone();
+    let (memory_summary, eval_subject, eval_expectation, verify_strategy) =
+        capability_stage_semantics(&identity.capability_id, context);
     let memory = match participation.memory {
         LifecycleParticipation::Supported => StageContribution::Supported {
             value: MemoryContribution {
-                summary: format!(
-                    "Capability `{}` invocation {}: {}",
-                    identity.capability_id, identity.invocation_id, context.result_summary
-                ),
+                summary: memory_summary,
                 observation_id: context.observation_ids.first().copied(),
                 confidence: if context.api_reported_success {
                     0.7
@@ -264,11 +266,8 @@ pub fn default_lifecycle_contributions(
     let evaluation = match participation.evaluation {
         LifecycleParticipation::Supported => StageContribution::Supported {
             value: EvaluationContributionRequest {
-                subject: format!(
-                    "Capability `{}` execution outcome",
-                    identity.capability_id
-                ),
-                expectation: "External action completed as planned; independent verification still required".into(),
+                subject: eval_subject,
+                expectation: eval_expectation,
                 rationale: "Evaluate the engineering significance of the bounded external action using evidence, not API success alone".into(),
                 evidence_ids: evidence.clone(),
                 suggested_severity: Some(if context.api_reported_success {
@@ -283,7 +282,7 @@ pub fn default_lifecycle_contributions(
     let verification = match participation.verification {
         LifecycleParticipation::Supported => StageContribution::Supported {
             value: VerificationContributionRequest {
-                strategy: "Independent state observation; do not trust capability execution result as proof".into(),
+                strategy: verify_strategy,
                 required_evidence: vec![
                     "Independent external state observation".into(),
                     "Correlation of external identifiers".into(),
@@ -345,6 +344,85 @@ pub fn default_lifecycle_contributions(
         verification,
         improvement,
         learning,
+    }
+}
+
+/// Capability-aware stage semantics for useful Engineering Loop artifacts.
+fn capability_stage_semantics(
+    capability_id: &str,
+    context: &LifecycleContributionContext,
+) -> (String, String, String, String) {
+    let action = context.action_name.as_deref().unwrap_or("action");
+    let summary = context.result_summary.as_str();
+    let ids = if context.external_identifiers.is_empty() {
+        "none".to_string()
+    } else {
+        context.external_identifiers.join(", ")
+    };
+    match capability_id {
+        "mock.record" => (
+            format!(
+                "Capability `mock.record` mock resource mutation recorded (invocation {}, action {}, externals=[{}]): {}",
+                context.invocation_id, action, ids, summary
+            ),
+            "Mock mutation engineering outcome".into(),
+            "In-process resource field matches planned value; independent observe_state is still required".into(),
+            "Re-read mock resource fields and compare exact field/value; never trust execute status alone".into(),
+        ),
+        "github.issue.comment" => (
+            format!(
+                "Capability `github.issue.comment` issue comment action recorded (invocation {}, externals=[{}]): {}",
+                context.invocation_id, ids, summary
+            ),
+            "Issue comment execution outcome".into(),
+            "Exact comment body exists on the target issue; API acceptance is not verification".into(),
+            "GET exact comment by id and compare body and issue association".into(),
+        ),
+        "github.issue.label" => (
+            format!(
+                "Capability `github.issue.label` label mutation recorded (invocation {}, action {}, externals=[{}]): {}",
+                context.invocation_id, action, ids, summary
+            ),
+            "Issue label execution outcome".into(),
+            "Target issue label set matches the planned add/remove state".into(),
+            "GET issue labels and assert exact presence or absence of the label".into(),
+        ),
+        "github.issue.create" => (
+            format!(
+                "Capability `github.issue.create` issue creation recorded (invocation {}, externals=[{}]): {}",
+                context.invocation_id, ids, summary
+            ),
+            "Issue creation execution outcome".into(),
+            "Created issue exists with expected title; API 201 is not verified success".into(),
+            "GET issue by number and compare title and repository binding".into(),
+        ),
+        "github.pull_request.create_draft" => (
+            format!(
+                "Capability `github.pull_request.create_draft` draft PR creation recorded (invocation {}, externals=[{}]): {}",
+                context.invocation_id, ids, summary
+            ),
+            "Draft pull request execution outcome".into(),
+            "Draft PR exists for head→base with draft=true".into(),
+            "GET pull request and assert draft flag, head, and base refs".into(),
+        ),
+        "github_actions.workflow_dispatch" => (
+            format!(
+                "Capability `github_actions.workflow_dispatch` workflow dispatch recorded (invocation {}, action {}, externals=[{}]): {}",
+                context.invocation_id, action, ids, summary
+            ),
+            "Workflow dispatch execution outcome".into(),
+            "Named workflow run correlated to the dispatch; dispatch acceptance is not run success".into(),
+            "List/filter workflow runs by workflow id, ref, and time; do not use 'latest run' alone".into(),
+        ),
+        other => (
+            format!(
+                "Capability `{other}` invocation {} (action {}): {}",
+                context.invocation_id, action, summary
+            ),
+            format!("Capability `{other}` execution outcome"),
+            "External action completed as planned; independent verification still required".into(),
+            "Independent state observation; do not trust capability execution result as proof".into(),
+        ),
     }
 }
 
@@ -506,10 +584,15 @@ impl ExecutionCapability for MockExecutionCapability {
     fn descriptor(&self) -> ExecutionCapabilityDescriptor {
         ExecutionCapabilityDescriptor {
             capability_id: "mock.record".into(),
+            name: "Mock Record Mutation".into(),
             version: "1".into(),
+            provider: "mock".into(),
+            operation: "record".into(),
             risk_level: CapabilityRiskLevel::LowRiskWrite,
+            mutating: true,
             supported_actions: vec!["record_mutation".into(), "fail_mutation".into()],
             required_inputs: vec!["resource_key".into(), "field".into(), "value".into()],
+            permissions: vec!["mock:write".into()],
             supports_dry_run: true,
             idempotency_behavior: "client key deduplicates identical mutations".into(),
             reversibility: "overwrite field with previous value when known".into(),
@@ -518,6 +601,11 @@ impl ExecutionCapability for MockExecutionCapability {
             target_restrictions: vec!["mock".into(), "sandbox".into()],
             failure_semantics: "failed actions leave prior state unchanged".into(),
             description: "In-process mock mutation for tests".into(),
+            output_types: vec!["execution_result".into(), "mutation_receipt".into()],
+            limitations: vec![
+                "Test-only; never talks to real external systems".into(),
+                "Improvement and Learning remain Deferred until measured evidence".into(),
+            ],
             engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
             accepted_input_types: default_accepted_input_types("mock.record"),
             provider_independent: true,

@@ -1216,18 +1216,37 @@ pub struct DryRunResult {
 }
 
 /// Capability descriptor for listing.
+///
+/// v0.8 extends the descriptor with identity, permissions, outputs, and
+/// limitations so every first-party Capability can be inventoried and audited
+/// for Engineering Loop coverage without a competing descriptor model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionCapabilityDescriptor {
     /// Unique capability id.
     pub capability_id: String,
+    /// Human-readable name (v0.8; defaults to `capability_id` when empty).
+    #[serde(default)]
+    pub name: String,
     /// Contract version.
     pub version: String,
+    /// Provider family (`mock`, `github`, `github_actions`, …).
+    #[serde(default)]
+    pub provider: String,
+    /// Primary operation family (`record`, `comment`, `dispatch`, …).
+    #[serde(default)]
+    pub operation: String,
     /// Risk level.
     pub risk_level: CapabilityRiskLevel,
+    /// Whether the Capability mutates external (or mock) state.
+    #[serde(default = "default_mutating_true")]
+    pub mutating: bool,
     /// Supported action names.
     pub supported_actions: Vec<String>,
     /// Required input keys.
     pub required_inputs: Vec<String>,
+    /// Permission scopes required for live execution (names only).
+    #[serde(default)]
+    pub permissions: Vec<String>,
     /// Dry-run support.
     pub supports_dry_run: bool,
     /// Idempotency behavior summary.
@@ -1244,6 +1263,12 @@ pub struct ExecutionCapabilityDescriptor {
     pub failure_semantics: String,
     /// Human description.
     pub description: String,
+    /// Canonical output type identifiers produced by successful execution.
+    #[serde(default)]
+    pub output_types: Vec<String>,
+    /// Known limitations and constraints (honest coverage documentation).
+    #[serde(default)]
+    pub limitations: Vec<String>,
     /// Engineering Loop stage participation (RFC-028 / v0.7).
     ///
     /// Explicit for every stage; defaults to Deferred for legacy descriptors.
@@ -1252,15 +1277,365 @@ pub struct ExecutionCapabilityDescriptor {
     /// Canonical provider-independent input type identifiers accepted for routing.
     #[serde(default)]
     pub accepted_input_types: Vec<String>,
-    /// Whether the Capability is independent of a specific provider/connector API.
+    /// Whether routing/inputs use canonical Runtime types (not vendor API shapes).
     ///
-    /// True means it consumes canonical Runtime types, not vendor-specific payloads.
+    /// True does **not** mean the adapter never calls a provider API; it means
+    /// Capability matching and contributions consume canonical types after
+    /// Connector normalization.
     #[serde(default = "default_provider_independent_true")]
     pub provider_independent: bool,
 }
 
 fn default_provider_independent_true() -> bool {
     true
+}
+
+fn default_mutating_true() -> bool {
+    true
+}
+
+/// Stable first-party ExecutionCapability ids expected under v0.8 coverage.
+pub const FIRST_PARTY_EXECUTION_CAPABILITY_IDS: &[&str] = &[
+    "mock.record",
+    "github.issue.comment",
+    "github.issue.create",
+    "github.issue.label",
+    "github.pull_request.create_draft",
+    "github_actions.workflow_dispatch",
+];
+
+/// First-party observation connector identifiers (v0.8 inventory).
+pub const FIRST_PARTY_CONNECTOR_IDS: &[&str] =
+    &["local", "github", "github_actions", "kubernetes", "sentry"];
+
+impl ExecutionCapabilityDescriptor {
+    /// Display name, falling back to capability id when unset (legacy descriptors).
+    pub fn display_name(&self) -> &str {
+        if self.name.trim().is_empty() {
+            &self.capability_id
+        } else {
+            &self.name
+        }
+    }
+
+    /// Whether this descriptor satisfies v0.8 completeness requirements.
+    pub fn is_complete(&self) -> bool {
+        self.completeness_gaps().is_empty()
+    }
+
+    /// List missing or incomplete descriptor fields for coverage audits.
+    pub fn completeness_gaps(&self) -> Vec<String> {
+        let mut gaps = Vec::new();
+        if self.capability_id.trim().is_empty() {
+            gaps.push("capability_id".into());
+        }
+        if self.name.trim().is_empty() {
+            gaps.push("name".into());
+        }
+        if self.version.trim().is_empty() {
+            gaps.push("version".into());
+        }
+        if self.provider.trim().is_empty() {
+            gaps.push("provider".into());
+        }
+        if self.operation.trim().is_empty() {
+            gaps.push("operation".into());
+        }
+        if self.description.trim().is_empty() {
+            gaps.push("description".into());
+        }
+        if self.supported_actions.is_empty() {
+            gaps.push("supported_actions".into());
+        }
+        if self.accepted_input_types.is_empty() {
+            gaps.push("accepted_input_types".into());
+        }
+        if self.idempotency_behavior.trim().is_empty() {
+            gaps.push("idempotency_behavior".into());
+        }
+        if self.reversibility.trim().is_empty() {
+            gaps.push("reversibility".into());
+        }
+        if self.verification_method.trim().is_empty() {
+            gaps.push("verification_method".into());
+        }
+        if self.failure_semantics.trim().is_empty() {
+            gaps.push("failure_semantics".into());
+        }
+        // engineering_loop is always present by type; all five stages are explicit.
+        let _ = &self.engineering_loop;
+        gaps
+    }
+
+    /// Whether every Engineering Loop stage has an explicit participation declaration.
+    ///
+    /// Always true for the typed model; retained for coverage reporting clarity.
+    pub fn lifecycle_fully_declared(&self) -> bool {
+        // Typed fields cannot be omitted; Default is explicit Deferred per stage.
+        true
+    }
+}
+
+/// Per-Capability coverage entry for CLI/Workspace health surfaces (v0.8).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityCoverageEntry {
+    /// Capability id.
+    pub capability_id: String,
+    /// Display name.
+    pub name: String,
+    /// Provider family.
+    pub provider: String,
+    /// Primary operation.
+    pub operation: String,
+    /// Version.
+    pub version: String,
+    /// Risk level string.
+    pub risk_level: String,
+    /// Whether mutating.
+    pub mutating: bool,
+    /// Descriptor completeness.
+    pub descriptor_complete: bool,
+    /// Completeness gaps (empty when complete).
+    #[serde(default)]
+    pub descriptor_gaps: Vec<String>,
+    /// Lifecycle participation fully declared.
+    pub lifecycle_declared: bool,
+    /// Memory participation.
+    pub memory: String,
+    /// Evaluation participation.
+    pub evaluation: String,
+    /// Verification participation.
+    pub verification: String,
+    /// Improvement participation.
+    pub improvement: String,
+    /// Learning participation.
+    pub learning: String,
+    /// Accepted canonical input types.
+    pub accepted_input_types: Vec<String>,
+    /// Provider-independent routing.
+    pub provider_independent: bool,
+    /// Whether this id is in the first-party catalog.
+    pub first_party: bool,
+    /// Limitations.
+    #[serde(default)]
+    pub limitations: Vec<String>,
+}
+
+/// Connector inventory entry for coverage reporting (v0.8).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConnectorCoverageEntry {
+    /// Connector id.
+    pub connector_id: String,
+    /// Provider.
+    pub provider: String,
+    /// Whether observation-only (read-only).
+    pub read_only: bool,
+    /// Canonical observation kinds emitted.
+    pub emitted_kinds: Vec<String>,
+    /// Whether fixture mode is supported.
+    pub fixture_support: bool,
+    /// Notes / limitations.
+    #[serde(default)]
+    pub limitations: Vec<String>,
+}
+
+/// First-party Capability and Connector coverage report (v0.8).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityCoverageReport {
+    /// Schema version for the report document.
+    pub schema_version: u32,
+    /// Registered capability coverage rows (sorted by id).
+    pub capabilities: Vec<CapabilityCoverageEntry>,
+    /// First-party connector inventory (static + process notes).
+    pub connectors: Vec<ConnectorCoverageEntry>,
+    /// Expected first-party capability count.
+    pub first_party_expected: usize,
+    /// How many first-party ids are currently registered.
+    pub first_party_registered: usize,
+    /// All first-party capabilities are registered.
+    pub all_first_party_registered: bool,
+    /// All registered descriptors are complete.
+    pub all_descriptors_complete: bool,
+    /// All registered capabilities declare lifecycle participation.
+    pub all_lifecycle_declared: bool,
+    /// Aggregated gap messages.
+    #[serde(default)]
+    pub gaps: Vec<String>,
+    /// Human summary.
+    pub summary: String,
+}
+
+/// Schema version for coverage reports.
+pub const CAPABILITY_COVERAGE_SCHEMA_VERSION: u32 = 1;
+
+/// Build connector inventory rows for the first-party observation connectors.
+pub fn first_party_connector_coverage() -> Vec<ConnectorCoverageEntry> {
+    vec![
+        ConnectorCoverageEntry {
+            connector_id: "local".into(),
+            provider: "local".into(),
+            read_only: true,
+            emitted_kinds: vec![
+                "repository".into(),
+                "git_status".into(),
+                "commit".into(),
+                "changed_files".into(),
+                "test_output".into(),
+                "local_event".into(),
+            ],
+            fixture_support: true,
+            limitations: vec![
+                "Live mode reads the local filesystem and git; fixture mode uses structured event/test files".into(),
+            ],
+        },
+        ConnectorCoverageEntry {
+            connector_id: "github".into(),
+            provider: "github".into(),
+            read_only: true,
+            emitted_kinds: vec![
+                "repository".into(),
+                "pull_request".into(),
+                "commit".into(),
+                "check_result".into(),
+                "issue".into(),
+            ],
+            fixture_support: true,
+            limitations: vec!["Live mode optional GITHUB_TOKEN; fixture mode for offline tests".into()],
+        },
+        ConnectorCoverageEntry {
+            connector_id: "github_actions".into(),
+            provider: "github".into(),
+            read_only: true,
+            emitted_kinds: vec!["workflow_run".into(), "check_result".into()],
+            fixture_support: true,
+            limitations: vec!["Live mode requires GITHUB_TOKEN; single-page collection".into()],
+        },
+        ConnectorCoverageEntry {
+            connector_id: "kubernetes".into(),
+            provider: "kubernetes".into(),
+            read_only: true,
+            emitted_kinds: vec!["infrastructure".into()],
+            fixture_support: true,
+            limitations: vec![
+                "Emits canonical infrastructure facts (phase/ready counts); no health reasoning".into(),
+            ],
+        },
+        ConnectorCoverageEntry {
+            connector_id: "sentry".into(),
+            provider: "sentry".into(),
+            read_only: true,
+            emitted_kinds: vec!["observability".into()],
+            fixture_support: true,
+            limitations: vec!["Live mode requires SENTRY_AUTH_TOKEN; redacts secrets".into()],
+        },
+    ]
+}
+
+/// Build a coverage entry from a registered descriptor.
+pub fn coverage_entry_from_descriptor(
+    desc: &ExecutionCapabilityDescriptor,
+) -> CapabilityCoverageEntry {
+    let gaps = desc.completeness_gaps();
+    CapabilityCoverageEntry {
+        capability_id: desc.capability_id.clone(),
+        name: desc.display_name().to_string(),
+        provider: if desc.provider.is_empty() {
+            desc.capability_id
+                .split('.')
+                .next()
+                .unwrap_or("unknown")
+                .to_string()
+        } else {
+            desc.provider.clone()
+        },
+        operation: desc.operation.clone(),
+        version: desc.version.clone(),
+        risk_level: desc.risk_level.as_str().to_string(),
+        mutating: desc.mutating,
+        descriptor_complete: gaps.is_empty(),
+        descriptor_gaps: gaps,
+        lifecycle_declared: desc.lifecycle_fully_declared(),
+        memory: desc.engineering_loop.memory.as_str().to_string(),
+        evaluation: desc.engineering_loop.evaluation.as_str().to_string(),
+        verification: desc.engineering_loop.verification.as_str().to_string(),
+        improvement: desc.engineering_loop.improvement.as_str().to_string(),
+        learning: desc.engineering_loop.learning.as_str().to_string(),
+        accepted_input_types: desc.accepted_input_types.clone(),
+        provider_independent: desc.provider_independent,
+        first_party: FIRST_PARTY_EXECUTION_CAPABILITY_IDS.contains(&desc.capability_id.as_str()),
+        limitations: desc.limitations.clone(),
+    }
+}
+
+/// Assemble a coverage report from currently registered descriptors.
+pub fn build_capability_coverage_report(
+    descriptors: &[ExecutionCapabilityDescriptor],
+) -> CapabilityCoverageReport {
+    let mut capabilities: Vec<CapabilityCoverageEntry> = descriptors
+        .iter()
+        .map(coverage_entry_from_descriptor)
+        .collect();
+    capabilities.sort_by(|a, b| a.capability_id.cmp(&b.capability_id));
+
+    let registered_ids: std::collections::HashSet<&str> = descriptors
+        .iter()
+        .map(|d| d.capability_id.as_str())
+        .collect();
+    let first_party_registered = FIRST_PARTY_EXECUTION_CAPABILITY_IDS
+        .iter()
+        .filter(|id| registered_ids.contains(*id))
+        .count();
+    let mut gaps = Vec::new();
+    for id in FIRST_PARTY_EXECUTION_CAPABILITY_IDS {
+        if !registered_ids.contains(id) {
+            gaps.push(format!("first-party capability `{id}` is not registered"));
+        }
+    }
+    for entry in &capabilities {
+        if !entry.descriptor_complete {
+            gaps.push(format!(
+                "capability `{}` incomplete descriptor: {}",
+                entry.capability_id,
+                entry.descriptor_gaps.join(", ")
+            ));
+        }
+        if !entry.lifecycle_declared {
+            gaps.push(format!(
+                "capability `{}` missing lifecycle declarations",
+                entry.capability_id
+            ));
+        }
+        if entry.accepted_input_types.is_empty() {
+            gaps.push(format!(
+                "capability `{}` has no accepted_input_types",
+                entry.capability_id
+            ));
+        }
+    }
+    let all_descriptors_complete = capabilities.iter().all(|c| c.descriptor_complete);
+    let all_lifecycle_declared = capabilities.iter().all(|c| c.lifecycle_declared);
+    let all_first_party_registered =
+        first_party_registered == FIRST_PARTY_EXECUTION_CAPABILITY_IDS.len();
+    let summary = format!(
+        "Capability coverage: {}/{} first-party registered; {} registered total; descriptors_complete={}; lifecycle_declared={}",
+        first_party_registered,
+        FIRST_PARTY_EXECUTION_CAPABILITY_IDS.len(),
+        capabilities.len(),
+        all_descriptors_complete,
+        all_lifecycle_declared
+    );
+    CapabilityCoverageReport {
+        schema_version: CAPABILITY_COVERAGE_SCHEMA_VERSION,
+        capabilities,
+        connectors: first_party_connector_coverage(),
+        first_party_expected: FIRST_PARTY_EXECUTION_CAPABILITY_IDS.len(),
+        first_party_registered,
+        all_first_party_registered,
+        all_descriptors_complete,
+        all_lifecycle_declared,
+        gaps,
+        summary,
+    }
 }
 
 /// End-to-end execution trace.

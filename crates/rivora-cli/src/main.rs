@@ -32,7 +32,7 @@ use rivora_connectors::github::GitHubConnector;
 use rivora_connectors::github_actions::{ConnectorStatusReport, GitHubActionsConnector};
 use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
-use rivora_connectors::register_github_execution_capabilities;
+use rivora_connectors::register_first_party_github_execution_capabilities;
 use rivora_connectors::sentry::SentryConnector;
 use rivora_connectors::NormalizedObservation;
 
@@ -244,7 +244,7 @@ enum Commands {
         #[command(subcommand)]
         action: ExecuteCmd,
     },
-    /// Capability descriptors, routing, and Engineering Loop inspection (v0.7).
+    /// Capability descriptors, routing, coverage, and Engineering Loop inspection (v0.7/v0.8).
     Capability {
         #[command(subcommand)]
         action: CapabilityCmd,
@@ -260,6 +260,8 @@ enum CapabilityCmd {
         /// Capability id (e.g. mock.record, github_actions.workflow_dispatch).
         id: String,
     },
+    /// First-party Capability and Connector coverage/health report (v0.8).
+    Coverage,
     /// Route Observations to compatible Capabilities (typed, deterministic).
     Route {
         #[arg(long)]
@@ -3606,6 +3608,10 @@ fn run() -> Result<(), String> {
                 let desc = caps.show_execution_capability(&id).map_err(err)?;
                 print_value(cli.json, &desc, || format_capability_descriptor(&desc));
             }
+            CapabilityCmd::Coverage => {
+                let report = caps.capability_coverage_report();
+                print_value(cli.json, &report, || format_capability_coverage(&report));
+            }
             CapabilityCmd::Route {
                 investigation,
                 observations,
@@ -4386,12 +4392,10 @@ fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     runtime
         .register_execution_capability(Arc::new(MockExecutionCapability::new()))
         .map_err(err)?;
-    // Optional GitHub bounded execution adapters (token from env; live still needs approval).
-    if let Ok(repo) = std::env::var("RIVORA_GITHUB_REPO") {
-        let token = std::env::var("GITHUB_TOKEN").ok();
-        register_github_execution_capabilities(runtime.execution_registry(), repo, token)
-            .map_err(err)?;
-    }
+    // v0.8: always register first-party GitHub adapters for Capability Coverage.
+    // Live execution still requires GITHUB_TOKEN + plan/approval; dry-run works without.
+    register_first_party_github_execution_capabilities(runtime.execution_registry())
+        .map_err(err)?;
     Ok(CapabilityService::new(runtime))
 }
 
@@ -4651,19 +4655,86 @@ fn format_capability_descriptor(desc: &rivora::ExecutionCapabilityDescriptor) ->
         desc.engineering_loop.improvement.as_str(),
         desc.engineering_loop.learning.as_str(),
     );
+    let limitations = if desc.limitations.is_empty() {
+        "  limitations: (none)".to_string()
+    } else {
+        format!(
+            "  limitations:\n{}",
+            desc.limitations
+                .iter()
+                .map(|l| format!("    - {l}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
     format!(
-        "{}\n  risk: {}\n  version: {}\n  dry_run: {}\n  actions: {}\n  accepted_input_types: [{}]\n  provider_independent: {}\n  {}\n{}\n{}",
+        "{}\n  name: {}\n  provider: {}\n  operation: {}\n  risk: {}\n  mutating: {}\n  version: {}\n  dry_run: {}\n  actions: {}\n  permissions: [{}]\n  accepted_input_types: [{}]\n  output_types: [{}]\n  provider_independent: {}\n  complete: {}\n  {}\n{}\n{}\n{}",
         desc.capability_id,
+        desc.display_name(),
+        desc.provider,
+        desc.operation,
         desc.risk_level.as_str(),
+        desc.mutating,
         desc.version,
         desc.supports_dry_run,
         desc.supported_actions.join(", "),
+        desc.permissions.join(", "),
         desc.accepted_input_types.join(", "),
+        desc.output_types.join(", "),
         desc.provider_independent,
+        desc.is_complete(),
         desc.description,
         loop_lines,
+        limitations,
         EXECUTION_BOUNDARY
     )
+}
+
+fn format_capability_coverage(report: &rivora::CapabilityCoverageReport) -> String {
+    let mut out = format!("{}\n", report.summary);
+    out.push_str(&format!(
+        "  first_party: {}/{} registered\n  descriptors_complete: {}\n  lifecycle_declared: {}\n",
+        report.first_party_registered,
+        report.first_party_expected,
+        report.all_descriptors_complete,
+        report.all_lifecycle_declared
+    ));
+    out.push_str("Capabilities:\n");
+    for c in &report.capabilities {
+        out.push_str(&format!(
+            "  {}  v{}  {}/{}  complete={}  loop=[M:{} E:{} V:{} I:{} L:{}]  types=[{}]\n",
+            c.capability_id,
+            c.version,
+            c.provider,
+            c.operation,
+            c.descriptor_complete,
+            c.memory,
+            c.evaluation,
+            c.verification,
+            c.improvement,
+            c.learning,
+            c.accepted_input_types.join(", ")
+        ));
+    }
+    out.push_str("Connectors:\n");
+    for conn in &report.connectors {
+        out.push_str(&format!(
+            "  {}  provider={}  read_only={}  kinds=[{}]  fixture={}\n",
+            conn.connector_id,
+            conn.provider,
+            conn.read_only,
+            conn.emitted_kinds.join(", "),
+            conn.fixture_support
+        ));
+    }
+    if !report.gaps.is_empty() {
+        out.push_str("Gaps:\n");
+        for g in &report.gaps {
+            out.push_str(&format!("  - {g}\n"));
+        }
+    }
+    out.push_str(EXECUTION_BOUNDARY);
+    out
 }
 
 fn format_lifecycle_run(run: &rivora::CapabilityLifecycleRun) -> String {

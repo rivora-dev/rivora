@@ -25,10 +25,13 @@ const MAX_LABEL_BYTES: usize = 128;
 const MAX_REF_BYTES: usize = 256;
 const MAX_WORKFLOW_BYTES: usize = 256;
 
-/// Register the standard v0.6 bounded GitHub execution adapters when a token is present.
+/// Register the standard first-party GitHub execution adapters (v0.6/v0.8).
 ///
 /// Without a token, adapters are still registered but live execute fails preconditions
 /// with a clear credential error (dry-run/plan validation still works).
+///
+/// v0.8 always registers these for Capability Coverage when a repository target is
+/// available (including the default sandbox target used by CLI/Workspace).
 pub fn register_github_execution_capabilities(
     registry: &rivora::ExecutionCapabilityRegistry,
     repository: impl Into<String>,
@@ -63,6 +66,78 @@ pub fn register_github_execution_capabilities(
         api_base,
     }))?;
     Ok(())
+}
+
+/// Default repository target used when `RIVORA_GITHUB_REPO` is unset.
+///
+/// Enables first-party Capability Coverage (list/show/route/dry-run) without live credentials.
+pub const DEFAULT_GITHUB_EXECUTION_REPO: &str = "rivora-dev/sandbox";
+
+/// Register all first-party GitHub execution capabilities for coverage.
+///
+/// Uses `RIVORA_GITHUB_REPO` when set, otherwise [`DEFAULT_GITHUB_EXECUTION_REPO`].
+/// Token is taken from `GITHUB_TOKEN` when present.
+pub fn register_first_party_github_execution_capabilities(
+    registry: &rivora::ExecutionCapabilityRegistry,
+) -> RivoraResult<()> {
+    let repository = std::env::var("RIVORA_GITHUB_REPO")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_GITHUB_EXECUTION_REPO.to_string());
+    let token = std::env::var("GITHUB_TOKEN")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    register_github_execution_capabilities(registry, repository, token)
+}
+
+/// Shared v0.8 descriptor fields for first-party GitHub-family adapters.
+#[allow(clippy::too_many_arguments)]
+fn github_family_descriptor(
+    capability_id: &str,
+    name: &str,
+    provider: &str,
+    operation: &str,
+    risk_level: CapabilityRiskLevel,
+    supported_actions: Vec<String>,
+    required_inputs: Vec<String>,
+    permissions: Vec<String>,
+    supports_dry_run: bool,
+    idempotency_behavior: impl Into<String>,
+    reversibility: impl Into<String>,
+    verification_method: impl Into<String>,
+    repository: &str,
+    failure_semantics: impl Into<String>,
+    description: impl Into<String>,
+    output_types: Vec<String>,
+    limitations: Vec<String>,
+) -> ExecutionCapabilityDescriptor {
+    ExecutionCapabilityDescriptor {
+        capability_id: capability_id.into(),
+        name: name.into(),
+        version: "1".into(),
+        provider: provider.into(),
+        operation: operation.into(),
+        risk_level,
+        mutating: true,
+        supported_actions,
+        required_inputs,
+        permissions,
+        supports_dry_run,
+        idempotency_behavior: idempotency_behavior.into(),
+        reversibility: reversibility.into(),
+        verification_method: verification_method.into(),
+        credential_requirements: vec!["GITHUB_TOKEN".into()],
+        target_restrictions: vec![repository.to_string()],
+        failure_semantics: failure_semantics.into(),
+        description: description.into(),
+        output_types,
+        limitations,
+        engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
+        accepted_input_types: default_accepted_input_types(capability_id),
+        // Routing and contributions use canonical Runtime input types after Connector
+        // normalization; the adapter still targets GitHub APIs for mutation.
+        provider_independent: true,
+    }
 }
 
 fn policy_low_risk(capability_id: &str) -> ExecutionPolicyDecision {
@@ -412,25 +487,29 @@ pub struct GitHubIssueCommentCapability {
 
 impl ExecutionCapability for GitHubIssueCommentCapability {
     fn descriptor(&self) -> ExecutionCapabilityDescriptor {
-        ExecutionCapabilityDescriptor {
-            capability_id: "github.issue.comment".into(),
-            version: "1".into(),
-            risk_level: CapabilityRiskLevel::LowRiskWrite,
-            supported_actions: vec!["create_comment".into()],
-            required_inputs: vec!["issue_number".into(), "body".into()],
-            supports_dry_run: true,
-            idempotency_behavior:
-                "client idempotency key; duplicate comments possible if key differs".into(),
-            reversibility: "comment may be deleted manually; no auto-rollback".into(),
-            verification_method: "GET issue comments and match body".into(),
-            credential_requirements: vec!["GITHUB_TOKEN".into()],
-            target_restrictions: vec![self.repository.clone()],
-            failure_semantics: "API errors fail the action; no partial comment".into(),
-            description: "Post a comment on a GitHub issue".into(),
-            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
-            accepted_input_types: default_accepted_input_types("github.issue.comment"),
-            provider_independent: true,
-        }
+        github_family_descriptor(
+            "github.issue.comment",
+            "GitHub Issue Comment",
+            "github",
+            "comment",
+            CapabilityRiskLevel::LowRiskWrite,
+            vec!["create_comment".into()],
+            vec!["issue_number".into(), "body".into()],
+            vec!["issues:write".into()],
+            true,
+            "client idempotency key; duplicate comments possible if key differs",
+            "comment may be deleted manually; no auto-rollback",
+            "GET issue comments and match body",
+            &self.repository,
+            "API errors fail the action; no partial comment",
+            "Post a comment on a GitHub issue",
+            vec!["issue_comment".into(), "execution_result".into()],
+            vec![
+                "Bound to a single owner/repo target at registration".into(),
+                "Live execution requires GITHUB_TOKEN; dry-run does not".into(),
+                "Improvement and Learning remain Deferred until measured evidence".into(),
+            ],
+        )
     }
 
     fn target(
@@ -687,25 +766,29 @@ pub struct GitHubIssueLabelCapability {
 
 impl ExecutionCapability for GitHubIssueLabelCapability {
     fn descriptor(&self) -> ExecutionCapabilityDescriptor {
-        ExecutionCapabilityDescriptor {
-            capability_id: "github.issue.label".into(),
-            version: "1".into(),
-            risk_level: CapabilityRiskLevel::LowRiskWrite,
-            supported_actions: vec!["add_label".into(), "remove_label".into()],
-            required_inputs: vec!["issue_number".into(), "label".into()],
-            supports_dry_run: true,
-            idempotency_behavior: "add is naturally idempotent; remove is idempotent when absent"
-                .into(),
-            reversibility: "swap add/remove".into(),
-            verification_method: "GET issue labels".into(),
-            credential_requirements: vec!["GITHUB_TOKEN".into()],
-            target_restrictions: vec![self.repository.clone()],
-            failure_semantics: "failed label ops leave prior labels".into(),
-            description: "Add or remove a label on a GitHub issue".into(),
-            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
-            accepted_input_types: default_accepted_input_types("github.issue.label"),
-            provider_independent: true,
-        }
+        github_family_descriptor(
+            "github.issue.label",
+            "GitHub Issue Label",
+            "github",
+            "label",
+            CapabilityRiskLevel::LowRiskWrite,
+            vec!["add_label".into(), "remove_label".into()],
+            vec!["issue_number".into(), "label".into()],
+            vec!["issues:write".into()],
+            true,
+            "add is naturally idempotent; remove is idempotent when absent",
+            "swap add/remove",
+            "GET issue labels",
+            &self.repository,
+            "failed label ops leave prior labels",
+            "Add or remove a label on a GitHub issue",
+            vec!["issue_label_state".into(), "execution_result".into()],
+            vec![
+                "Bound to a single owner/repo target at registration".into(),
+                "Live execution requires GITHUB_TOKEN; dry-run does not".into(),
+                "Improvement and Learning remain Deferred until measured evidence".into(),
+            ],
+        )
     }
 
     fn target(
@@ -999,24 +1082,29 @@ pub struct GitHubIssueCreateCapability {
 
 impl ExecutionCapability for GitHubIssueCreateCapability {
     fn descriptor(&self) -> ExecutionCapabilityDescriptor {
-        ExecutionCapabilityDescriptor {
-            capability_id: "github.issue.create".into(),
-            version: "1".into(),
-            risk_level: CapabilityRiskLevel::BoundedWrite,
-            supported_actions: vec!["create_issue".into()],
-            required_inputs: vec!["title".into()],
-            supports_dry_run: true,
-            idempotency_behavior: "client key; GitHub may create duplicates if key differs".into(),
-            reversibility: "issue may be closed; not deleted automatically".into(),
-            verification_method: "GET issue by number".into(),
-            credential_requirements: vec!["GITHUB_TOKEN".into()],
-            target_restrictions: vec![self.repository.clone()],
-            failure_semantics: "failed create leaves no issue".into(),
-            description: "Create a GitHub issue".into(),
-            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
-            accepted_input_types: default_accepted_input_types("github.issue.create"),
-            provider_independent: true,
-        }
+        github_family_descriptor(
+            "github.issue.create",
+            "GitHub Issue Create",
+            "github",
+            "create_issue",
+            CapabilityRiskLevel::BoundedWrite,
+            vec!["create_issue".into()],
+            vec!["title".into()],
+            vec!["issues:write".into()],
+            true,
+            "client key; GitHub may create duplicates if key differs",
+            "issue may be closed; not deleted automatically",
+            "GET issue by number",
+            &self.repository,
+            "failed create leaves no issue",
+            "Create a GitHub issue",
+            vec!["issue".into(), "execution_result".into()],
+            vec![
+                "Bound to a single owner/repo target at registration".into(),
+                "Live execution requires GITHUB_TOKEN; dry-run does not".into(),
+                "Improvement and Learning remain Deferred until measured evidence".into(),
+            ],
+        )
     }
 
     fn target(
@@ -1281,24 +1369,29 @@ pub struct GitHubDraftPrCapability {
 
 impl ExecutionCapability for GitHubDraftPrCapability {
     fn descriptor(&self) -> ExecutionCapabilityDescriptor {
-        ExecutionCapabilityDescriptor {
-            capability_id: "github.pull_request.create_draft".into(),
-            version: "1".into(),
-            risk_level: CapabilityRiskLevel::BoundedWrite,
-            supported_actions: vec!["create_draft_pr".into()],
-            required_inputs: vec!["title".into(), "head".into(), "base".into()],
-            supports_dry_run: true,
-            idempotency_behavior: "client key; natural head/base uniqueness may apply".into(),
-            reversibility: "PR may be closed; no force operations".into(),
-            verification_method: "GET pull request".into(),
-            credential_requirements: vec!["GITHUB_TOKEN".into()],
-            target_restrictions: vec![self.repository.clone()],
-            failure_semantics: "failed create leaves no PR".into(),
-            description: "Create a draft pull request from an existing branch".into(),
-            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
-            accepted_input_types: default_accepted_input_types("github.pull_request.create_draft"),
-            provider_independent: true,
-        }
+        github_family_descriptor(
+            "github.pull_request.create_draft",
+            "GitHub Draft Pull Request",
+            "github",
+            "create_draft_pr",
+            CapabilityRiskLevel::BoundedWrite,
+            vec!["create_draft_pr".into()],
+            vec!["title".into(), "head".into(), "base".into()],
+            vec!["pull_requests:write".into()],
+            true,
+            "client key; natural head/base uniqueness may apply",
+            "PR may be closed; no force operations",
+            "GET pull request",
+            &self.repository,
+            "failed create leaves no PR",
+            "Create a draft pull request from an existing branch",
+            vec!["pull_request".into(), "execution_result".into()],
+            vec![
+                "Existing branch only; no force-push, merge, or branch delete".into(),
+                "Live execution requires GITHUB_TOKEN; dry-run does not".into(),
+                "Improvement and Learning remain Deferred until measured evidence".into(),
+            ],
+        )
     }
 
     fn target(
@@ -1618,25 +1711,30 @@ pub struct GitHubWorkflowDispatchCapability {
 
 impl ExecutionCapability for GitHubWorkflowDispatchCapability {
     fn descriptor(&self) -> ExecutionCapabilityDescriptor {
-        ExecutionCapabilityDescriptor {
-            capability_id: "github_actions.workflow_dispatch".into(),
-            version: "1".into(),
-            risk_level: CapabilityRiskLevel::BoundedWrite,
-            supported_actions: vec!["dispatch_workflow".into()],
-            required_inputs: vec!["workflow_id".into(), "ref".into()],
-            supports_dry_run: true,
-            idempotency_behavior: "dispatch is not naturally idempotent; client key required"
-                .into(),
-            reversibility: "cancel run if policy allows; not automatic".into(),
-            verification_method: "list workflow runs for workflow_id".into(),
-            credential_requirements: vec!["GITHUB_TOKEN".into()],
-            target_restrictions: vec![self.repository.clone()],
-            failure_semantics: "failed dispatch starts no run".into(),
-            description: "Trigger an explicitly named GitHub Actions workflow".into(),
-            engineering_loop: EngineeringLoopParticipation::execution_capability_default(),
-            accepted_input_types: default_accepted_input_types("github_actions.workflow_dispatch"),
-            provider_independent: true,
-        }
+        github_family_descriptor(
+            "github_actions.workflow_dispatch",
+            "GitHub Actions Workflow Dispatch",
+            "github_actions",
+            "dispatch_workflow",
+            CapabilityRiskLevel::BoundedWrite,
+            vec!["dispatch_workflow".into()],
+            vec!["workflow_id".into(), "ref".into()],
+            vec!["actions:write".into()],
+            true,
+            "dispatch is not naturally idempotent; client key required",
+            "cancel run if policy allows; not automatic",
+            "list workflow runs for workflow_id",
+            &self.repository,
+            "failed dispatch starts no run",
+            "Trigger an explicitly named GitHub Actions workflow",
+            vec!["workflow_run".into(), "execution_result".into()],
+            vec![
+                "Named workflow only; does not mutate workflow files".into(),
+                "Dispatch acceptance is not workflow success".into(),
+                "Live execution requires GITHUB_TOKEN; dry-run does not".into(),
+                "Improvement and Learning remain Deferred until measured evidence".into(),
+            ],
+        )
     }
 
     fn target(

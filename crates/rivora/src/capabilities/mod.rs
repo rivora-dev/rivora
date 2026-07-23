@@ -1268,6 +1268,11 @@ impl CapabilityService {
         self.runtime.show_execution_capability(capability_id)
     }
 
+    /// First-party Capability and Connector coverage report (v0.8).
+    pub fn capability_coverage_report(&self) -> crate::domain::CapabilityCoverageReport {
+        self.runtime.capability_coverage_report()
+    }
+
     /// Create an Execution Plan for an accepted Proposal.
     pub fn create_execution_plan(
         &self,

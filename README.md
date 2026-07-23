@@ -12,9 +12,9 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Development: v0.7 — Engineering Loop Integration
+## Current Development: v0.8 — Capability Coverage
 
-Rivora v0.7 answers: **Can every Capability participate consistently in the Engineering Loop while the Runtime remains the single source of engineering reasoning?**
+Rivora v0.8 answers: **Can every first-party Capability and Connector participate consistently in the Capability Engineering Loop without special-case Runtime behavior or architectural exceptions?**
 
 ```text
 Connectors → Normalized facts
@@ -24,13 +24,13 @@ Capabilities → Intent + typed lifecycle contributions
 Runtime → Memory → Evaluation → Verification → Improvement → Learning
 ```
 
-Built on v0.1–v0.6 (Memory, Knowledge, Evaluation, Verification, Proposals, Learning, Observation Connectors, bounded Execution Capabilities, Plans, Approvals, Attempts, Receipts):
+Built on v0.7 (Engineering Loop Integration) and earlier releases:
 
-- **Lifecycle contract** (RFC-028) — every Capability declares `Supported` / `NotApplicable` / `Unsupported` / `Deferred` for each loop stage
-- **Typed contributions** — Capabilities never write Memory or create Evaluations/Verifications themselves; Runtime orchestrates existing engines
-- **Typed routing** — Observations route to Capabilities by stable input type ids, not vendor names
-- **Durable lineage** — `CapabilityLifecycleRun` snapshots with explicit partial/failed/deferred stages and idempotent replay
-- **CLI / Workspace** — `rivora capability …` and Workspace Engineering Loop surface
+- **Full first-party coverage** — all six execution Capabilities (`mock.record` + GitHub adapters) use the same descriptor, lifecycle, contribution, Runtime, persistence, CLI, and Workspace models
+- **Complete descriptors** — identity, provider, operation, risk, permissions, inputs/outputs, limitations, and explicit loop participation
+- **Connector canonical inputs** — local, GitHub, GitHub Actions, Kubernetes, and Sentry emit Observation kinds without inventing health/failure conclusions
+- **Coverage surface** — `rivora capability coverage` and Workspace health view report registration, completeness, lifecycle support, and gaps
+- **Deterministic routing** — zero / one / many matches with stable ordering; no string-name-only routing
 
 **Connectors provide normalized engineering data. Capabilities express engineering intent. The Runtime produces engineering knowledge through the Engineering Loop.**
 
@@ -194,9 +194,10 @@ Binaries:
   --confirm
 ./target/release/rivora execute verify --investigation <ID> --attempt <ATTEMPT_ID>
 
-# Engineering Loop (v0.7)
+# Engineering Loop + Capability Coverage (v0.8)
 ./target/release/rivora capability list
 ./target/release/rivora capability show mock.record
+./target/release/rivora capability coverage
 ./target/release/rivora capability lifecycle --investigation <ID> --attempt <ATTEMPT_ID>
 ./target/release/rivora capability trace --investigation <ID> <ATTEMPT_ID>
 ./target/release/rivora capability lifecycle-list --investigation <ID>
@@ -249,6 +250,7 @@ Global flags:
 | `execute receipts` / `export-receipt` / `trace` | Inspect and export sanitized evidence and trace the complete execution lineage |
 | `execute rollback-plan` | Generate a separate draft rollback plan from explicit inverse metadata; never auto-roll back |
 | `capability list` / `show` | List registered Capabilities and Engineering Loop participation |
+| `capability coverage` | First-party Capability/Connector coverage and health report |
 | `capability route` | Deterministic Observation → Capability routing |
 | `capability lifecycle` / `lifecycle-list` / `lifecycle-show` | Run and inspect Engineering Loop stage status |
 | `capability trace` | Trace Observation/execution → Memory → … → Learning lineage |
@@ -413,15 +415,18 @@ Follow Red → Green → Refactor. See `.agents/skills/build-rivora/SKILL.md`.
 | `docs/ARCHITECTURAL_INVARIANTS.md` | Non-negotiable architectural invariants (tracked source of truth) |
 | `docs/internal/` | Local working notes only (gitignored; not required for contributors) |
 | `ROADMAP.md` | Release progression and future boundary |
-| `docs/rfc/RFC-000` … `RFC-028` | Architecture and feature RFCs, including v0.6 execution and v0.7 Engineering Loop (RFC-028) |
+| `docs/rfc/RFC-000` … `RFC-028` | Architecture and feature RFCs, including Engineering Loop (RFC-028) validated across first-party coverage in v0.8 |
+| `docs/guides/CAPABILITY_GUIDE.md` | Contributor guide for first-party Capabilities |
+| `docs/guides/CONNECTOR_GUIDE.md` | Contributor guide for Connectors |
+| `docs/guides/CAPABILITY_CATALOG.md` | First-party Capability catalog and lifecycle coverage matrix |
 
 ---
 
-## v0.6–v0.7 execution and loop boundary
+## v0.6–v0.8 execution, loop, and coverage boundary
 
 Rivora can invoke only registered, typed, bounded capabilities after exact-revision approval and policy evaluation. It does not run unrestricted shell commands, merge or force-push, delete branches/repositories/infrastructure, edit workflow definitions, auto-execute accepted Proposals, retry hiddenly, or perform automatic rollback/remediation. A successful mutation response is a Receipt, not proof of the expected effect or a successful Measured Outcome.
 
-v0.7 adds formal Engineering Loop participation and inspection; it does not add marketplaces, SDKs, or autonomous remediation. See `ROADMAP.md`, RFC-025 through RFC-027, and RFC-028.
+v0.7 formalized Engineering Loop participation. v0.8 applies that contract to every first-party Capability and Connector without special-case Runtime paths. It does not add marketplaces, SDKs, or autonomous remediation. See `ROADMAP.md`, RFC-025 through RFC-028, and the Capability/Connector guides.
 
 ---
 

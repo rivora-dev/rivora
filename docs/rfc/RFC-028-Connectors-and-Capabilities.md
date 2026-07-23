@@ -1,10 +1,10 @@
 # RFC-028 --- Connectors and Capabilities
 
-**Status:** Implemented (v0.7)
+**Status:** Implemented (v0.7); **validated across first-party platform coverage (v0.8)**
 
 **Author:** Sergio Rovira
 
-**Target Version:** v0.7 (Engineering Loop Integration); foundational for later SDK work
+**Target Version:** v0.7 (Engineering Loop Integration); first-party coverage validated in v0.8; foundational for later SDK work
 
 ------------------------------------------------------------------------
 

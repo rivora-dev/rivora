@@ -131,10 +131,15 @@ impl ExecutionCapability for ProbeCapability {
     fn descriptor(&self) -> ExecutionCapabilityDescriptor {
         ExecutionCapabilityDescriptor {
             capability_id: "probe.mutate".into(),
+            name: "Probe Mutate".into(),
             version: "1".into(),
+            provider: "probe".into(),
+            operation: "mutate".into(),
             risk_level: CapabilityRiskLevel::LowRiskWrite,
+            mutating: true,
             supported_actions: vec!["mutate".into()],
             required_inputs: vec!["resource_key".into(), "field".into(), "value".into()],
+            permissions: vec!["probe:write".into()],
             supports_dry_run: true,
             idempotency_behavior: "runtime durable reservation".into(),
             reversibility: "explicit inverse metadata only".into(),
@@ -150,8 +155,10 @@ impl ExecutionCapability for ProbeCapability {
             ],
             failure_semantics: "timeouts are uncertain".into(),
             description: "Hardening test probe".into(),
+            output_types: vec!["execution_result".into()],
+            limitations: vec!["test-only probe".into()],
             engineering_loop: rivora::EngineeringLoopParticipation::execution_capability_default(),
-            accepted_input_types: vec![],
+            accepted_input_types: vec!["event".into()],
             provider_independent: true,
         }
     }
