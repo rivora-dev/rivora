@@ -528,11 +528,24 @@ impl Runtime {
             k
         };
 
+        // Namespace dry-run keys so dry-run never suppresses live execution.
+        let effective_key = if dry_run {
+            format!("dry-run:{idempotency_key}")
+        } else {
+            idempotency_key.clone()
+        };
+
         // Idempotent replay must run before head/approval checks so retries of a
         // completed attempt do not require the plan to remain Approved.
         if let Some(existing) =
-            self.find_attempt_by_idempotency(investigation_id, &idempotency_key)?
+            self.find_attempt_by_idempotency(investigation_id, &effective_key)?
         {
+            if existing.dry_run != dry_run {
+                return Err(RivoraError::precondition(format!(
+                    "idempotency key collides with attempt {} under a different dry_run mode",
+                    existing.id
+                )));
+            }
             if let Ok(p) = self.store.load_execution_plan(&investigation_id, &plan_id) {
                 if existing.plan_id == plan_id || existing.plan_lineage_id == p.lineage_id {
                     return Ok(existing);
@@ -568,7 +581,7 @@ impl Runtime {
                 &plan,
                 &approval,
                 &actor,
-                &idempotency_key,
+                &effective_key,
                 true,
                 Provenance::now(&actor, "runtime").with_capability("execute_plan"),
             )?;
@@ -625,7 +638,7 @@ impl Runtime {
                 &plan,
                 &approval,
                 &actor,
-                &idempotency_key,
+                &effective_key,
                 false,
                 Provenance::now(&actor, "runtime").with_capability("execute_plan"),
             )?;
@@ -666,7 +679,7 @@ impl Runtime {
             &plan,
             &approval,
             &actor,
-            &idempotency_key,
+            &effective_key,
             false,
             Provenance::now(&actor, "runtime").with_capability("execute_plan"),
         )?;
@@ -697,7 +710,7 @@ impl Runtime {
                 action_id: action.action_id.clone(),
                 inputs: merge_inputs(&plan.inputs, &action.inputs),
                 environment: plan.target_environment.clone(),
-                idempotency_key: format!("{}:{}", idempotency_key, action.action_id),
+                idempotency_key: format!("{}:{}", effective_key, action.action_id),
                 investigation_id: investigation_id.to_string(),
                 plan_id: plan.id.to_string(),
             };
@@ -1125,11 +1138,41 @@ impl Runtime {
             .capability_id
             .clone()
             .unwrap_or_else(|| plan.capability_id.clone());
-        let inputs = attempt
+        let mut inputs = attempt
             .rollback
             .inputs
             .clone()
             .unwrap_or_else(|| serde_json::json!({}));
+        // Prefer an explicit inverse action from rollback metadata; otherwise pick a
+        // capability-supported action (never hardcode mock-only names for GitHub).
+        let action_name = inputs
+            .get("inverse")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                self.execution_registry
+                    .get(&capability_id)
+                    .and_then(|c| c.descriptor().supported_actions.first().cloned())
+            })
+            .ok_or_else(|| {
+                RivoraError::precondition(format!(
+                    "cannot derive rollback action for capability `{capability_id}`"
+                ))
+            })?;
+        // Drop the inverse helper field from action inputs if present.
+        if let Some(obj) = inputs.as_object_mut() {
+            obj.remove("inverse");
+        }
+        let risks: Vec<crate::domain::ExecutionRisk> = attempt
+            .rollback
+            .risks
+            .iter()
+            .map(|r| crate::domain::ExecutionRisk {
+                description: r.clone(),
+                severity: "medium".into(),
+                mitigation: "explicit approval required; no automatic rollback".into(),
+            })
+            .collect();
         let request = CreateExecutionPlanRequest {
             proposal_id: plan.proposal_id,
             capability_id,
@@ -1137,7 +1180,7 @@ impl Runtime {
             target_environment: plan.target_environment.clone(),
             actions: vec![ExecutionAction {
                 action_id: "rollback".into(),
-                action_name: "record_mutation".into(),
+                action_name,
                 inputs: inputs.clone(),
                 continue_on_failure: false,
             }],
@@ -1150,29 +1193,42 @@ impl Runtime {
             preconditions: vec![],
             supports_dry_run: true,
         };
-        let mut rollback_plan = self.create_execution_plan(investigation_id, request, actor)?;
-        rollback_plan.risks = attempt
-            .rollback
-            .risks
-            .iter()
-            .map(|r| crate::domain::ExecutionRisk {
-                description: r.clone(),
-                severity: "medium".into(),
-                mitigation: "explicit approval required".into(),
-            })
-            .collect();
-        // Persist updated risks via revise is heavy; re-append not allowed. Create via draft fields before append.
-        // Since create already appended, revise with same content to attach risks.
-        self.revise_execution_plan(
+        let mut plan = self.create_execution_plan(investigation_id, request, &actor)?;
+        // Persist risks by revising content on the new draft head.
+        plan = self.revise_execution_plan(
             investigation_id,
-            rollback_plan.id,
+            plan.id,
             ReviseExecutionPlanRequest {
-                expected_effects: Some(rollback_plan.expected_effects.clone()),
+                expected_effects: Some(plan.expected_effects.clone()),
+                preconditions: Some(plan.preconditions.clone()),
                 ..Default::default()
             },
-            "runtime",
-            "attach rollback metadata",
-        )
+            &actor,
+            "persist rollback draft for explicit re-approval",
+        )?;
+        // Attach risks on the in-memory successor by a second domain-level rewrite
+        // through revise is insufficient; store a final draft with risks via transition-free append.
+        // Load head and re-save risks by creating one more revised snapshot with risks set.
+        let mut with_risks = plan.clone();
+        with_risks.id = ObjectId::new();
+        with_risks.parent_plan_id = Some(plan.id);
+        with_risks.revision_number = plan.revision_number.saturating_add(1);
+        with_risks.risks = risks;
+        with_risks.updated_at = Utc::now();
+        with_risks.provenance = Provenance::now(&actor, "runtime")
+            .with_capability("create_rollback_plan")
+            .with_evidence(vec![plan.id, attempt.id]);
+        with_risks
+            .transitions
+            .push(crate::domain::ExecutionPlanTransition {
+                from: plan.status,
+                to: ExecutionPlanStatus::Draft,
+                actor: actor.clone(),
+                reason: "attach rollback risks".into(),
+                at: Utc::now(),
+            });
+        self.store.append_execution_plan(&with_risks)?;
+        Ok(with_risks)
     }
 
     /// Explain policy for a plan.

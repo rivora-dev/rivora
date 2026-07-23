@@ -445,6 +445,34 @@ fn dry_run_does_not_mutate() {
 }
 
 #[test]
+fn dry_run_idempotency_does_not_suppress_live_execution() {
+    let env = env();
+    let (plan, approval) = prepare_approved(&env, vec![action("a1", "issue/6", "label", "bug")]);
+    let dry = env
+        .caps
+        .execute_plan(env.inv, plan.id, approval.id, "runner", "shared-key", true)
+        .unwrap();
+    assert!(dry.dry_run);
+    assert!(env.mock.get_resource("issue/6").is_none());
+
+    let live = env
+        .caps
+        .execute_plan(env.inv, plan.id, approval.id, "runner", "shared-key", false)
+        .unwrap();
+    assert!(!live.dry_run);
+    assert_ne!(live.id, dry.id);
+    assert_eq!(live.status, ExecutionAttemptStatus::Completed);
+    assert_eq!(
+        env.mock
+            .get_resource("issue/6")
+            .unwrap()
+            .get("label")
+            .unwrap(),
+        "bug"
+    );
+}
+
+#[test]
 fn list_capabilities_includes_mock() {
     let env = env();
     let list = env.caps.list_execution_capabilities();
