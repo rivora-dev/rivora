@@ -137,3 +137,62 @@ fn proposal_runtime_has_no_implementation_or_external_mutation_primitive() {
         );
     }
 }
+
+/// Outcome Runtime records and evaluates external work but never applies or mutates systems.
+#[test]
+fn outcome_runtime_has_no_apply_or_coding_agent_invocation() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(manifest_dir.join("src/runtime/outcome.rs")).unwrap();
+    for forbidden in [
+        "std::process::Command",
+        "std::fs::write",
+        "File::create",
+        "OpenOptions",
+        "fn apply_improvement_proposal",
+        "fn apply_implementation",
+        "fn invoke_coding_agent",
+        "fn create_branch",
+        "fn create_pull_request",
+        "fn deploy",
+        "fn mutate_external",
+        "fn execute_patch",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "Outcome Runtime must not contain mutation primitive `{forbidden}`"
+        );
+    }
+    // Measured outcomes must remain distinct from proposal acceptance.
+    assert!(
+        !source.contains("ProposalStatus::Accepted")
+            || source.contains("Accepted Proposal")
+            || source.contains("accepted does not"),
+        "Outcome Runtime should not treat proposal acceptance as measured success without explicit boundary language"
+    );
+    assert!(
+        source.contains("Accepted Proposal")
+            || source.contains("never applies")
+            || source.contains("does not prove"),
+        "Outcome Runtime must document that acceptance ≠ measured outcome"
+    );
+}
+
+/// v0.1 Recommendation LearningOutcome remains distinct from MeasuredLearningOutcome.
+#[test]
+fn measured_outcome_is_not_recommendation_disposition_learning_outcome() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let learning = std::fs::read_to_string(manifest_dir.join("src/domain/learning.rs")).unwrap();
+    let outcome = std::fs::read_to_string(manifest_dir.join("src/domain/outcome.rs")).unwrap();
+    assert!(
+        learning.contains("struct LearningOutcome"),
+        "v0.1 LearningOutcome must remain"
+    );
+    assert!(
+        outcome.contains("struct MeasuredLearningOutcome"),
+        "v0.5 MeasuredLearningOutcome must exist as a distinct type"
+    );
+    assert!(
+        !outcome.contains("enum OutcomeDisposition"),
+        "Measured outcomes must not reuse Recommendation disposition enum as their classification"
+    );
+}

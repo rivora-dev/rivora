@@ -7,8 +7,10 @@ use std::sync::Arc;
 
 use crate::domain::{
     AssistedWorkflow, CompositeCapabilityDefinition, DeploymentReadiness, EngineeringReport,
-    Evaluation, Hypothesis, ImprovementProposal, Investigation, InvestigationId,
+    Evaluation, HistoricalInfluenceExplanation, Hypothesis, ImplementationListing,
+    ImplementationRecord, ImprovementProposal, Investigation, InvestigationId,
     InvestigationRelationship, InvestigationSummary, KnowledgeObject, LearningOutcome,
+    LearningPattern, MeasuredLearningOutcome, MeasuredOutcomeListing, MeasuredOutcomeStatus,
     MemoryRecord, ObjectId, Observation, ObservationKind, OutcomeDisposition,
     PrioritizedRecommendation, ProposalArtifact, ProposalArtifactListing, ProposalComparison,
     ProposalFeedbackCategory, ProposalListing, ProposalStatus, ProposalTrace,
@@ -20,6 +22,10 @@ use crate::runtime::context::{DetectedPattern, HistoricalTrend};
 use crate::runtime::graph::{RelatedInvestigation, RelationshipExplanation};
 use crate::runtime::learning::RecordOutcomeRequest;
 use crate::runtime::observation::IngestObservationRequest;
+use crate::runtime::outcome::{
+    CollectOutcomeEvidenceRequest, MeasuredOutcomeTrace, RecordImplementationRequest,
+    ReviseImplementationRequest, ReviseMeasuredOutcomeRequest,
+};
 use crate::runtime::proposal::{
     CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
 };
@@ -854,6 +860,339 @@ impl CapabilityService {
     ) -> RivoraResult<ImprovementProposal> {
         self.runtime
             .record_external_implementation_reference(id, proposal_id, reference, actor)
+    }
+
+    // -----------------------------------------------------------------------
+    // v0.5 Implementation Records / Measured Outcomes / Patterns
+    // -----------------------------------------------------------------------
+
+    /// Record that external work associated with a Proposal was performed.
+    pub fn record_external_implementation(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        request: RecordImplementationRequest,
+        actor: impl Into<String>,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime
+            .record_external_implementation(id, proposal_id, request, actor)
+    }
+
+    /// Revise an Implementation Record (immutable successor).
+    pub fn revise_implementation_record(
+        &self,
+        id: InvestigationId,
+        record_id: ObjectId,
+        request: ReviseImplementationRequest,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime
+            .revise_implementation_record(id, record_id, request, actor, reason)
+    }
+
+    /// Link evidence to an Implementation Record.
+    pub fn link_implementation_evidence(
+        &self,
+        id: InvestigationId,
+        record_id: ObjectId,
+        evidence_ids: Vec<ObjectId>,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime
+            .link_implementation_evidence(id, record_id, evidence_ids, actor, reason)
+    }
+
+    /// Mark an Implementation Record ready for evaluation.
+    pub fn mark_implementation_ready(
+        &self,
+        id: InvestigationId,
+        record_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime
+            .mark_implementation_ready(id, record_id, actor, reason)
+    }
+
+    /// Withdraw an Implementation Record.
+    pub fn withdraw_implementation(
+        &self,
+        id: InvestigationId,
+        record_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime
+            .withdraw_implementation(id, record_id, actor, reason)
+    }
+
+    /// Supersede an Implementation Record.
+    pub fn supersede_implementation(
+        &self,
+        id: InvestigationId,
+        record_id: ObjectId,
+        successor_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime
+            .supersede_implementation(id, record_id, successor_id, actor, reason)
+    }
+
+    /// List Implementation Records.
+    pub fn list_implementation_records(
+        &self,
+        id: InvestigationId,
+    ) -> RivoraResult<ImplementationListing> {
+        self.runtime.list_implementation_records(id)
+    }
+
+    /// Get one Implementation Record.
+    pub fn get_implementation_record(
+        &self,
+        id: InvestigationId,
+        record_id: ObjectId,
+    ) -> RivoraResult<ImplementationRecord> {
+        self.runtime.get_implementation_record(id, record_id)
+    }
+
+    /// List Implementation Record revisions.
+    pub fn list_implementation_revisions(
+        &self,
+        id: InvestigationId,
+        lineage_id: ObjectId,
+    ) -> RivoraResult<ImplementationListing> {
+        self.runtime.list_implementation_revisions(id, lineage_id)
+    }
+
+    /// Create a Draft Measured Learning Outcome.
+    pub fn create_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+        implementation_record_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime.create_measured_learning_outcome(
+            id,
+            proposal_id,
+            implementation_record_id,
+            actor,
+        )
+    }
+
+    /// Collect typed evidence on a Measured Learning Outcome.
+    pub fn collect_outcome_evidence(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+        request: CollectOutcomeEvidenceRequest,
+        actor: impl Into<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime
+            .collect_outcome_evidence(id, outcome_id, request, actor)
+    }
+
+    /// Revise a Measured Learning Outcome.
+    pub fn revise_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+        request: ReviseMeasuredOutcomeRequest,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime
+            .revise_measured_learning_outcome(id, outcome_id, request, actor, reason)
+    }
+
+    /// Transition a Measured Learning Outcome lifecycle status.
+    pub fn transition_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+        to: MeasuredOutcomeStatus,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime
+            .transition_measured_learning_outcome(id, outcome_id, to, actor, reason)
+    }
+
+    /// Withdraw a Measured Learning Outcome.
+    pub fn withdraw_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime
+            .withdraw_measured_learning_outcome(id, outcome_id, actor, reason)
+    }
+
+    /// Supersede a Measured Learning Outcome.
+    pub fn supersede_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+        successor_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime.supersede_measured_learning_outcome(
+            id,
+            outcome_id,
+            successor_id,
+            actor,
+            reason,
+        )
+    }
+
+    /// Deterministically evaluate a Measured Learning Outcome.
+    pub fn evaluate_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+        actor: impl Into<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime
+            .evaluate_measured_learning_outcome(id, outcome_id, actor)
+    }
+
+    /// Explicitly verify a Measured Learning Outcome.
+    pub fn verify_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+        override_readiness: bool,
+        override_reason: Option<String>,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime.verify_measured_learning_outcome(
+            id,
+            outcome_id,
+            actor,
+            reason,
+            override_readiness,
+            override_reason,
+        )
+    }
+
+    /// List Measured Learning Outcomes.
+    pub fn list_measured_learning_outcomes(
+        &self,
+        id: InvestigationId,
+    ) -> RivoraResult<MeasuredOutcomeListing> {
+        self.runtime.list_measured_learning_outcomes(id)
+    }
+
+    /// Get one Measured Learning Outcome.
+    pub fn get_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        self.runtime.get_measured_learning_outcome(id, outcome_id)
+    }
+
+    /// List Measured Learning Outcome revisions.
+    pub fn list_measured_outcome_revisions(
+        &self,
+        id: InvestigationId,
+        lineage_id: ObjectId,
+    ) -> RivoraResult<MeasuredOutcomeListing> {
+        self.runtime
+            .list_measured_outcome_revisions(id, lineage_id)
+    }
+
+    /// Trace Proposal → Implementation → Measured Learning Outcome.
+    pub fn trace_measured_learning_outcome(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+    ) -> RivoraResult<MeasuredOutcomeTrace> {
+        self.runtime.trace_measured_learning_outcome(id, outcome_id)
+    }
+
+    /// Export Measured Learning Outcome as Markdown.
+    pub fn export_measured_learning_outcome_markdown(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime
+            .export_measured_learning_outcome_markdown(id, outcome_id)
+    }
+
+    /// Export Measured Learning Outcome as JSON.
+    pub fn export_measured_learning_outcome_json(
+        &self,
+        id: InvestigationId,
+        outcome_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime
+            .export_measured_learning_outcome_json(id, outcome_id)
+    }
+
+    /// Derive Learning Patterns from verified Outcomes.
+    pub fn derive_learning_patterns(
+        &self,
+        actor: impl Into<String>,
+    ) -> RivoraResult<Vec<LearningPattern>> {
+        self.runtime.derive_learning_patterns(actor)
+    }
+
+    /// List Learning Patterns.
+    pub fn list_learning_patterns(&self) -> RivoraResult<Vec<LearningPattern>> {
+        self.runtime.list_learning_patterns()
+    }
+
+    /// Show one Learning Pattern.
+    pub fn get_learning_pattern(
+        &self,
+        pattern_id: ObjectId,
+    ) -> RivoraResult<LearningPattern> {
+        self.runtime.get_learning_pattern(pattern_id)
+    }
+
+    /// Retire a Learning Pattern.
+    pub fn retire_learning_pattern(
+        &self,
+        pattern_id: ObjectId,
+        actor: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> RivoraResult<LearningPattern> {
+        self.runtime
+            .retire_learning_pattern(pattern_id, actor, reason)
+    }
+
+    /// Explain historical influence for a Proposal.
+    pub fn explain_historical_influence(
+        &self,
+        id: InvestigationId,
+        proposal_id: ObjectId,
+    ) -> RivoraResult<HistoricalInfluenceExplanation> {
+        self.runtime.explain_historical_influence(id, proposal_id)
+    }
+
+    /// Export Learning Pattern as Markdown.
+    pub fn export_learning_pattern_markdown(
+        &self,
+        pattern_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime.export_learning_pattern_markdown(pattern_id)
+    }
+
+    /// Export Learning Pattern as JSON.
+    pub fn export_learning_pattern_json(
+        &self,
+        pattern_id: ObjectId,
+    ) -> RivoraResult<String> {
+        self.runtime.export_learning_pattern_json(pattern_id)
     }
 }
 

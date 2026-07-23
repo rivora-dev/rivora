@@ -6,10 +6,11 @@ pub use local::LocalStore;
 
 use crate::domain::{
     AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
-    ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
-    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalArtifact,
-    ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
-    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    ImplementationListing, ImplementationRecord, ImprovementProposal, Investigation,
+    InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome, LearningPattern,
+    MeasuredLearningOutcome, MeasuredOutcomeListing, MemoryRecord, ObjectId, Observation,
+    ProposalArtifact, ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation,
+    RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 
@@ -207,4 +208,62 @@ pub trait Store: Send + Sync {
         &self,
         id: &InvestigationId,
     ) -> RivoraResult<ProposalArtifactListing>;
+
+    /// Append one immutable Implementation Record snapshot.
+    fn append_implementation_record(&self, record: &ImplementationRecord) -> RivoraResult<()>;
+
+    /// Load one Implementation Record snapshot owned by an Investigation.
+    fn load_implementation_record(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ImplementationRecord>;
+
+    /// List valid Implementation Records and isolated corruption diagnostics.
+    fn list_implementation_records(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ImplementationListing>;
+
+    /// List all immutable snapshots in one Implementation Record lineage.
+    fn list_implementation_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<ImplementationListing>;
+
+    /// Append one immutable Measured Learning Outcome snapshot.
+    fn append_measured_learning_outcome(
+        &self,
+        outcome: &MeasuredLearningOutcome,
+    ) -> RivoraResult<()>;
+
+    /// Load one Measured Learning Outcome snapshot owned by an Investigation.
+    fn load_measured_learning_outcome(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<MeasuredLearningOutcome>;
+
+    /// List valid Measured Learning Outcomes and isolated corruption diagnostics.
+    fn list_measured_learning_outcomes(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<MeasuredOutcomeListing>;
+
+    /// List all immutable snapshots in one Measured Learning Outcome lineage.
+    fn list_measured_outcome_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<MeasuredOutcomeListing>;
+
+    /// Append one Learning Pattern snapshot (store-root learning/patterns).
+    fn append_learning_pattern(&self, pattern: &LearningPattern) -> RivoraResult<()>;
+
+    /// Load one Learning Pattern by id.
+    fn load_learning_pattern(&self, id: &ObjectId) -> RivoraResult<LearningPattern>;
+
+    /// List all Learning Patterns at the store root.
+    fn list_learning_patterns(&self) -> RivoraResult<Vec<LearningPattern>>;
 }

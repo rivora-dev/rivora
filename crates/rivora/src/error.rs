@@ -74,4 +74,9 @@ impl RivoraError {
     pub fn serialization(message: impl Into<String>) -> Self {
         Self::Serialization(message.into())
     }
+
+    /// Create a precondition failure.
+    pub fn precondition(message: impl Into<String>) -> Self {
+        Self::Precondition(message.into())
+    }
 }

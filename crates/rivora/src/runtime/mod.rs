@@ -16,6 +16,8 @@ pub mod learning;
 mod memory;
 /// Observation ingestion request types and Runtime methods.
 pub mod observation;
+/// Implementation Records, Measured Learning Outcomes, and Patterns (RFC-022/023/024).
+pub mod outcome;
 /// Improvement Proposal lifecycle and reasoning (RFC-020/RFC-021).
 pub mod proposal;
 mod recommendation;

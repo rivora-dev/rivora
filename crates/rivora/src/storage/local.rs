@@ -22,24 +22,33 @@
 //!     assistance/reports/{object_id}.json
 //!     proposals/{object_id}.json
 //!     proposal_artifacts/{object_id}.json
+//!     implementations/{object_id}.json
+//!     learning_outcomes/{object_id}.json
 //!   graph/
 //!     relationships/{object_id}.json
+//!   learning/
+//!     patterns/{pattern_id}.json
 //! ```
 //!
 //! The `graph` area (RFC-015) is separate from per-Investigation
 //! directories. It is created lazily on first relationship write, so
 //! stores containing only v0.1 data keep working unchanged.
-//! New v0.3 directories are created lazily for the same reason.
+//! New v0.3+ directories are created lazily for the same reason.
+//! v0.5 `implementations/`, `learning_outcomes/`, and root
+//! `learning/patterns/` are also lazy and additive.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::{
     AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, Hypothesis,
+    ImplementationListing, ImplementationRecord, ImplementationStorageDiagnostic,
     ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
-    KnowledgeObject, LearningOutcome, MemoryRecord, ObjectId, Observation, ProposalArtifact,
-    ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
-    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    KnowledgeObject, LearningOutcome, LearningPattern, MeasuredLearningOutcome,
+    MeasuredOutcomeListing, MeasuredOutcomeStorageDiagnostic, MemoryRecord, ObjectId,
+    Observation, ProposalArtifact, ProposalArtifactListing, ProposalListing, RecalledContext,
+    Recommendation, RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt,
+    VerificationSuggestion,
 };
 use crate::error::{RivoraError, RivoraResult};
 
@@ -181,6 +190,36 @@ impl LocalStore {
             .join(format!("{id}.json"))
     }
 
+    fn implementations_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("implementations")
+    }
+
+    fn implementation_path(&self, investigation_id: &InvestigationId, id: &ObjectId) -> PathBuf {
+        self.implementations_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn learning_outcomes_dir(&self, id: &InvestigationId) -> PathBuf {
+        self.inv_dir(id).join("learning_outcomes")
+    }
+
+    fn measured_outcome_path(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> PathBuf {
+        self.learning_outcomes_dir(investigation_id)
+            .join(format!("{id}.json"))
+    }
+
+    fn learning_patterns_dir(&self) -> PathBuf {
+        self.root.join("learning").join("patterns")
+    }
+
+    fn learning_pattern_path(&self, id: &ObjectId) -> PathBuf {
+        self.learning_patterns_dir().join(format!("{id}.json"))
+    }
+
     fn list_proposals_isolated(&self, id: &InvestigationId) -> RivoraResult<ProposalListing> {
         use crate::domain::ProposalStorageDiagnostic;
 
@@ -214,6 +253,88 @@ impl LocalStore {
             }
         }
         listing.proposals.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.revision_number.cmp(&b.revision_number))
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(listing)
+    }
+
+    fn list_implementations_isolated(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ImplementationListing> {
+        let dir = self.implementations_dir(id);
+        if !dir.exists() {
+            return Ok(ImplementationListing::default());
+        }
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        let mut listing = ImplementationListing::default();
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<ImplementationRecord>(&path) {
+                Ok(record) if record.investigation_id == *id => listing.records.push(record),
+                Ok(_) => listing.diagnostics.push(ImplementationStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "implementation record investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(ImplementationStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.records.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.revision_number.cmp(&b.revision_number))
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(listing)
+    }
+
+    fn list_measured_outcomes_isolated(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<MeasuredOutcomeListing> {
+        let dir = self.learning_outcomes_dir(id);
+        if !dir.exists() {
+            return Ok(MeasuredOutcomeListing::default());
+        }
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
+        })?;
+        let mut listing = MeasuredOutcomeListing::default();
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match self.read_json::<MeasuredLearningOutcome>(&path) {
+                Ok(outcome) if outcome.investigation_id == *id => listing.outcomes.push(outcome),
+                Ok(_) => listing.diagnostics.push(MeasuredOutcomeStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: "measured learning outcome investigation ownership mismatch".into(),
+                }),
+                Err(error) => listing.diagnostics.push(MeasuredOutcomeStorageDiagnostic {
+                    path: path.display().to_string(),
+                    error: error.to_string(),
+                }),
+            }
+        }
+        listing.outcomes.sort_by(|a, b| {
             a.created_at
                 .cmp(&b.created_at)
                 .then_with(|| a.revision_number.cmp(&b.revision_number))
@@ -811,6 +932,144 @@ impl Store for LocalStore {
         });
         listing.diagnostics.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(listing)
+    }
+
+    fn append_implementation_record(&self, record: &ImplementationRecord) -> RivoraResult<()> {
+        let path = self.implementation_path(&record.investigation_id, &record.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "implementation record snapshot {} already exists (immutable)",
+                record.id
+            )));
+        }
+        self.write_json(&path, record)
+    }
+
+    fn load_implementation_record(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<ImplementationRecord> {
+        let path = self.implementation_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let record: ImplementationRecord = self.read_json(&path)?;
+        if record.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "implementation record investigation ownership mismatch",
+            ));
+        }
+        Ok(record)
+    }
+
+    fn list_implementation_records(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<ImplementationListing> {
+        self.list_implementations_isolated(id)
+    }
+
+    fn list_implementation_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<ImplementationListing> {
+        let mut listing = self.list_implementations_isolated(id)?;
+        listing.records.retain(|r| r.lineage_id == *lineage_id);
+        listing.records.sort_by(|a, b| {
+            a.revision_number
+                .cmp(&b.revision_number)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(listing)
+    }
+
+    fn append_measured_learning_outcome(
+        &self,
+        outcome: &MeasuredLearningOutcome,
+    ) -> RivoraResult<()> {
+        let path = self.measured_outcome_path(&outcome.investigation_id, &outcome.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "measured learning outcome snapshot {} already exists (immutable)",
+                outcome.id
+            )));
+        }
+        self.write_json(&path, outcome)
+    }
+
+    fn load_measured_learning_outcome(
+        &self,
+        investigation_id: &InvestigationId,
+        id: &ObjectId,
+    ) -> RivoraResult<MeasuredLearningOutcome> {
+        let path = self.measured_outcome_path(investigation_id, id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        let outcome: MeasuredLearningOutcome = self.read_json(&path)?;
+        if outcome.investigation_id != *investigation_id {
+            return Err(RivoraError::validation(
+                "measured learning outcome investigation ownership mismatch",
+            ));
+        }
+        Ok(outcome)
+    }
+
+    fn list_measured_learning_outcomes(
+        &self,
+        id: &InvestigationId,
+    ) -> RivoraResult<MeasuredOutcomeListing> {
+        self.list_measured_outcomes_isolated(id)
+    }
+
+    fn list_measured_outcome_revisions(
+        &self,
+        id: &InvestigationId,
+        lineage_id: &ObjectId,
+    ) -> RivoraResult<MeasuredOutcomeListing> {
+        let mut listing = self.list_measured_outcomes_isolated(id)?;
+        listing.outcomes.retain(|o| o.lineage_id == *lineage_id);
+        listing.outcomes.sort_by(|a, b| {
+            a.revision_number
+                .cmp(&b.revision_number)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(listing)
+    }
+
+    fn append_learning_pattern(&self, pattern: &LearningPattern) -> RivoraResult<()> {
+        let path = self.learning_pattern_path(&pattern.id);
+        if path.exists() {
+            return Err(RivoraError::storage(format!(
+                "learning pattern {} already exists (immutable)",
+                pattern.id
+            )));
+        }
+        self.write_json(&path, pattern)
+    }
+
+    fn load_learning_pattern(&self, id: &ObjectId) -> RivoraResult<LearningPattern> {
+        let path = self.learning_pattern_path(id);
+        if !path.exists() {
+            return Err(RivoraError::ObjectNotFound(*id));
+        }
+        self.read_json(&path)
+    }
+
+    fn list_learning_patterns(&self) -> RivoraResult<Vec<LearningPattern>> {
+        let dir = self.learning_patterns_dir();
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut patterns: Vec<LearningPattern> = self.list_json_dir(&dir)?;
+        patterns.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.to_string().cmp(&b.id.to_string()))
+        });
+        Ok(patterns)
     }
 }
 
