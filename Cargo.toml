@@ -17,7 +17,7 @@ default-members = [
 version = "0.6.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/rivora-ai/rivora"
+repository = "https://github.com/rivora-dev/rivora"
 rust-version = "1.75"
 
 [workspace.dependencies]

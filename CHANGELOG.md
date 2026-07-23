@@ -6,6 +6,8 @@
 
 - Durable Execution Plans convert accepted Proposals into ordered external actions
 - Immutable plan revisions; exact-revision Execution Approvals with actor, reason, scope, environment
+- Immutable target snapshots bind provider, owner, repository, environment, capability, Plan revision, and branch/ref; runtime target drift invalidates approval
+- Invalid capabilities, targets, actions, inputs, preconditions, and risk combinations are rejected before approval
 - Centralized Execution Policy (`Allowed` / `AllowedWithApproval` / `AllowedDryRunOnly` / `Denied`)
 - Lifecycle: Draft → ReadyForReview → Approved → Executing → Executed → Verified → Closed (plus exceptional states)
 - Proposal Accepted ≠ Execution Approved ≠ Execution Started ≠ Verified ≠ Outcome Successful
@@ -16,14 +18,18 @@
 - Risk levels; v0.6 supports ReadOnly / LowRiskWrite / BoundedWrite only (HighRiskWrite and Prohibited denied)
 - Dry-run / plan validation, idempotency keys, retry safety classification, preconditions
 - Initial adapters: `mock.record`, GitHub issue comment/label/create, draft PR, workflow dispatch
+- Duplicate capability registration is rejected; timeouts and ambiguous transport outcomes remain explicitly uncertain
 - No arbitrary shell, force-push, merge, or autonomous remediation
 
 ### Phase 3 — Receipts, Verification, CLI/Workspace (RFC-027)
 
-- Execution Attempts, Receipts, and independent Verification records with partial-failure modeling
-- Rollback metadata only (no automatic rollback); linkage to v0.5 Implementation Records / Outcomes
-- CLI `execute` command tree and Workspace Execution surface over shared CapabilityService
-- Architecture tests enforce approval requirements, connector boundaries, and policy denial
+- `Started` Attempts and idempotency reservations are durable before mutation; recovery and duplicate suppression preserve audit history
+- Execution Attempts, Receipts, and capability-specific independent Verification records with partial-failure and uncertainty modeling
+- Explicit inverse rollback metadata creates a separate draft Plan for normal validation and approval; no automatic rollback
+- Idempotent linkage populates Implementation Record and Measured Outcome trace identifiers
+- CLI supports ordered multi-action/precondition authoring, cancellation, revision listing, rollback-plan creation, and Receipt export
+- Workspace shows the exact revision, target, capability, risk, policy, and approval before live confirmation
+- Architecture and regression tests enforce authority, connector boundaries, policy denial, durability, verification, rollback, and traceability
 
 ## 0.5.0 — Learning Outcomes
 

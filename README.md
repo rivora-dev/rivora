@@ -26,14 +26,14 @@ Observe → Remember → Understand → Assist → Propose → Accept
 
 Implemented for v0.6:
 
-- **Execution Plans and Approvals** (RFC-025) — durable plans, immutable revisions, exact-revision approval, centralized policy
+- **Execution Plans and Approvals** (RFC-025) — durable plans, immutable revisions, exact-revision approval, immutable target snapshots, centralized policy
 - **Bounded Execution Capabilities** (RFC-026) — typed write adapters separate from observation connectors; risk levels; dry-run; idempotency
-- **Attempts, Receipts, Verification** (RFC-027) — partial failure, independent verification, rollback metadata, v0.5 linkage
+- **Attempts, Receipts, Verification** (RFC-027) — durable started attempts, explicit uncertainty, capability-specific independent verification, separate rollback plans, v0.5 linkage
 - **CLI and Workspace** — `rivora execute …` and Workspace Execution surface over shared CapabilityService
 
 **Rivora executes only explicitly approved, bounded capabilities.** It is not a self-healing agent. Proposal acceptance never starts execution. External API success is not Outcome success.
 
-Initial capabilities: `mock.record` (tests), GitHub issue comment/label/create, draft PR from existing branch, named workflow dispatch. High-risk and prohibited actions are denied.
+Initial capabilities: `mock.record` (tests), GitHub issue comment/label/create, draft PR from an existing branch, and named workflow dispatch. Each approval binds the provider, owner, repository, environment, capability, plan revision, and branch/ref where applicable. Runtime target drift invalidates approval. High-risk and prohibited actions are denied.
 
 ---
 
@@ -100,7 +100,7 @@ See `docs/internal/ARCHITECTURAL_INVARIANTS.md` and `docs/rfc/`.
 Requirements: Rust 1.75+ (edition 2021).
 
 ```sh
-git clone <repo>
+git clone https://github.com/rivora-dev/rivora.git
 cd rivora
 cargo build --workspace --release
 ```
@@ -165,6 +165,33 @@ Binaries:
 ./target/release/rivora proposal implementation-plan --investigation <ID> <PROPOSAL_ID>
 ./target/release/rivora proposal export --investigation <ID> <PROPOSAL_ID> --format markdown
 ./target/release/rivora proposal handoff --investigation <ID> <PROPOSAL_ID>
+
+# Author a bounded multi-action execution plan from an accepted Proposal.
+# Repeat --action-input and --precondition as needed.
+./target/release/rivora execute plan \
+  --investigation <ID> \
+  --proposal <ACCEPTED_PROPOSAL_ID> \
+  --capability mock.record \
+  --target-system mock \
+  --environment sandbox \
+  --action record_mutation \
+  --action-input '{"resource_key":"demo/1","field":"label","value":"ready"}' \
+  --precondition '{"id":"scope-ok","description":"Target is in approved scope","satisfied":true,"detail":null}'
+
+# Validate, preview, and explicitly approve the exact immutable revision.
+./target/release/rivora execute validate --investigation <ID> --plan <PLAN_ID> --reason "inputs and target reviewed"
+./target/release/rivora execute preview --investigation <ID> --plan <READY_PLAN_ID>
+./target/release/rivora execute approve --investigation <ID> --plan <READY_PLAN_ID> --reason "bounded sandbox mutation approved"
+
+# Live execution requires both approval and --confirm. API success is still
+# followed by independent verification.
+./target/release/rivora execute run \
+  --investigation <ID> \
+  --plan <APPROVED_PLAN_ID> \
+  --approval <APPROVAL_ID> \
+  --idempotency-key example-live-1 \
+  --confirm
+./target/release/rivora execute verify --investigation <ID> --attempt <ATTEMPT_ID>
 ```
 
 Global flags:
@@ -207,6 +234,12 @@ Global flags:
 | `proposal verification-plan` / `implementation-plan` | Inspect proposed, unexecuted plans |
 | `proposal export` / `handoff` | Emit Markdown/JSON artifacts or bounded implementation handoff text |
 | `proposal portfolio` / `trace` | Filter an Investigation portfolio and trace evidence to a Proposal |
+| `execute plan` / `revise` / `revisions` | Author ordered actions and preconditions; preserve and inspect immutable plan revisions |
+| `execute validate` / `preview` / `policy` | Validate before approval and inspect dry-run and centralized policy decisions |
+| `execute approve` / `reject` / `cancel` | Record explicit authority and lifecycle decisions |
+| `execute run` / `attempts` / `verify` | Execute only an approved target, inspect durable attempts, and independently verify effects |
+| `execute receipts` / `export-receipt` / `trace` | Inspect and export sanitized evidence and trace the complete execution lineage |
+| `execute rollback-plan` | Generate a separate draft rollback plan from explicit inverse metadata; never auto-roll back |
 
 ---
 
@@ -235,8 +268,12 @@ The Workspace lets you:
 - inspect supporting and contradicting evidence, risks, assumptions, implementation outlines, and Verification Plans
 - attach feedback, refine while preserving revisions, and explicitly accept, reject, defer, supersede, or withdraw
 - export Proposal artifacts or bounded coding-agent handoff text
+- author, validate, preview, approve, cancel, and inspect immutable Execution Plan revisions
+- review the exact plan revision, target, capability, risk, policy, and approval before confirming a live mutation
+- inspect Attempts and Receipts, independently verify effects, and export sanitized receipt JSON
+- create a separate rollback Plan from explicit inverse metadata for later validation and approval
 
-The Workspace labels every Proposal as **not applied, not implemented, and not verified**. It has no Apply action and does not invoke coding agents.
+The Workspace labels every Proposal as **not applied, not implemented, and not verified**. It has no Apply action and does not invoke coding agents. It never performs automatic rollback.
 
 Non-interactive smoke mode (CI):
 
@@ -284,6 +321,22 @@ rivora observe --investigation <ID> --github-fixture path/to/fixture.json
 
 Connectors **only** observe → normalize → produce Observations. They never evaluate, verify, recommend, or learn.
 
+### Bounded GitHub execution adapters (v0.6)
+
+GitHub mutation is provided by separate `ExecutionCapability` adapters, never
+by observation connectors. Configure the bounded repository and credentials
+before starting the CLI or Workspace:
+
+```sh
+export RIVORA_GITHUB_REPO=owner/repository
+export GITHUB_TOKEN=...
+```
+
+The adapter's normalized owner/repository and applicable branch/ref are bound
+into the Plan and Approval target snapshots. Changing this runtime target does
+not redirect existing authority; execution is rejected until a new Plan
+revision is validated and approved. Tokens are not persisted or exported.
+
 ---
 
 ## Storage
@@ -302,11 +355,20 @@ Local filesystem store under `--data-dir` (default `.rivora/data`):
   learning/
   proposals/
   proposal_artifacts/
+  implementations/
+  learning_outcomes/
+  execution_plans/
+  execution_approvals/
+  execution_attempts/
+  execution_receipts/
+  execution_verifications/
+.rivora/data/learning/
+  patterns/
 ```
 
-Memory is append-only. Corrections create new records. Proposal storage is additive and lazy; existing v0.1-v0.3 stores require no migration.
+Memory is append-only. Corrections create new records. Proposal, learning, and execution storage is additive and lazy; existing v0.1-v0.5 stores require no destructive migration. Execution Plan revisions and Attempts/Receipts/Verifications remain durable; list operations isolate corrupt records and report diagnostics.
 
-Proposal export is explicit and stdout-only in the CLI. It never writes into a source tree or silently overwrites a file.
+Proposal, Execution Plan, and Receipt export is explicit and stdout-only in the CLI. It never writes into a source tree or silently overwrites a file. Persisted Plans, Approvals, and Receipts contain sanitized metadata, never credentials.
 
 ---
 
@@ -341,13 +403,13 @@ Follow Red → Green → Refactor. See `.agents/skills/build-rivora/SKILL.md`.
 | `docs/internal/ARCHITECTURAL_INVARIANTS.md` | Non-negotiable invariants |
 | `docs/internal/IMPLEMENTATION_PLAN.md` | Current release implementation plan |
 | `ROADMAP.md` | Release progression and future boundary |
-| `docs/rfc/RFC-000` … `RFC-021` | Architecture and feature RFCs |
+| `docs/rfc/RFC-000` … `RFC-027` | Architecture and feature RFCs, including v0.6 authority, bounded execution, receipts, and verification |
 
 ---
 
-## What v0.4 never does
+## v0.6 execution boundary
 
-Rivora v0.4 does not edit repositories, write patches to source, create branches or commits, open pull requests, deploy, mutate infrastructure/configuration/tickets, invoke coding agents, execute remediation, or infer Learning Outcomes from accepted Proposals. See `ROADMAP.md` for the release boundary.
+Rivora v0.6 can invoke only registered, typed, bounded capabilities after exact-revision approval and policy evaluation. It does not run unrestricted shell commands, merge or force-push, delete branches/repositories/infrastructure, edit workflow definitions, auto-execute accepted Proposals, retry hiddenly, or perform automatic rollback/remediation. A successful mutation response is a Receipt, not proof of the expected effect or a successful Measured Outcome. See `ROADMAP.md` and RFC-025 through RFC-027.
 
 ---
 

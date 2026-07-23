@@ -67,6 +67,15 @@ Execution Plan. An Execution Plan never executes merely because it exists.
 
 An Execution Plan converts an accepted Proposal into ordered external actions.
 
+### Target snapshot
+
+Execution authority is bound to an immutable `TargetSnapshot`, not to mutable
+adapter configuration. The snapshot contains provider, owner, repository,
+environment, capability, exact Plan revision, and branch/ref when applicable.
+It is persisted with the Plan and copied into the Approval. Runtime compares
+the approved snapshot with the adapter's current target immediately before any
+mutation. A change to any bound field invalidates approval.
+
 ### Required fields
 
 | Field | Meaning |
@@ -83,6 +92,7 @@ An Execution Plan converts an accepted Proposal into ordered external actions.
 | `capability_id` | Target capability identifier |
 | `target_system` | External system family (e.g. `github`) |
 | `target_environment` | Environment label (e.g. `production`, `sandbox`) |
+| `target_snapshot` | Immutable normalized execution target and exact Plan revision |
 | `actions` | Ordered `ExecutionAction` list |
 | `inputs` | Structured action inputs |
 | `expected_effects` | Expected external effects |
@@ -135,6 +145,7 @@ Edits create immutable successor snapshots. Prior approvals bind only the exact
 | `denied_actions` | Explicitly denied actions |
 | `environment` | Approved environment |
 | `capability_id` | Approved capability |
+| `target_snapshot` | Exact immutable target authorized by the approver |
 | `policy_decision` | Policy decision at approval time |
 | `expires_at` | Optional expiration |
 | `one_time` | Whether one-time use |
@@ -159,9 +170,13 @@ Approval becomes invalid if:
 - Plan revision changes;
 - action inputs change;
 - target, capability, environment, or scope expands;
+- provider, owner, repository, branch/ref, or any other target-snapshot field changes;
 - approval expires;
 - one-time approval was already consumed;
 - preconditions are no longer satisfied.
+
+CLI or Workspace confirmation cannot substitute for this Runtime-owned target
+comparison.
 
 ## Execution Policy
 
@@ -236,7 +251,8 @@ corruption isolation on list. Additive only; no migration of prior objects.
 # Success criteria
 
 1. Execution Plan exists as a first-class object with immutable revisions.
-2. Approval binds exact Plan revision and scope.
-3. Policy is centralized and explainable.
-4. Accepted Proposals never auto-execute.
-5. CLI and Workspace only call shared Capabilities.
+2. Approval binds exact Plan revision, scope, and immutable target snapshot.
+3. Runtime rejects target drift before external mutation.
+4. Policy is centralized and explainable.
+5. Accepted Proposals never auto-execute.
+6. CLI and Workspace only call shared Capabilities.

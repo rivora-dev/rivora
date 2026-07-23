@@ -76,6 +76,11 @@ string_enum!(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ImplementationReference {
+    /// Rivora Execution Attempt lineage identifier.
+    ExecutionAttempt {
+        /// Stable attempt lineage id.
+        attempt_id: ObjectId,
+    },
     /// Git commit SHA.
     CommitSha {
         /// Commit hash.

@@ -25,7 +25,9 @@ use rivora::runtime::proposal::{
 };
 use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
 use rivora::storage::LocalStore;
-use rivora::{CapabilityService, ExecutionAction, MockExecutionCapability, Runtime};
+use rivora::{
+    CapabilityService, ExecutionAction, ExecutionPrecondition, MockExecutionCapability, Runtime,
+};
 use rivora_connectors::github::GitHubConnector;
 use rivora_connectors::github_actions::{ConnectorStatusReport, GitHubActionsConnector};
 use rivora_connectors::kubernetes::KubernetesConnector;
@@ -265,12 +267,18 @@ enum ExecuteCmd {
         target_system: String,
         #[arg(long, default_value = "sandbox")]
         environment: String,
-        /// Action name supported by the capability.
-        #[arg(long)]
-        action: String,
-        /// JSON object of action inputs (never secrets).
+        /// Action name supported by the capability. Repeat for an ordered multi-action plan.
+        #[arg(long, required = true)]
+        action: Vec<String>,
+        /// Fallback JSON input applied to each action when --action-input is omitted.
         #[arg(long, default_value = "{}")]
         inputs: String,
+        /// Per-action JSON input. Repeat once per --action, in the same order.
+        #[arg(long = "action-input")]
+        action_inputs: Vec<String>,
+        /// JSON ExecutionPrecondition. Repeat to add multiple preconditions.
+        #[arg(long)]
+        precondition: Vec<String>,
         #[arg(long, default_value = "cli")]
         actor: String,
     },
@@ -341,6 +349,14 @@ enum ExecuteCmd {
         #[arg(long)]
         investigation: String,
     },
+    /// List every immutable revision in a plan lineage.
+    Revisions {
+        #[arg(long)]
+        investigation: String,
+        /// Any plan snapshot in the lineage.
+        #[arg(long)]
+        plan: String,
+    },
     /// Show one execution plan.
     Show {
         #[arg(long)]
@@ -369,7 +385,7 @@ enum ExecuteCmd {
         #[arg(long, default_value = "cli")]
         actor: String,
     },
-    /// Trace plan → approval → attempt → receipt → verification.
+    /// Trace plan → approval → attempt → receipt → verification → implementation → outcome.
     Trace {
         #[arg(long)]
         investigation: String,
@@ -382,6 +398,38 @@ enum ExecuteCmd {
         investigation: String,
         #[arg(long)]
         plan: String,
+    },
+    /// Cancel a non-terminal execution plan.
+    Cancel {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        plan: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// Create a separate draft rollback plan from an attempt's explicit metadata.
+    RollbackPlan {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        attempt: String,
+        #[arg(long, default_value = "cli")]
+        actor: String,
+    },
+    /// List execution receipts for an Investigation.
+    Receipts {
+        #[arg(long)]
+        investigation: String,
+    },
+    /// Export one execution receipt as JSON.
+    ExportReceipt {
+        #[arg(long)]
+        investigation: String,
+        #[arg(long)]
+        receipt: String,
     },
     /// Export plan JSON.
     Export {
@@ -2954,9 +3002,41 @@ fn run() -> Result<(), String> {
                 environment,
                 action,
                 inputs,
+                action_inputs,
+                precondition,
                 actor,
             } => {
                 let inputs_val: serde_json::Value = serde_json::from_str(&inputs).map_err(err)?;
+                if !action_inputs.is_empty() && action_inputs.len() != action.len() {
+                    return Err(format!(
+                        "--action-input count ({}) must match --action count ({})",
+                        action_inputs.len(),
+                        action.len()
+                    ));
+                }
+                let action_values = if action_inputs.is_empty() {
+                    vec![inputs_val.clone(); action.len()]
+                } else {
+                    action_inputs
+                        .iter()
+                        .map(|value| serde_json::from_str(value).map_err(err))
+                        .collect::<Result<Vec<serde_json::Value>, String>>()?
+                };
+                let actions = action
+                    .into_iter()
+                    .zip(action_values)
+                    .enumerate()
+                    .map(|(index, (action_name, inputs))| ExecutionAction {
+                        action_id: format!("a{}", index + 1),
+                        action_name,
+                        inputs,
+                        continue_on_failure: false,
+                    })
+                    .collect();
+                let preconditions = precondition
+                    .iter()
+                    .map(|value| serde_json::from_str::<ExecutionPrecondition>(value).map_err(err))
+                    .collect::<Result<Vec<_>, String>>()?;
                 let plan = caps
                     .create_execution_plan(
                         parse_inv(&investigation)?,
@@ -2965,15 +3045,10 @@ fn run() -> Result<(), String> {
                             capability_id: capability,
                             target_system,
                             target_environment: environment,
-                            actions: vec![ExecutionAction {
-                                action_id: "a1".into(),
-                                action_name: action,
-                                inputs: inputs_val,
-                                continue_on_failure: false,
-                            }],
-                            inputs: serde_json::json!({}),
+                            actions,
+                            inputs: inputs_val,
                             expected_effects: vec![],
-                            preconditions: vec![],
+                            preconditions,
                             supports_dry_run: true,
                         },
                         actor,
@@ -3150,6 +3225,39 @@ fn run() -> Result<(), String> {
                     out
                 });
             }
+            ExecuteCmd::Revisions {
+                investigation,
+                plan,
+            } => {
+                let investigation_id = parse_inv(&investigation)?;
+                let snapshot = caps
+                    .get_execution_plan(investigation_id, parse_obj(&plan)?)
+                    .map_err(err)?;
+                let listing = caps
+                    .list_execution_plan_revisions(investigation_id, snapshot.lineage_id)
+                    .map_err(err)?;
+                print_value(cli.json, &listing, || {
+                    let mut out = listing
+                        .plans
+                        .iter()
+                        .map(|revision| {
+                            format!(
+                                "revision {}  {}  [{}]  capability={} target={}:{}",
+                                revision.revision_number,
+                                revision.id,
+                                revision.status.as_str(),
+                                revision.capability_id,
+                                revision.target_system,
+                                revision.target_environment
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    out.push('\n');
+                    out.push_str(EXECUTION_BOUNDARY);
+                    out
+                });
+            }
             ExecuteCmd::Show {
                 investigation,
                 plan,
@@ -3204,9 +3312,14 @@ fn run() -> Result<(), String> {
                     .map_err(err)?;
                 print_value(cli.json, &attempt, || {
                     format!(
-                        "Attempt {} [{}]\n  receipts: {}\n  errors: {}\n{}",
+                        "Attempt {} [{}]\n  completed: {:?}\n  failed: {:?}\n  skipped: {:?}\n  uncertain: {:?}\n  retry safety: {}\n  receipts: {}\n  errors: {}\n{}",
                         attempt.id,
                         attempt.status.as_str(),
+                        attempt.completed_actions,
+                        attempt.failed_actions,
+                        attempt.skipped_actions,
+                        attempt.uncertain_actions,
+                        attempt.retry_safety.as_str(),
                         attempt.receipt_ids.len(),
                         attempt.errors.join("; "),
                         EXECUTION_BOUNDARY
@@ -3245,13 +3358,22 @@ fn run() -> Result<(), String> {
                     .map_err(err)?;
                 print_value(cli.json, &trace, || {
                     format!(
-                        "Plan {} rev {} [{}]\n  approvals: {}\n  attempts: {}\n  receipts: {}\n  {}\n{}",
+                        "Plan {} rev {} [{}]\n  approvals: {}\n  attempts: {}\n  receipts: {}\n  verifications: {}\n  implementation record: {}\n  measured outcome: {}\n  {}\n{}",
                         trace.plan_id,
                         trace.plan_revision_number,
                         trace.plan_status.as_str(),
                         trace.approval_ids.len(),
                         trace.attempt_ids.len(),
                         trace.receipt_ids.len(),
+                        trace.verification_ids.len(),
+                        trace
+                            .implementation_record_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_else(|| "-".into()),
+                        trace
+                            .measured_outcome_id
+                            .map(|id| id.to_string())
+                            .unwrap_or_else(|| "-".into()),
                         trace.explanation,
                         EXECUTION_BOUNDARY
                     )
@@ -3275,6 +3397,85 @@ fn run() -> Result<(), String> {
                         EXECUTION_BOUNDARY
                     )
                 });
+            }
+            ExecuteCmd::Cancel {
+                investigation,
+                plan,
+                reason,
+                actor,
+            } => {
+                let plan = caps
+                    .cancel_execution_plan(
+                        parse_inv(&investigation)?,
+                        parse_obj(&plan)?,
+                        actor,
+                        reason,
+                    )
+                    .map_err(err)?;
+                print_value(cli.json, &plan, || {
+                    format!(
+                        "Cancelled plan {} rev {} [{}]\n{}",
+                        plan.id,
+                        plan.revision_number,
+                        plan.status.as_str(),
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::RollbackPlan {
+                investigation,
+                attempt,
+                actor,
+            } => {
+                let plan = caps
+                    .create_rollback_plan(parse_inv(&investigation)?, parse_obj(&attempt)?, actor)
+                    .map_err(err)?;
+                print_value(cli.json, &plan, || {
+                    format!(
+                        "Rollback plan {} rev {} [{}]\n  capability: {}\n  target: {}:{}\n  approval required before execution\n{}",
+                        plan.id,
+                        plan.revision_number,
+                        plan.status.as_str(),
+                        plan.capability_id,
+                        plan.target_system,
+                        plan.target_environment,
+                        EXECUTION_BOUNDARY
+                    )
+                });
+            }
+            ExecuteCmd::Receipts { investigation } => {
+                let listing = caps
+                    .list_execution_receipts(parse_inv(&investigation)?)
+                    .map_err(err)?;
+                print_value(cli.json, &listing, || {
+                    let mut out = listing
+                        .receipts
+                        .iter()
+                        .map(|receipt| {
+                            format!(
+                                "{} [{}] attempt={} action={} capability={}",
+                                receipt.id,
+                                receipt.result_status.as_str(),
+                                receipt.attempt_id,
+                                receipt.action_name,
+                                receipt.capability_id
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    out.push('\n');
+                    out.push_str(EXECUTION_BOUNDARY);
+                    out
+                });
+            }
+            ExecuteCmd::ExportReceipt {
+                investigation,
+                receipt,
+            } => {
+                let json = caps
+                    .export_execution_receipt(parse_inv(&investigation)?, parse_obj(&receipt)?)
+                    .map_err(err)?;
+                println!("{json}");
             }
             ExecuteCmd::Export {
                 investigation,
@@ -4028,11 +4229,14 @@ fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     let store = LocalStore::open(data_dir).map_err(err)?;
     let runtime = Arc::new(Runtime::new(Arc::new(store)));
     // Always register the in-process mock capability for local/tests.
-    runtime.register_execution_capability(Arc::new(MockExecutionCapability::new()));
+    runtime
+        .register_execution_capability(Arc::new(MockExecutionCapability::new()))
+        .map_err(err)?;
     // Optional GitHub bounded execution adapters (token from env; live still needs approval).
     if let Ok(repo) = std::env::var("RIVORA_GITHUB_REPO") {
         let token = std::env::var("GITHUB_TOKEN").ok();
-        register_github_execution_capabilities(runtime.execution_registry(), repo, token);
+        register_github_execution_capabilities(runtime.execution_registry(), repo, token)
+            .map_err(err)?;
     }
     Ok(CapabilityService::new(runtime))
 }

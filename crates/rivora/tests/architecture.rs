@@ -197,6 +197,40 @@ fn measured_outcome_is_not_recommendation_disposition_learning_outcome() {
     );
 }
 
+/// Runtime never guesses rollback inverses from supported_actions order.
+#[test]
+fn rollback_derivation_never_uses_supported_actions_first() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runtime = std::fs::read_to_string(manifest_dir.join("src/runtime/execution.rs")).unwrap();
+    let create_fn = runtime
+        .find("pub fn create_rollback_plan")
+        .expect("create_rollback_plan must exist");
+    let next_fn = runtime[create_fn + 1..]
+        .find("\n    pub fn ")
+        .map(|offset| create_fn + 1 + offset)
+        .unwrap_or(runtime.len());
+    let body = &runtime[create_fn..next_fn];
+    for forbidden in [
+        "supported_actions.first()",
+        "supported_actions.first(",
+        ".supported_actions\n                    .first(",
+        "descriptor().supported_actions.first",
+    ] {
+        assert!(
+            !body.contains(forbidden),
+            "create_rollback_plan must never guess inverses via `{forbidden}`"
+        );
+    }
+    assert!(
+        body.contains("inverse_action_name"),
+        "create_rollback_plan must require explicit inverse_action_name from receipts"
+    );
+    assert!(
+        body.contains("Draft") || body.contains("status"),
+        "rollback plans must remain draft-only"
+    );
+}
+
 /// v0.6 execution requires explicit approval; proposal acceptance must not execute.
 #[test]
 fn execution_requires_approval_and_not_proposal_acceptance() {
@@ -227,6 +261,31 @@ fn execution_requires_approval_and_not_proposal_acceptance() {
             "execution runtime must not contain autonomous primitive `{forbidden}`"
         );
     }
+}
+
+/// v0.6 authority is bound to an immutable target and Started is durable before mutation.
+#[test]
+fn execution_authority_and_durability_are_runtime_owned() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let domain = std::fs::read_to_string(manifest_dir.join("src/domain/execution.rs")).unwrap();
+    let runtime = std::fs::read_to_string(manifest_dir.join("src/runtime/execution.rs")).unwrap();
+
+    assert!(
+        domain.contains("struct TargetSnapshot")
+            && domain.contains("pub target_snapshot: Option<TargetSnapshot>"),
+        "Plans, Approvals, and Attempts must preserve immutable target authority"
+    );
+
+    let persist_started = runtime
+        .find("append_execution_attempt(&started)")
+        .expect("Runtime must persist a Started Attempt");
+    let invoke_adapter = runtime
+        .find("cap.execute(&invocation)")
+        .expect("Runtime must own bounded adapter invocation");
+    assert!(
+        persist_started < invoke_adapter,
+        "Runtime must durably persist Started before invoking an external mutation"
+    );
 }
 
 /// CLI and Workspace must not call GitHub mutation APIs directly.

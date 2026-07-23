@@ -7,15 +7,17 @@
 use chrono::{DateTime, Utc};
 
 use crate::domain::{
-    evaluate_execution_policy, verification_confidence, CapabilityInvocation, CapabilityStateQuery,
+    evaluate_execution_policy, verification_confidence, CapabilityExecutionStatus,
+    CapabilityInvocation, CapabilityStateQuery, CapabilityTarget, CapabilityVerificationStatus,
     DryRunResult, ExecutionAction, ExecutionApproval, ExecutionAttempt, ExecutionAttemptListing,
-    ExecutionAttemptStatus, ExecutionCapabilityDescriptor, ExecutionCapabilityRegistry,
-    ExecutionCheckResult, ExecutionPlan, ExecutionPlanListing, ExecutionPlanStatus,
-    ExecutionPolicyDecision, ExecutionPolicyDecisionKind, ExecutionPrecondition, ExecutionReceipt,
-    ExecutionReceiptListing, ExecutionReceiptResult, ExecutionTrace, ExecutionVerification,
-    ExecutionVerificationStatus, ExpectedEffect, ImplementationRecord, ImplementationReference,
-    ImplementationSource, InvestigationId, ObjectId, ProposalStatus, Provenance, RetrySafety,
-    RollbackMetadata, SanitizationMetadata,
+    ExecutionAttemptStatus, ExecutionCapability, ExecutionCapabilityDescriptor,
+    ExecutionCapabilityRegistry, ExecutionCheckResult, ExecutionPlan, ExecutionPlanListing,
+    ExecutionPlanStatus, ExecutionPolicyDecision, ExecutionPolicyDecisionKind,
+    ExecutionPrecondition, ExecutionReceipt, ExecutionReceiptListing, ExecutionReceiptResult,
+    ExecutionTrace, ExecutionVerification, ExecutionVerificationStatus, ExpectedEffect,
+    ImplementationRecord, ImplementationReference, ImplementationSource, InvestigationId, ObjectId,
+    ProposalStatus, Provenance, RetrySafety, RollbackMetadata, SanitizationMetadata,
+    TargetSnapshot,
 };
 use crate::error::{RivoraError, RivoraResult};
 use crate::runtime::Runtime;
@@ -67,8 +69,8 @@ impl Runtime {
     pub fn register_execution_capability(
         &self,
         capability: std::sync::Arc<dyn crate::domain::ExecutionCapability>,
-    ) {
-        self.execution_registry.register(capability);
+    ) -> RivoraResult<()> {
+        self.execution_registry.register(capability)
     }
 
     /// Access the execution capability registry.
@@ -137,6 +139,20 @@ impl Runtime {
         // Attach capability defaults when registered.
         if let Some(cap) = self.execution_registry.get(&plan.capability_id) {
             let desc = cap.descriptor();
+            let target = self.resolve_plan_target(&plan, cap.as_ref())?;
+            plan.target_snapshot = Some(TargetSnapshot::bind(&plan, target.clone()));
+            plan.scope_restrictions.repositories = target
+                .owner
+                .as_ref()
+                .zip(target.repository.as_ref())
+                .map(|(owner, repository)| vec![format!("{owner}/{repository}")])
+                .unwrap_or_default();
+            plan.scope_restrictions.action_names = plan
+                .actions
+                .iter()
+                .map(|action| action.action_name.clone())
+                .collect();
+            plan.scope_restrictions.max_actions = Some(20);
             plan.supports_dry_run = plan.supports_dry_run && desc.supports_dry_run;
             if plan.verification_plan.checks.is_empty() {
                 plan.verification_plan.checks = desc
@@ -210,11 +226,52 @@ impl Runtime {
             }
             next.target_system = sys;
         }
+        if let Some(capability) = self.execution_registry.get(&next.capability_id) {
+            let target = self.resolve_plan_target(&next, capability.as_ref())?;
+            next.target_snapshot = Some(TargetSnapshot::bind(&next, target.clone()));
+            next.scope_restrictions.repositories = target
+                .owner
+                .as_ref()
+                .zip(target.repository.as_ref())
+                .map(|(owner, repository)| vec![format!("{owner}/{repository}")])
+                .unwrap_or_default();
+            next.scope_restrictions.action_names = next
+                .actions
+                .iter()
+                .map(|action| action.action_name.clone())
+                .collect();
+            next.scope_restrictions.max_actions = Some(20);
+        } else {
+            next.target_snapshot = None;
+        }
         next.last_policy_decision = Some(self.evaluate_plan_policy(&next));
+        if current.status == ExecutionPlanStatus::Approved {
+            let mut superseded = current.transitioned(
+                ExecutionPlanStatus::Superseded,
+                &actor,
+                format!(
+                    "superseded by edited plan revision {}",
+                    next.revision_number.saturating_add(1)
+                ),
+                Utc::now(),
+            )?;
+            next.parent_plan_id = Some(superseded.id);
+            next.revision_number = superseded.revision_number.saturating_add(1);
+            next.target_snapshot = next
+                .target_snapshot
+                .as_ref()
+                .map(|target| target.rebound_to(next.id, next.revision_number));
+            superseded.superseding_plan_id = Some(next.id);
+            self.store.append_execution_plan(&superseded)?;
+        }
         self.store.append_execution_plan(&next)?;
 
         // Invalidate approvals that pointed at the prior snapshot.
-        for approval in self.store.list_execution_approvals(&investigation_id)? {
+        for approval in self
+            .store
+            .list_execution_approvals(&investigation_id)?
+            .approvals
+        {
             if approval.plan_id == plan_id && !approval.invalidated {
                 let invalidated = approval.invalidate(format!(
                     "plan revised to snapshot {} (revision {})",
@@ -249,19 +306,21 @@ impl Runtime {
             )));
         }
 
+        let capability = self
+            .execution_registry
+            .get(&plan.capability_id)
+            .ok_or_else(|| {
+                RivoraError::precondition(format!(
+                    "capability `{}` is not registered",
+                    plan.capability_id
+                ))
+            })?;
+        let target = self.validate_plan_contract(&plan, capability.as_ref())?;
         let policy = self.evaluate_plan_policy(&plan);
         if policy.decision == ExecutionPolicyDecisionKind::Denied {
             return Err(RivoraError::precondition(format!(
                 "policy denied plan: {}",
                 policy.reasons.join("; ")
-            )));
-        }
-
-        // Capability must be registered for validation to ReadyForReview for live paths.
-        if self.execution_registry.get(&plan.capability_id).is_none() {
-            return Err(RivoraError::precondition(format!(
-                "capability `{}` is not registered",
-                plan.capability_id
             )));
         }
 
@@ -289,6 +348,19 @@ impl Runtime {
                 });
             successor
         };
+        next.target_snapshot = Some(TargetSnapshot::bind(&next, target.clone()));
+        next.scope_restrictions.repositories = target
+            .owner
+            .as_ref()
+            .zip(target.repository.as_ref())
+            .map(|(owner, repository)| vec![format!("{owner}/{repository}")])
+            .unwrap_or_default();
+        next.scope_restrictions.action_names = next
+            .actions
+            .iter()
+            .map(|action| action.action_name.clone())
+            .collect();
+        next.scope_restrictions.max_actions = Some(20);
         next.last_policy_decision = Some(policy);
         self.store.append_execution_plan(&next)?;
         Ok(next)
@@ -522,44 +594,17 @@ impl Runtime {
         let actor = require_actor(actor)?;
         let idempotency_key = {
             let k = idempotency_key.into().trim().to_string();
-            if k.is_empty() {
-                return Err(RivoraError::validation("idempotency_key must not be empty"));
+            if k.is_empty() || k.len() > 256 || k.chars().any(char::is_control) {
+                return Err(RivoraError::validation(
+                    "idempotency_key must be a non-empty bounded printable value",
+                ));
             }
             k
         };
-
-        // Namespace dry-run keys so dry-run never suppresses live execution.
-        let effective_key = if dry_run {
-            format!("dry-run:{idempotency_key}")
-        } else {
-            idempotency_key.clone()
-        };
-
-        // Idempotent replay must run before head/approval checks so retries of a
-        // completed attempt do not require the plan to remain Approved.
-        if let Some(existing) =
-            self.find_attempt_by_idempotency(investigation_id, &effective_key)?
-        {
-            if existing.dry_run != dry_run {
-                return Err(RivoraError::precondition(format!(
-                    "idempotency key collides with attempt {} under a different dry_run mode",
-                    existing.id
-                )));
-            }
-            if let Ok(p) = self.store.load_execution_plan(&investigation_id, &plan_id) {
-                if existing.plan_id == plan_id || existing.plan_lineage_id == p.lineage_id {
-                    return Ok(existing);
-                }
-            } else if existing.plan_id == plan_id {
-                return Ok(existing);
-            }
-            return Err(RivoraError::precondition(format!(
-                "idempotency key already used for attempt {} on a different plan",
-                existing.id
-            )));
-        }
-
-        self.ensure_plan_head(investigation_id, plan_id)?;
+        let effective_key = format!(
+            "mode={};key={idempotency_key}",
+            if dry_run { "dry_run" } else { "live" }
+        );
         let plan = self
             .store
             .load_execution_plan(&investigation_id, &plan_id)?;
@@ -567,8 +612,65 @@ impl Runtime {
             .store
             .load_execution_approval(&investigation_id, &approval_id)?;
 
+        // A duplicate request is a new durable trace record, but it never invokes
+        // the adapter. Keys bind the exact Plan snapshot, capability, target, and mode.
+        if let Some(existing) =
+            self.find_attempt_by_idempotency(investigation_id, &effective_key)?
+        {
+            if existing.plan_id != plan.id
+                || existing.capability_id != plan.capability_id
+                || existing.target_snapshot != plan.target_snapshot
+                || existing.dry_run != dry_run
+            {
+                return Err(RivoraError::precondition(format!(
+                    "idempotency key is already reserved by attempt {} for a different exact execution",
+                    existing.id
+                )));
+            }
+            let existing = if existing.status == ExecutionAttemptStatus::Started {
+                let mut recovered = existing.revised(
+                    Provenance::now(&actor, "runtime")
+                        .with_capability("recover_interrupted_execution")
+                        .with_evidence(vec![existing.id]),
+                );
+                recovered.status = ExecutionAttemptStatus::PartiallyCompleted;
+                recovered.uncertain_actions = recovered.requested_actions.clone();
+                recovered.errors.push(
+                    "process interruption left the external mutation outcome uncertain".into(),
+                );
+                recovered.finished_at = Some(Utc::now());
+                recovered.retry_safety = RetrySafety::Unsafe;
+                recovered.recommended_next_action = Some(
+                    "independently observe external state before authoring any new plan".into(),
+                );
+                self.store.append_execution_attempt(&recovered)?;
+                recovered
+            } else {
+                existing
+            };
+            let mut duplicate = ExecutionAttempt::start(
+                &plan,
+                &approval,
+                &actor,
+                &effective_key,
+                dry_run,
+                Provenance::now(&actor, "runtime")
+                    .with_capability("suppress_duplicate_execution")
+                    .with_evidence(vec![existing.id]),
+            )?;
+            duplicate.status = ExecutionAttemptStatus::DuplicateSuppressed;
+            duplicate.duplicate_of_attempt_id = Some(existing.id);
+            duplicate.finished_at = Some(Utc::now());
+            duplicate.retry_safety = existing.retry_safety;
+            duplicate.recommended_next_action =
+                Some("inspect the original durable Attempt; no mutation was repeated".into());
+            self.store.append_execution_attempt(&duplicate)?;
+            return Ok(duplicate);
+        }
+
+        self.ensure_plan_head(investigation_id, plan_id)?;
+
         if dry_run {
-            // Dry-run attempt does not require approval consumption; still validates policy.
             let policy = self.evaluate_plan_policy(&plan);
             if !policy.dry_run_permitted {
                 return Err(RivoraError::precondition(format!(
@@ -577,7 +679,7 @@ impl Runtime {
                 )));
             }
             let preview = self.preview_execution_plan(investigation_id, plan_id)?;
-            let mut attempt = ExecutionAttempt::start(
+            let started = ExecutionAttempt::start(
                 &plan,
                 &approval,
                 &actor,
@@ -585,6 +687,12 @@ impl Runtime {
                 true,
                 Provenance::now(&actor, "runtime").with_capability("execute_plan"),
             )?;
+            self.store.append_execution_attempt(&started)?;
+            let mut attempt = started.revised(
+                Provenance::now(&actor, "runtime")
+                    .with_capability("complete_dry_run")
+                    .with_evidence(vec![started.id]),
+            );
             attempt.status = ExecutionAttemptStatus::Completed;
             attempt.completed_actions = attempt.requested_actions.clone();
             attempt.finished_at = Some(Utc::now());
@@ -596,7 +704,6 @@ impl Runtime {
             return Ok(attempt);
         }
 
-        // Live execution requires Approved plan + valid approval.
         if plan.status != ExecutionPlanStatus::Approved {
             return Err(RivoraError::precondition(format!(
                 "live execution requires approved plan; got {}",
@@ -625,34 +732,65 @@ impl Runtime {
                     plan.capability_id
                 ))
             })?;
+        self.validate_plan_contract(&plan, cap.as_ref())?;
 
-        // Evaluate plan-level preconditions marked unsatisfied.
-        let failed_pre: Vec<_> = plan
+        // Reserve the exact execution durably before checking dynamic preconditions.
+        let started = ExecutionAttempt::start(
+            &plan,
+            &approval,
+            &actor,
+            &effective_key,
+            false,
+            Provenance::now(&actor, "runtime").with_capability("execute_plan"),
+        )?;
+        self.store.append_execution_attempt(&started)?;
+
+        let mut blocked_errors: Vec<String> = plan
             .preconditions
             .iter()
-            .filter(|p| p.satisfied == Some(false))
-            .cloned()
+            .filter(|precondition| precondition.satisfied != Some(true))
+            .map(|precondition| {
+                format!(
+                    "precondition {}: {}",
+                    precondition.id,
+                    precondition
+                        .detail
+                        .clone()
+                        .unwrap_or_else(|| precondition.description.clone())
+                )
+            })
             .collect();
-        if !failed_pre.is_empty() {
-            let mut attempt = ExecutionAttempt::start(
-                &plan,
-                &approval,
-                &actor,
-                &effective_key,
-                false,
-                Provenance::now(&actor, "runtime").with_capability("execute_plan"),
-            )?;
+        for action in &plan.actions {
+            if !approval.approved_actions.is_empty()
+                && !approval.approved_actions.contains(&action.action_id)
+            {
+                continue;
+            }
+            if approval.denied_actions.contains(&action.action_id) {
+                continue;
+            }
+            let invocation = CapabilityInvocation {
+                capability_id: plan.capability_id.clone(),
+                action_name: action.action_name.clone(),
+                action_id: action.action_id.clone(),
+                inputs: merge_inputs(&plan.inputs, &action.inputs),
+                environment: plan.target_environment.clone(),
+                idempotency_key: format!("{};action={}", effective_key, action.action_id),
+                investigation_id: investigation_id.to_string(),
+                plan_id: plan.id.to_string(),
+            };
+            if let Err(error) = cap.validate_preconditions(&invocation) {
+                blocked_errors.push(error.to_string());
+            }
+        }
+        if !blocked_errors.is_empty() {
+            let mut attempt = started.revised(
+                Provenance::now(&actor, "runtime")
+                    .with_capability("block_execution_attempt")
+                    .with_evidence(vec![started.id]),
+            );
             attempt.status = ExecutionAttemptStatus::Blocked;
-            attempt.errors = failed_pre
-                .iter()
-                .map(|p| {
-                    format!(
-                        "precondition {}: {}",
-                        p.id,
-                        p.detail.clone().unwrap_or_else(|| p.description.clone())
-                    )
-                })
-                .collect();
+            attempt.errors = blocked_errors;
             attempt.finished_at = Some(Utc::now());
             attempt.retry_safety = RetrySafety::ConditionallySafe;
             attempt.recommended_next_action =
@@ -661,7 +799,11 @@ impl Runtime {
             return Ok(attempt);
         }
 
-        // Transition plan to Executing.
+        // Consume one-time authority and persist Executing before external mutation.
+        if approval.one_time {
+            self.store
+                .save_execution_approval(&approval.mark_consumed())?;
+        }
         let mut executing = plan.transitioned(
             ExecutionPlanStatus::Executing,
             &actor,
@@ -671,21 +813,14 @@ impl Runtime {
         executing.last_policy_decision = Some(policy);
         self.store.append_execution_plan(&executing)?;
 
-        // Note: approval bound to Approved snapshot; after transition approval is stale for
-        // the new Executing snapshot by design. Validity for execute is checked against the
-        // Approved plan before transition. We keep approval.plan_id == plan.id (Approved).
-
-        let mut attempt = ExecutionAttempt::start(
-            &plan,
-            &approval,
-            &actor,
-            &effective_key,
-            false,
-            Provenance::now(&actor, "runtime").with_capability("execute_plan"),
-        )?;
-
+        let mut attempt = started.revised(
+            Provenance::now(&actor, "runtime")
+                .with_capability("complete_execution_attempt")
+                .with_evidence(vec![started.id]),
+        );
         let mut any_success = false;
         let mut any_failure = false;
+        let mut any_uncertain = false;
         let mut stop = false;
 
         for action in &plan.actions {
@@ -710,25 +845,25 @@ impl Runtime {
                 action_id: action.action_id.clone(),
                 inputs: merge_inputs(&plan.inputs, &action.inputs),
                 environment: plan.target_environment.clone(),
-                idempotency_key: format!("{}:{}", effective_key, action.action_id),
+                idempotency_key: format!("{};action={}", effective_key, action.action_id),
                 investigation_id: investigation_id.to_string(),
                 plan_id: plan.id.to_string(),
             };
 
             match cap.execute(&invocation) {
                 Ok(result) => {
-                    if result.duplicate_suppressed {
-                        attempt.status = ExecutionAttemptStatus::DuplicateSuppressed;
-                    }
-                    let receipt_status = match result.result_status.as_str() {
-                        "success" => ExecutionReceiptResult::Success,
-                        "partial" => ExecutionReceiptResult::Partial,
-                        "uncertain" => ExecutionReceiptResult::Uncertain,
-                        _ => ExecutionReceiptResult::Failed,
+                    let receipt_status = match result.status {
+                        CapabilityExecutionStatus::Success
+                        | CapabilityExecutionStatus::DuplicateSuppressed => {
+                            ExecutionReceiptResult::Success
+                        }
+                        CapabilityExecutionStatus::Partial => ExecutionReceiptResult::Partial,
+                        CapabilityExecutionStatus::Uncertain => ExecutionReceiptResult::Uncertain,
+                        CapabilityExecutionStatus::Failed => ExecutionReceiptResult::Failed,
                     };
                     let receipt = ExecutionReceipt {
                         id: ObjectId::new(),
-                        attempt_id: attempt.id,
+                        attempt_id: attempt.lineage_id(),
                         investigation_id,
                         capability_id: plan.capability_id.clone(),
                         target_system: plan.target_system.clone(),
@@ -761,28 +896,79 @@ impl Runtime {
                     attempt
                         .external_references
                         .extend(result.external_identifiers);
-                    if result.success {
-                        any_success = true;
-                        attempt.completed_actions.push(action.action_id.clone());
-                        if result.rollback.available {
-                            attempt.rollback = result.rollback;
+                    match result.status {
+                        CapabilityExecutionStatus::Success
+                        | CapabilityExecutionStatus::DuplicateSuppressed => {
+                            any_success = true;
+                            attempt.completed_actions.push(action.action_id.clone());
+                            if result.rollback.available {
+                                attempt.rollback.available = true;
+                            }
                         }
-                    } else {
-                        any_failure = true;
-                        attempt.failed_actions.push(action.action_id.clone());
-                        if let Some(err) = result.error {
-                            attempt.errors.push(err);
+                        CapabilityExecutionStatus::Failed => {
+                            any_failure = true;
+                            attempt.failed_actions.push(action.action_id.clone());
                         }
-                        if !action.continue_on_failure {
-                            stop = true;
+                        CapabilityExecutionStatus::Partial
+                        | CapabilityExecutionStatus::Uncertain => {
+                            any_uncertain = true;
+                            attempt.uncertain_actions.push(action.action_id.clone());
                         }
+                    }
+                    if let Some(err) = result.error {
+                        attempt.errors.push(err);
+                    }
+                    if !matches!(
+                        result.status,
+                        CapabilityExecutionStatus::Success
+                            | CapabilityExecutionStatus::DuplicateSuppressed
+                    ) && !action.continue_on_failure
+                    {
+                        stop = true;
                     }
                     self.store.append_execution_receipt(&receipt)?;
                 }
                 Err(err) => {
-                    any_failure = true;
-                    attempt.failed_actions.push(action.action_id.clone());
+                    // An unexpected adapter error after invocation may have occurred
+                    // after submission. Conservatively retain it as uncertain.
+                    any_uncertain = true;
+                    attempt.uncertain_actions.push(action.action_id.clone());
                     attempt.errors.push(err.to_string());
+                    let receipt = ExecutionReceipt {
+                        id: ObjectId::new(),
+                        attempt_id: attempt.lineage_id(),
+                        investigation_id,
+                        capability_id: plan.capability_id.clone(),
+                        target_system: plan.target_system.clone(),
+                        action_name: action.action_name.clone(),
+                        action_id: action.action_id.clone(),
+                        request_summary: format!("invoke {}", action.action_name),
+                        response_summary: "adapter outcome uncertain".into(),
+                        changed_resources: vec![],
+                        unchanged_resources: vec![],
+                        external_identifiers: vec![],
+                        result_status: ExecutionReceiptResult::Uncertain,
+                        warnings: vec!["do not retry until independently observed".into()],
+                        rollback_metadata: RollbackMetadata::default(),
+                        verification_requirements: vec![
+                            "determine whether the external mutation occurred".into(),
+                        ],
+                        raw_evidence_refs: vec![],
+                        sanitization: SanitizationMetadata {
+                            redacted_keys: vec![
+                                "token".into(),
+                                "authorization".into(),
+                                "password".into(),
+                                "secret".into(),
+                            ],
+                            raw_body_discarded: true,
+                        },
+                        provenance: Provenance::now(&actor, "runtime")
+                            .with_capability("record_uncertain_execution_receipt"),
+                        created_at: Utc::now(),
+                    };
+                    attempt.receipt_ids.push(receipt.id);
+                    self.store.append_execution_receipt(&receipt)?;
                     if !action.continue_on_failure {
                         stop = true;
                     }
@@ -791,21 +977,27 @@ impl Runtime {
         }
 
         attempt.finished_at = Some(Utc::now());
-        attempt.status = match (any_success, any_failure) {
-            (true, false) => ExecutionAttemptStatus::Completed,
-            (true, true) => ExecutionAttemptStatus::PartiallyCompleted,
-            (false, true) => ExecutionAttemptStatus::Failed,
-            (false, false) => ExecutionAttemptStatus::Blocked,
+        attempt.status = match (any_success, any_failure, any_uncertain) {
+            (true, false, false) if attempt.skipped_actions.is_empty() => {
+                ExecutionAttemptStatus::Completed
+            }
+            (true, _, _) | (_, _, true) => ExecutionAttemptStatus::PartiallyCompleted,
+            (false, true, false) => ExecutionAttemptStatus::Failed,
+            (false, false, false) => ExecutionAttemptStatus::Blocked,
         };
-        attempt.retry_safety = match attempt.status {
-            ExecutionAttemptStatus::Completed | ExecutionAttemptStatus::DuplicateSuppressed => {
-                RetrySafety::Safe
+        attempt.retry_safety = if any_uncertain {
+            RetrySafety::Unsafe
+        } else {
+            match attempt.status {
+                ExecutionAttemptStatus::Completed | ExecutionAttemptStatus::DuplicateSuppressed => {
+                    RetrySafety::Safe
+                }
+                ExecutionAttemptStatus::PartiallyCompleted => RetrySafety::Unsafe,
+                ExecutionAttemptStatus::Failed | ExecutionAttemptStatus::Blocked => {
+                    RetrySafety::Unknown
+                }
+                ExecutionAttemptStatus::Started => RetrySafety::Unknown,
             }
-            ExecutionAttemptStatus::PartiallyCompleted => RetrySafety::Unsafe,
-            ExecutionAttemptStatus::Failed | ExecutionAttemptStatus::Blocked => {
-                RetrySafety::Unknown
-            }
-            ExecutionAttemptStatus::Started => RetrySafety::Unknown,
         };
         attempt.recommended_next_action = Some(match attempt.status {
             ExecutionAttemptStatus::Completed => "verify_execution_attempt".into(),
@@ -822,13 +1014,6 @@ impl Runtime {
             ExecutionAttemptStatus::Started => "wait for completion".into(),
         });
 
-        // Consume one-time approval after live attempt starts completing.
-        if approval.one_time {
-            let consumed = approval.mark_consumed();
-            self.store.save_execution_approval(&consumed)?;
-        }
-
-        // Update plan status from Executing.
         let plan_status = match attempt.status {
             ExecutionAttemptStatus::Completed | ExecutionAttemptStatus::DuplicateSuppressed => {
                 ExecutionPlanStatus::Executed
@@ -867,6 +1052,17 @@ impl Runtime {
                 "cannot verify a dry-run attempt as live execution",
             ));
         }
+        if matches!(
+            attempt.status,
+            ExecutionAttemptStatus::Started
+                | ExecutionAttemptStatus::Blocked
+                | ExecutionAttemptStatus::DuplicateSuppressed
+        ) {
+            return Err(RivoraError::validation(format!(
+                "cannot verify an attempt in status {}",
+                attempt.status.as_str()
+            )));
+        }
         let plan = self
             .store
             .load_execution_plan(&investigation_id, &attempt.plan_id)?;
@@ -884,7 +1080,7 @@ impl Runtime {
         let attempt_receipts: Vec<_> = receipts
             .receipts
             .into_iter()
-            .filter(|r| r.attempt_id == attempt.id)
+            .filter(|r| r.attempt_id == attempt.lineage_id())
             .collect();
 
         let mut checks = plan.verification_plan.checks.clone();
@@ -920,12 +1116,21 @@ impl Runtime {
             let observation = cap.observe_state(&query)?;
             evidence.push(observation.summary.clone());
 
-            // API success but empty observation is a contradiction.
-            if receipt.result_status == ExecutionReceiptResult::Success && !observation.observed {
-                contradictions.push(format!(
-                    "receipt {} reported success but independent observation failed",
+            let capability_passed = observation.verification_status
+                == CapabilityVerificationStatus::Passed
+                && observation.observed
+                && observation.error.is_none();
+            match observation.verification_status {
+                CapabilityVerificationStatus::Passed if capability_passed => {}
+                CapabilityVerificationStatus::Passed => contradictions.push(format!(
+                    "receipt {} returned an internally inconsistent passing observation",
                     receipt.id
-                ));
+                )),
+                CapabilityVerificationStatus::Failed => contradictions.push(format!(
+                    "receipt {} postcondition contradicted: {}",
+                    receipt.id, observation.summary
+                )),
+                CapabilityVerificationStatus::Inconclusive => {}
             }
 
             // Expected fields from plan effects.
@@ -933,7 +1138,7 @@ impl Runtime {
                 for (field, expected) in &effect.expected_fields {
                     let actual = observation.fields.get(field).cloned().unwrap_or_default();
                     let passed = actual == *expected;
-                    if !passed && receipt.result_status == ExecutionReceiptResult::Success {
+                    if !passed {
                         contradictions
                             .push(format!("expected {field}={expected}, observed {actual:?}"));
                     }
@@ -946,16 +1151,19 @@ impl Runtime {
                 }
             }
 
-            // Default check: success receipts must produce at least one external id or changed resource.
-            let basic_ok = receipt.result_status != ExecutionReceiptResult::Success
-                || !receipt.external_identifiers.is_empty()
-                || !receipt.changed_resources.is_empty()
-                || observation.observed;
             results.push(ExecutionCheckResult {
                 check: format!("receipt:{}", receipt.action_id),
-                passed: basic_ok && contradictions.is_empty(),
-                detail: receipt.response_summary.clone(),
-                evidence: receipt.raw_evidence_refs.clone(),
+                passed: capability_passed,
+                detail: format!(
+                    "{}; independent observation: {}",
+                    receipt.response_summary, observation.summary
+                ),
+                evidence: receipt
+                    .raw_evidence_refs
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(observation.resource_key))
+                    .collect(),
             });
         }
 
@@ -970,8 +1178,17 @@ impl Runtime {
 
         let passed = results.iter().filter(|r| r.passed).count();
         let total = results.len();
-        let status = if !contradictions.is_empty() {
+        let has_inconclusive = attempt_receipts.iter().enumerate().any(|(index, _)| {
+            results
+                .iter()
+                .filter(|result| result.check.starts_with("receipt:"))
+                .nth(index)
+                .is_some_and(|result| !result.passed)
+        }) && contradictions.is_empty();
+        let status = if !attempt.failed_actions.is_empty() || !contradictions.is_empty() {
             ExecutionVerificationStatus::Failed
+        } else if has_inconclusive || !attempt.uncertain_actions.is_empty() && passed != total {
+            ExecutionVerificationStatus::Inconclusive
         } else if passed == total {
             ExecutionVerificationStatus::Passed
         } else if passed == 0 {
@@ -980,9 +1197,18 @@ impl Runtime {
             ExecutionVerificationStatus::Inconclusive
         };
 
+        let prior_verifications = self
+            .store
+            .list_execution_verifications(&investigation_id)?
+            .verifications;
+        let prior = prior_verifications
+            .iter()
+            .filter(|verification| verification.attempt_id == attempt.lineage_id())
+            .max_by_key(|verification| verification.revision);
         let verification = ExecutionVerification {
             id: ObjectId::new(),
-            attempt_id: attempt.id,
+            parent_verification_id: prior.map(|verification| verification.id),
+            attempt_id: attempt.lineage_id(),
             receipt_ids: attempt_receipts.iter().map(|r| r.id).collect(),
             investigation_id,
             checks,
@@ -996,7 +1222,9 @@ impl Runtime {
             provenance: Provenance::now(&actor, "runtime")
                 .with_capability("verify_execution_attempt"),
             created_at: Utc::now(),
-            revision: 1,
+            revision: prior
+                .map(|verification| verification.revision.saturating_add(1))
+                .unwrap_or(1),
         };
         self.store.append_execution_verification(&verification)?;
 
@@ -1073,6 +1301,22 @@ impl Runtime {
         let plan = self
             .store
             .load_execution_plan(&investigation_id, &attempt.plan_id)?;
+        let attempt_lineage_id = attempt.lineage_id();
+        let implementations = self.store.list_implementation_records(&investigation_id)?;
+        if let Some(existing) = implementations.records.into_iter().find(|record| {
+            record.references.iter().any(|reference| {
+                matches!(
+                    reference,
+                    ImplementationReference::ExecutionAttempt { attempt_id }
+                        if *attempt_id == attempt_lineage_id
+                )
+            })
+        }) {
+            return Err(RivoraError::precondition(format!(
+                "execution attempt {} is already linked to implementation record {}",
+                attempt_lineage_id, existing.id
+            )));
+        }
         let mut refs: Vec<ImplementationReference> = attempt
             .external_references
             .iter()
@@ -1088,6 +1332,9 @@ impl Runtime {
                 }
             })
             .collect();
+        refs.push(ImplementationReference::ExecutionAttempt {
+            attempt_id: attempt_lineage_id,
+        });
         refs.push(ImplementationReference::HumanNote {
             note: format!(
                 "linked from execution attempt {} plan {} capability {}",
@@ -1114,7 +1361,15 @@ impl Runtime {
         )
     }
 
-    /// Create a rollback plan draft from an attempt's rollback metadata.
+    /// Create a rollback plan draft from an attempt's explicit receipt inverses.
+    ///
+    /// Rule: **no explicit, validated inverse → no executable rollback Plan**.
+    /// Runtime never guesses an inverse from `supported_actions` order, naming,
+    /// or capability registration order. Inverses originate only from immutable
+    /// Execution Receipt metadata emitted by capabilities after a real mutation.
+    ///
+    /// The resulting Plan is always Draft. It inherits neither approval nor
+    /// execution from the original Attempt.
     pub fn create_rollback_plan(
         &self,
         investigation_id: InvestigationId,
@@ -1125,108 +1380,174 @@ impl Runtime {
         let attempt = self
             .store
             .load_execution_attempt(&investigation_id, &attempt_id)?;
-        if !attempt.rollback.available {
-            return Err(RivoraError::precondition(
-                "rollback is not available for this attempt",
-            ));
-        }
-        let plan = self
+        let source_plan = self
             .store
             .load_execution_plan(&investigation_id, &attempt.plan_id)?;
-        let capability_id = attempt
-            .rollback
-            .capability_id
-            .clone()
-            .unwrap_or_else(|| plan.capability_id.clone());
-        let mut inputs = attempt
-            .rollback
-            .inputs
-            .clone()
-            .unwrap_or_else(|| serde_json::json!({}));
-        // Prefer an explicit inverse action from rollback metadata; otherwise pick a
-        // capability-supported action (never hardcode mock-only names for GitHub).
-        let action_name = inputs
-            .get("inverse")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .or_else(|| {
-                self.execution_registry
-                    .get(&capability_id)
-                    .and_then(|c| c.descriptor().supported_actions.first().cloned())
-            })
-            .ok_or_else(|| {
-                RivoraError::precondition(format!(
-                    "cannot derive rollback action for capability `{capability_id}`"
-                ))
-            })?;
-        // Drop the inverse helper field from action inputs if present.
-        if let Some(obj) = inputs.as_object_mut() {
-            obj.remove("inverse");
-        }
-        let risks: Vec<crate::domain::ExecutionRisk> = attempt
-            .rollback
-            .risks
-            .iter()
-            .map(|r| crate::domain::ExecutionRisk {
-                description: r.clone(),
-                severity: "medium".into(),
-                mitigation: "explicit approval required; no automatic rollback".into(),
+        let receipts = self.store.list_execution_receipts(&investigation_id)?;
+        let mut rollback_receipts: Vec<_> = receipts
+            .receipts
+            .into_iter()
+            .filter(|receipt| {
+                receipt.attempt_id == attempt.lineage_id()
+                    && attempt.completed_actions.contains(&receipt.action_id)
+                    && receipt.result_status == ExecutionReceiptResult::Success
             })
             .collect();
-        let request = CreateExecutionPlanRequest {
-            proposal_id: plan.proposal_id,
-            capability_id,
-            target_system: plan.target_system.clone(),
-            target_environment: plan.target_environment.clone(),
-            actions: vec![ExecutionAction {
-                action_id: "rollback".into(),
+        // Reverse completion order so later mutations are undone first.
+        rollback_receipts.reverse();
+        if rollback_receipts.is_empty() {
+            return Err(RivoraError::precondition(
+                "rollback is not available for this attempt: no successful completed receipts",
+            ));
+        }
+
+        let mut capability_id: Option<String> = None;
+        let mut actions = Vec::with_capacity(rollback_receipts.len());
+        let mut risks = Vec::new();
+        let mut evidence = vec![source_plan.id, attempt.id];
+        for receipt in &rollback_receipts {
+            evidence.push(receipt.id);
+            let rollback = &receipt.rollback_metadata;
+            if !rollback.available {
+                return Err(RivoraError::precondition(format!(
+                    "rollback unavailable for action `{}`: capability did not declare a reversible mutation",
+                    receipt.action_id
+                )));
+            }
+            let receipt_capability = rollback
+                .capability_id
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    RivoraError::precondition(format!(
+                        "rollback inverse incomplete for `{}`: missing capability_id",
+                        receipt.action_id
+                    ))
+                })?;
+            if capability_id
+                .as_ref()
+                .is_some_and(|existing| existing != &receipt_capability)
+            {
+                return Err(RivoraError::precondition(
+                    "rollback actions require more than one capability; create separate plans",
+                ));
+            }
+            capability_id = Some(receipt_capability.clone());
+
+            // Explicit inverse only — never infer from descriptor ordering.
+            let action_name = rollback
+                .inverse_action_name
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    RivoraError::precondition(format!(
+                        "rollback inverse incomplete for `{}`: explicit inverse_action_name is required",
+                        receipt.action_id
+                    ))
+                })?;
+            let inputs = rollback.inputs.clone().ok_or_else(|| {
+                RivoraError::precondition(format!(
+                    "rollback inverse incomplete for `{}`: inverse inputs are required",
+                    receipt.action_id
+                ))
+            })?;
+
+            // Capability must be registered and declare the inverse action.
+            let inverse_cap = self
+                .execution_registry
+                .get(&receipt_capability)
+                .ok_or_else(|| {
+                    RivoraError::precondition(format!(
+                        "rollback capability unavailable: `{receipt_capability}` is not registered"
+                    ))
+                })?;
+            let descriptor = inverse_cap.descriptor();
+            if !descriptor
+                .supported_actions
+                .iter()
+                .any(|name| name == &action_name)
+            {
+                return Err(RivoraError::precondition(format!(
+                    "rollback action unsupported: `{action_name}` is not declared by capability `{receipt_capability}`"
+                )));
+            }
+
+            actions.push(ExecutionAction {
+                action_id: format!("rollback-{}", receipt.action_id),
                 action_name,
-                inputs: inputs.clone(),
+                inputs,
                 continue_on_failure: false,
-            }],
-            inputs,
+            });
+            risks.extend(
+                rollback
+                    .risks
+                    .iter()
+                    .map(|risk| crate::domain::ExecutionRisk {
+                        description: risk.clone(),
+                        severity: "medium".into(),
+                        mitigation: "explicit approval required; no automatic rollback".into(),
+                    }),
+            );
+        }
+        let capability_id = capability_id.ok_or_else(|| {
+            RivoraError::precondition("rollback capability metadata is unavailable")
+        })?;
+        let request = CreateExecutionPlanRequest {
+            proposal_id: source_plan.proposal_id,
+            capability_id,
+            target_system: source_plan.target_system.clone(),
+            target_environment: source_plan.target_environment.clone(),
+            actions,
+            inputs: serde_json::json!({
+                "rollback_of_attempt": attempt.id.to_string(),
+                "rollback_of_plan": source_plan.id.to_string(),
+            }),
             expected_effects: vec![ExpectedEffect {
-                description: "rollback prior mutation".into(),
+                description: "rollback prior mutation using capability-provided inverse".into(),
                 resource_type: "rollback".into(),
                 expected_fields: vec![],
             }],
             preconditions: vec![],
             supports_dry_run: true,
         };
-        let mut plan = self.create_execution_plan(investigation_id, request, &actor)?;
-        // Persist risks by revising content on the new draft head.
-        plan = self.revise_execution_plan(
+        // Draft only — no approval, no attempt, no adapter invocation.
+        let mut draft = self.create_execution_plan(investigation_id, request, &actor)?;
+        draft = self.revise_execution_plan(
             investigation_id,
-            plan.id,
+            draft.id,
             ReviseExecutionPlanRequest {
-                expected_effects: Some(plan.expected_effects.clone()),
-                preconditions: Some(plan.preconditions.clone()),
+                expected_effects: Some(draft.expected_effects.clone()),
+                preconditions: Some(draft.preconditions.clone()),
                 ..Default::default()
             },
             &actor,
             "persist rollback draft for explicit re-approval",
         )?;
-        // Attach risks on the in-memory successor by a second domain-level rewrite
-        // through revise is insufficient; store a final draft with risks via transition-free append.
-        // Load head and re-save risks by creating one more revised snapshot with risks set.
-        let mut with_risks = plan.clone();
+        let mut with_risks = draft.clone();
         with_risks.id = ObjectId::new();
-        with_risks.parent_plan_id = Some(plan.id);
-        with_risks.revision_number = plan.revision_number.saturating_add(1);
+        with_risks.parent_plan_id = Some(draft.id);
+        with_risks.revision_number = draft.revision_number.saturating_add(1);
+        with_risks.target_snapshot = with_risks
+            .target_snapshot
+            .as_ref()
+            .map(|target| target.rebound_to(with_risks.id, with_risks.revision_number));
         with_risks.risks = risks;
         with_risks.updated_at = Utc::now();
         with_risks.provenance = Provenance::now(&actor, "runtime")
             .with_capability("create_rollback_plan")
-            .with_evidence(vec![plan.id, attempt.id]);
+            .with_evidence(evidence);
         with_risks
             .transitions
             .push(crate::domain::ExecutionPlanTransition {
-                from: plan.status,
+                from: draft.status,
                 to: ExecutionPlanStatus::Draft,
                 actor: actor.clone(),
-                reason: "attach rollback risks".into(),
+                reason: "attach rollback risks from explicit receipt inverses".into(),
                 at: Utc::now(),
             });
+        debug_assert_eq!(with_risks.status, ExecutionPlanStatus::Draft);
         self.store.append_execution_plan(&with_risks)?;
         Ok(with_risks)
     }
@@ -1249,10 +1570,14 @@ impl Runtime {
         investigation_id: InvestigationId,
         plan_id: ObjectId,
     ) -> RivoraResult<ExecutionTrace> {
-        let plan = self
+        let requested_plan = self
             .store
             .load_execution_plan(&investigation_id, &plan_id)?;
-        let approvals = self.store.list_execution_approvals(&investigation_id)?;
+        let plan = self.latest_plan_in_lineage(investigation_id, requested_plan.lineage_id)?;
+        let approvals = self
+            .store
+            .list_execution_approvals(&investigation_id)?
+            .approvals;
         let approval_ids = approvals
             .into_iter()
             .filter(|a| a.plan_lineage_id == plan.lineage_id)
@@ -1272,12 +1597,53 @@ impl Runtime {
             .filter(|r| attempt_ids.contains(&r.attempt_id))
             .map(|r| r.id)
             .collect();
-        let verifications = self.store.list_execution_verifications(&investigation_id)?;
+        let verifications = self
+            .store
+            .list_execution_verifications(&investigation_id)?
+            .verifications;
         let verification_ids: Vec<_> = verifications
             .iter()
             .filter(|v| attempt_ids.contains(&v.attempt_id))
             .map(|v| v.id)
             .collect();
+        let implementations: Vec<_> = self
+            .store
+            .list_implementation_records(&investigation_id)?
+            .records
+            .into_iter()
+            .filter(|record| {
+                record.references.iter().any(|reference| {
+                    matches!(
+                        reference,
+                        ImplementationReference::ExecutionAttempt { attempt_id }
+                            if attempt_ids.contains(attempt_id)
+                    )
+                })
+            })
+            .collect();
+        let measured_outcome = self
+            .store
+            .list_measured_learning_outcomes(&investigation_id)?
+            .outcomes
+            .into_iter()
+            .filter(|outcome| {
+                implementations
+                    .iter()
+                    .any(|record| record.id == outcome.implementation_record_id)
+            })
+            .max_by_key(|outcome| (outcome.revision_number, outcome.updated_at));
+        let implementation_record_id = if let Some(outcome) = measured_outcome.as_ref() {
+            implementations
+                .iter()
+                .find(|record| record.id == outcome.implementation_record_id)
+                .map(|record| record.id)
+        } else {
+            implementations
+                .iter()
+                .max_by_key(|record| (record.revision_number, record.updated_at))
+                .map(|record| record.id)
+        };
+        let measured_outcome_id = measured_outcome.map(|outcome| outcome.id);
 
         Ok(ExecutionTrace {
             investigation_id,
@@ -1291,8 +1657,8 @@ impl Runtime {
             attempt_ids,
             receipt_ids,
             verification_ids,
-            implementation_record_id: None,
-            measured_outcome_id: None,
+            implementation_record_id,
+            measured_outcome_id,
             explanation: "Proposal Accepted ≠ Execution Approved ≠ Execution Started ≠ Execution Completed ≠ Execution Verified ≠ Outcome Successful. Each step requires explicit authority.".into(),
         })
     }
@@ -1403,6 +1769,106 @@ impl Runtime {
         )
     }
 
+    fn resolve_plan_target(
+        &self,
+        plan: &ExecutionPlan,
+        capability: &dyn ExecutionCapability,
+    ) -> RivoraResult<CapabilityTarget> {
+        let mut resolved: Option<CapabilityTarget> = None;
+        for action in &plan.actions {
+            let inputs = merge_inputs(&plan.inputs, &action.inputs);
+            let target = capability.target(&plan.target_environment, &inputs)?;
+            if target.provider.trim().is_empty() {
+                return Err(RivoraError::validation(
+                    "capability target provider must not be empty",
+                ));
+            }
+            if target.provider != plan.target_system {
+                return Err(RivoraError::validation(format!(
+                    "plan target_system `{}` does not match capability provider `{}`",
+                    plan.target_system, target.provider
+                )));
+            }
+            if let Some(existing) = &resolved {
+                if existing != &target {
+                    return Err(RivoraError::validation(
+                        "all actions in one Plan must resolve to the same immutable target",
+                    ));
+                }
+            } else {
+                resolved = Some(target);
+            }
+        }
+        resolved.ok_or_else(|| RivoraError::validation("execution plan requires an action"))
+    }
+
+    fn validate_plan_contract(
+        &self,
+        plan: &ExecutionPlan,
+        capability: &dyn ExecutionCapability,
+    ) -> RivoraResult<CapabilityTarget> {
+        let descriptor = capability.descriptor();
+        if descriptor.capability_id != plan.capability_id {
+            return Err(RivoraError::validation(
+                "registered capability descriptor does not match Plan capability",
+            ));
+        }
+        let mut action_ids = std::collections::HashSet::new();
+        let mut action_signatures = std::collections::HashSet::new();
+        for action in &plan.actions {
+            if !action_ids.insert(action.action_id.as_str()) {
+                return Err(RivoraError::validation(format!(
+                    "duplicate action id `{}`",
+                    action.action_id
+                )));
+            }
+            if !descriptor.supported_actions.contains(&action.action_name) {
+                return Err(RivoraError::validation(format!(
+                    "unsupported action `{}` for capability `{}`",
+                    action.action_name, plan.capability_id
+                )));
+            }
+            let inputs = merge_inputs(&plan.inputs, &action.inputs);
+            let signature = serde_json::to_string(&(action.action_name.as_str(), &inputs))
+                .map_err(|error| RivoraError::serialization(error.to_string()))?;
+            if !action_signatures.insert(signature) {
+                return Err(RivoraError::validation(format!(
+                    "duplicate action `{}` with identical inputs",
+                    action.action_name
+                )));
+            }
+            let object = inputs.as_object().ok_or_else(|| {
+                RivoraError::validation(format!(
+                    "inputs for action `{}` must be an object",
+                    action.action_id
+                ))
+            })?;
+            for required in &descriptor.required_inputs {
+                let present = object.get(required).is_some_and(|value| match value {
+                    serde_json::Value::Null => false,
+                    serde_json::Value::String(value) => !value.trim().is_empty(),
+                    _ => true,
+                });
+                if !present {
+                    return Err(RivoraError::validation(format!(
+                        "action `{}` is missing required input `{required}`",
+                        action.action_id
+                    )));
+                }
+            }
+        }
+        let target = self.resolve_plan_target(plan, capability)?;
+        let expected = TargetSnapshot::bind(plan, target.clone());
+        if let Some(bound) = &plan.target_snapshot {
+            if bound != &expected {
+                return Err(RivoraError::precondition(
+                    "runtime target does not match the Plan target snapshot",
+                ));
+            }
+        }
+        Ok(target)
+    }
+
     fn transition_plan(
         &self,
         investigation_id: InvestigationId,
@@ -1470,7 +1936,10 @@ impl Runtime {
         Ok(listing
             .attempts
             .into_iter()
-            .find(|a| a.idempotency_key == key))
+            .filter(|a| {
+                a.idempotency_key == key && a.status != ExecutionAttemptStatus::DuplicateSuppressed
+            })
+            .max_by_key(|a| a.revision_number))
     }
 }
 

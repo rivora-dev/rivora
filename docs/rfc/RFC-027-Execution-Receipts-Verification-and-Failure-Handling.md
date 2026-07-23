@@ -53,6 +53,18 @@ v0.5 Learning determines whether the change improved engineering outcomes over t
 
 One attempt to invoke an approved Plan.
 
+The Runtime persists `Started` and the idempotency reservation before invoking
+an external mutation:
+
+```text
+Started → Persist → Execute → Receipt → Verify
+```
+
+On restart, a persisted Started attempt is recovered without silently issuing
+the mutation again. A matching retry produces a durable
+`DuplicateSuppressed` attempt or resumes only when the capability contract
+proves doing so is safe.
+
 | Field | Meaning |
 | --- | --- |
 | `id` | Attempt identifier |
@@ -144,6 +156,8 @@ Partial completion is first-class:
 - no collapse into success without detail;
 - no automatic continuation after material failure unless the Plan defines safe continuation;
 - rollback availability and recommended next action are recorded.
+- ambiguous transport outcomes are recorded in `uncertain_actions`; a timeout
+  is uncertainty, not definite failure.
 
 ---
 
@@ -156,6 +170,11 @@ Plans and Receipts store rollback metadata:
 - risks;
 - verification;
 - irreversible effects.
+
+Every reversible capability explicitly defines its inverse action and inputs
+per completed action. Runtime never guesses an inverse by choosing an arbitrary
+supported action. Rollback metadata produces a separate draft Execution Plan
+that must pass normal validation and receive its own approval.
 
 Automatic rollback is out of scope. A user may approve a separate rollback Plan if a
 supported capability exists.
@@ -172,6 +191,23 @@ supported capability exists.
 | Unknown | Treated as Unsafe |
 
 Runtime never auto-retries.
+
+Dry-run and live execution use distinct idempotency namespaces so a preview
+cannot suppress a later approved mutation.
+
+# Capability-Specific Verification
+
+Verification is an independent observation, never reuse of mutation-response
+fields. v0.6 checks:
+
+- issue comments by exact comment identifier and content;
+- labels by final presence or absence;
+- created issues by exact identifier and expected fields;
+- pull requests by exact identifier and `draft=true`;
+- workflow dispatch by workflow, approved ref, dispatch time, and correlated run.
+
+Unrelated observations and non-success Receipts cannot produce a passing
+Verification.
 
 ---
 
@@ -191,6 +227,10 @@ Execution Plan
 - Implementation Records do not claim Outcome success.
 - Measured Outcomes use existing v0.5 evaluation (RFC-023) without duplication.
 - Linkage capability: `link_execution_to_implementation`.
+- Linkage is idempotent: one execution linkage cannot create duplicate
+  Implementation Records.
+- `trace_execution` populates both `implementation_record_id` and
+  `measured_outcome_id` when those durable objects exist.
 
 ---
 
@@ -258,3 +298,6 @@ errors, retry decisions, and rollback information.
 4. Idempotency and retry safety are enforced.
 5. Rollback is metadata-only unless a separate approved Plan runs.
 6. v0.5 linkage works without rewriting historical Outcomes.
+7. Started attempts and idempotency reservations survive restart.
+8. Ambiguous outcomes remain explicitly uncertain.
+9. Rollback plans use only explicit inverse metadata and require separate approval.

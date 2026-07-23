@@ -19,7 +19,7 @@ fn setup() -> (CapabilityService, rivora::InvestigationId, ObjectId) {
     std::mem::forget(dir);
     let runtime = Arc::new(Runtime::new(store));
     let mock = Arc::new(MockExecutionCapability::new());
-    runtime.register_execution_capability(mock);
+    runtime.register_execution_capability(mock).unwrap();
     let caps = CapabilityService::new(runtime);
     let inv = caps
         .create_investigation("v0.6 model", None, "tester")
@@ -95,7 +95,9 @@ fn create_plan_requires_accepted_proposal() {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(LocalStore::open(dir.path()).unwrap());
     let runtime = Arc::new(Runtime::new(store));
-    runtime.register_execution_capability(Arc::new(MockExecutionCapability::new()));
+    runtime
+        .register_execution_capability(Arc::new(MockExecutionCapability::new()))
+        .unwrap();
     let caps = CapabilityService::new(runtime);
     let inv = caps.create_investigation("x", None, "t").unwrap();
     let draft = caps

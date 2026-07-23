@@ -28,7 +28,8 @@ fn env() -> Env {
     let runtime = Arc::new(Runtime::new(store));
     let mock = Arc::new(MockExecutionCapability::new());
     runtime
-        .register_execution_capability(Arc::clone(&mock) as Arc<dyn rivora::ExecutionCapability>);
+        .register_execution_capability(Arc::clone(&mock) as Arc<dyn rivora::ExecutionCapability>)
+        .unwrap();
     let caps = CapabilityService::new(runtime);
     let inv = caps
         .create_investigation("v0.6 e2e", None, "tester")
@@ -332,13 +333,14 @@ fn idempotent_retry_suppresses_duplicate_mutation() {
         .unwrap();
     assert_eq!(first.status, ExecutionAttemptStatus::Completed);
 
-    // One-time approval consumed; re-approve for retry demonstration at capability layer:
-    // Attempt-level idempotency returns the same attempt without re-mutation.
+    // Idempotency creates a durable suppression record without re-mutation.
     let second = env
         .caps
         .execute_plan(env.inv, plan.id, approval.id, "runner", "same-key", false)
         .unwrap();
-    assert_eq!(second.id, first.id);
+    assert_eq!(second.status, ExecutionAttemptStatus::DuplicateSuppressed);
+    assert_ne!(second.id, first.id);
+    assert_eq!(second.duplicate_of_attempt_id, Some(first.id));
     assert_eq!(
         env.mock
             .get_resource("issue/2")

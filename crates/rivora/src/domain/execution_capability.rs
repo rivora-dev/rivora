@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use super::execution::{
-    CapabilityRiskLevel, DryRunResult, ExecutionCapabilityDescriptor, ExecutionPolicyDecision,
+    CapabilityExecutionStatus, CapabilityRiskLevel, CapabilityTarget, CapabilityVerificationStatus,
+    DryRunResult, ExecutionCapabilityDescriptor, ExecutionPolicyDecision,
     ExecutionPolicyDecisionKind, RollbackMetadata,
 };
 use super::Confidence;
@@ -39,10 +40,8 @@ pub struct CapabilityInvocation {
 /// Result of a live capability execution (still not verification).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityExecutionResult {
-    /// Whether the external call reported success.
-    pub success: bool,
-    /// Result status label: success | failed | partial | uncertain.
-    pub result_status: String,
+    /// Single typed result status.
+    pub status: CapabilityExecutionStatus,
     /// Sanitized request summary.
     pub request_summary: String,
     /// Sanitized response summary.
@@ -78,6 +77,8 @@ pub struct CapabilityStateObservation {
     pub summary: String,
     /// Whether observation succeeded.
     pub observed: bool,
+    /// Capability-specific conclusion about the exact requested postcondition.
+    pub verification_status: CapabilityVerificationStatus,
     /// Error if observation failed.
     pub error: Option<String>,
 }
@@ -104,6 +105,35 @@ pub trait ExecutionCapability: Send + Sync {
     /// Capability descriptor.
     fn descriptor(&self) -> ExecutionCapabilityDescriptor;
 
+    /// Resolve the exact immutable external target for these inputs.
+    fn target(
+        &self,
+        _environment: &str,
+        inputs: &serde_json::Value,
+    ) -> RivoraResult<CapabilityTarget> {
+        let descriptor = self.descriptor();
+        Ok(CapabilityTarget {
+            provider: descriptor
+                .capability_id
+                .split('.')
+                .next()
+                .unwrap_or("unknown")
+                .to_string(),
+            owner: None,
+            repository: descriptor.target_restrictions.first().cloned(),
+            branch_or_ref: inputs
+                .get("ref")
+                .or_else(|| inputs.get("head"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+        })
+    }
+
+    /// Check credentials and adapter-specific preconditions without mutation.
+    fn validate_preconditions(&self, _request: &CapabilityInvocation) -> RivoraResult<()> {
+        Ok(())
+    }
+
     /// Dry-run or plan validation. Must never mutate.
     fn dry_run(&self, request: &CapabilityInvocation) -> RivoraResult<DryRunResult>;
 
@@ -129,11 +159,18 @@ impl ExecutionCapabilityRegistry {
         Self::default()
     }
 
-    /// Register a capability adapter (replaces existing id).
-    pub fn register(&self, capability: Arc<dyn ExecutionCapability>) {
+    /// Register a capability adapter. Duplicate ids are rejected.
+    pub fn register(&self, capability: Arc<dyn ExecutionCapability>) -> RivoraResult<()> {
         let desc = capability.descriptor();
         let mut guard = self.inner.lock().expect("execution registry lock");
+        if guard.contains_key(&desc.capability_id) {
+            return Err(RivoraError::validation(format!(
+                "execution capability `{}` is already registered",
+                desc.capability_id
+            )));
+        }
         guard.insert(desc.capability_id, capability);
+        Ok(())
     }
 
     /// Get a capability by id.
@@ -260,6 +297,47 @@ impl ExecutionCapability for MockExecutionCapability {
         }
     }
 
+    fn target(
+        &self,
+        environment: &str,
+        _inputs: &serde_json::Value,
+    ) -> RivoraResult<CapabilityTarget> {
+        Ok(CapabilityTarget {
+            provider: "mock".into(),
+            owner: None,
+            repository: Some("local".into()),
+            branch_or_ref: Some(environment.to_string()),
+        })
+    }
+
+    fn validate_preconditions(&self, request: &CapabilityInvocation) -> RivoraResult<()> {
+        if request.capability_id != "mock.record" {
+            return Err(RivoraError::validation("capability mismatch"));
+        }
+        if !matches!(
+            request.action_name.as_str(),
+            "record_mutation" | "fail_mutation"
+        ) {
+            return Err(RivoraError::validation(format!(
+                "unsupported action {}",
+                request.action_name
+            )));
+        }
+        for key in ["resource_key", "field", "value"] {
+            if request
+                .inputs
+                .get(key)
+                .and_then(|value| value.as_str())
+                .map_or(true, str::is_empty)
+            {
+                return Err(RivoraError::validation(format!(
+                    "required input `{key}` is missing"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn dry_run(&self, request: &CapabilityInvocation) -> RivoraResult<DryRunResult> {
         if request.capability_id != "mock.record" {
             return Err(RivoraError::validation("capability mismatch"));
@@ -334,8 +412,7 @@ impl ExecutionCapability for MockExecutionCapability {
         {
             state.fail_next = false;
             let result = CapabilityExecutionResult {
-                success: false,
-                result_status: "failed".into(),
+                status: CapabilityExecutionStatus::Failed,
                 request_summary: format!("record_mutation {key}.{field}"),
                 response_summary: "mock failure".into(),
                 changed_resources: Vec::new(),
@@ -364,8 +441,7 @@ impl ExecutionCapability for MockExecutionCapability {
 
         let external_id = format!("mock:{key}:{field}");
         let result = CapabilityExecutionResult {
-            success: true,
-            result_status: "success".into(),
+            status: CapabilityExecutionStatus::Success,
             request_summary: format!("set {key}.{field}={value}"),
             response_summary: if state.lie_success {
                 "reported success".into()
@@ -386,6 +462,7 @@ impl ExecutionCapability for MockExecutionCapability {
                         "value": p,
                     })
                 }),
+                inverse_action_name: previous.as_ref().map(|_| "record_mutation".into()),
                 risks: vec![],
                 verification: Some(format!("observe {key}.{field}")),
                 irreversible_effects: if previous.is_none() {
@@ -420,6 +497,7 @@ impl ExecutionCapability for MockExecutionCapability {
                 fields: HashMap::new(),
                 summary: "observed empty (mismatch)".into(),
                 observed: true,
+                verification_status: CapabilityVerificationStatus::Failed,
                 error: None,
             });
         }
@@ -429,6 +507,26 @@ impl ExecutionCapability for MockExecutionCapability {
                 fields: fields.clone(),
                 summary: format!("observed {fields:?}"),
                 observed: true,
+                verification_status: {
+                    let expected_field = query
+                        .inputs
+                        .get("field")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("value");
+                    let expected_value = query
+                        .inputs
+                        .get("value")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default();
+                    if fields
+                        .get(expected_field)
+                        .is_some_and(|value| value == expected_value)
+                    {
+                        CapabilityVerificationStatus::Passed
+                    } else {
+                        CapabilityVerificationStatus::Failed
+                    }
+                },
                 error: None,
             }),
             None => Ok(CapabilityStateObservation {
@@ -436,6 +534,7 @@ impl ExecutionCapability for MockExecutionCapability {
                 fields: HashMap::new(),
                 summary: "resource not found".into(),
                 observed: false,
+                verification_status: CapabilityVerificationStatus::Failed,
                 error: Some("resource not found".into()),
             }),
         }

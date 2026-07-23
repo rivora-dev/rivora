@@ -51,6 +51,9 @@ execution interface.
 Runtime invokes execution only through registered `ExecutionCapability` adapters.
 CLI and Workspace never call external APIs for mutation.
 
+Capability identifiers are unique. Registration rejects a duplicate identifier
+instead of silently replacing an existing adapter.
+
 ---
 
 # Risk Levels
@@ -115,6 +118,9 @@ execute(action, inputs, idempotency_key) → ExternalResult
 observe_state(query) → ObservedState (for verification)
 ```
 
+`target(environment, inputs)` provides the normalized runtime target used to
+construct and revalidate RFC-025's immutable `TargetSnapshot`.
+
 ---
 
 # Dry Run
@@ -165,8 +171,13 @@ Before execute, Runtime validates:
 - idempotency state;
 - capability-declared preconditions;
 - verification availability.
+- exact equality between the approved target snapshot and current adapter target.
 
 Failed preconditions block execution and are recorded.
+
+Timeouts and transport failures that may have occurred after the external
+system accepted a mutation are ambiguous outcomes. They are recorded as
+`Uncertain`, never collapsed into definite failure.
 
 ---
 
@@ -180,6 +191,10 @@ Failed preconditions block execution and are recorded.
 | `github.issue.label` | `add_label`, `remove_label` | LowRiskWrite |
 | `github.issue.create` | `create_issue` | BoundedWrite |
 
+Independent verification observes the exact created resource: comment
+identifier and content for comments, final presence/absence for labels, and
+the exact created issue identifier and fields for issue creation.
+
 ## GitHub Pull Request
 
 | Capability ID | Actions | Risk |
@@ -187,6 +202,8 @@ Failed preconditions block execution and are recorded.
 | `github.pull_request.create_draft` | `create_draft_pr` | BoundedWrite |
 
 From an already existing branch only. No force-push, merge, or branch deletion.
+Independent verification requires the exact created pull request and
+`draft=true`.
 
 ## GitHub Actions
 
@@ -195,6 +212,8 @@ From an already existing branch only. No force-push, merge, or branch deletion.
 | `github_actions.workflow_dispatch` | `dispatch_workflow` | BoundedWrite |
 
 Explicitly named workflow only. No workflow definition mutation.
+Verification correlates the named workflow, approved ref, dispatch time, and
+resulting run; an unrelated latest run never satisfies the check.
 
 ## Mock (tests / local dry adapters)
 
@@ -234,3 +253,4 @@ workflow file modification, unrestricted shell, arbitrary kubectl apply/delete.
 3. Runtime alone invokes adapters.
 4. High-risk and prohibited actions are denied by policy.
 5. Initial bounded capabilities are fully testable with a mock adapter.
+6. Capability registration is unique and approved target drift is rejected.

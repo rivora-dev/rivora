@@ -6,13 +6,14 @@ pub use local::LocalStore;
 
 use crate::domain::{
     AssistedWorkflow, DeploymentReadiness, EngineeringReport, Evaluation, ExecutionApproval,
-    ExecutionAttempt, ExecutionAttemptListing, ExecutionPlan, ExecutionPlanListing,
-    ExecutionReceipt, ExecutionReceiptListing, ExecutionVerification, Hypothesis,
-    ImplementationListing, ImplementationRecord, ImprovementProposal, Investigation,
-    InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome, LearningPattern,
-    MeasuredLearningOutcome, MeasuredOutcomeListing, MemoryRecord, ObjectId, Observation,
-    ProposalArtifact, ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation,
-    RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    ExecutionApprovalListing, ExecutionAttempt, ExecutionAttemptListing, ExecutionPlan,
+    ExecutionPlanListing, ExecutionReceipt, ExecutionReceiptListing, ExecutionVerification,
+    ExecutionVerificationListing, Hypothesis, ImplementationListing, ImplementationRecord,
+    ImprovementProposal, Investigation, InvestigationId, InvestigationRelationship,
+    KnowledgeObject, LearningOutcome, LearningPattern, MeasuredLearningOutcome,
+    MeasuredOutcomeListing, MemoryRecord, ObjectId, Observation, ProposalArtifact,
+    ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
+    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 
@@ -303,10 +304,13 @@ pub trait Store: Send + Sync {
     fn list_execution_approvals(
         &self,
         id: &InvestigationId,
-    ) -> RivoraResult<Vec<ExecutionApproval>>;
+    ) -> RivoraResult<ExecutionApprovalListing>;
 
     /// Append one Execution Attempt.
     fn append_execution_attempt(&self, attempt: &ExecutionAttempt) -> RivoraResult<()>;
+
+    /// Atomically reserve a Started Attempt. Returns false when already reserved.
+    fn try_reserve_execution_attempt(&self, attempt: &ExecutionAttempt) -> RivoraResult<bool>;
 
     /// Load one Execution Attempt.
     fn load_execution_attempt(
@@ -354,5 +358,8 @@ pub trait Store: Send + Sync {
     fn list_execution_verifications(
         &self,
         id: &InvestigationId,
-    ) -> RivoraResult<Vec<ExecutionVerification>>;
+    ) -> RivoraResult<ExecutionVerificationListing>;
+
+    /// Atomically consume one-time approval authority.
+    fn try_consume_execution_approval(&self, approval: &ExecutionApproval) -> RivoraResult<bool>;
 }

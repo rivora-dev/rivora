@@ -139,12 +139,22 @@ fn cli_execution_plan_preview_approve_dry_run() {
             "mock.record",
             "--action",
             "record_mutation",
-            "--inputs",
+            "--action-input",
             r#"{"resource_key":"issue/1","field":"label","value":"bug"}"#,
+            "--action",
+            "record_mutation",
+            "--action-input",
+            r#"{"resource_key":"issue/1","field":"label","value":"high-priority"}"#,
+            "--precondition",
+            r#"{"id":"scope-ok","description":"issue is in approved scope","satisfied":true,"detail":null}"#,
         ],
     );
     let plan_id = plan["id"].as_str().unwrap().to_string();
     assert_eq!(plan["status"], "draft");
+    assert_eq!(plan["actions"].as_array().unwrap().len(), 2);
+    assert_eq!(plan["actions"][0]["action_id"], "a1");
+    assert_eq!(plan["actions"][1]["action_id"], "a2");
+    assert_eq!(plan["preconditions"].as_array().unwrap().len(), 1);
 
     let ready = run_json(
         &bin,
@@ -211,6 +221,123 @@ fn cli_execution_plan_preview_approve_dry_run() {
     );
     assert_eq!(attempt["dry_run"], true);
     assert_eq!(attempt["status"], "completed");
+
+    let live = run_json(
+        &bin,
+        &data,
+        &[
+            "execute",
+            "run",
+            "--investigation",
+            inv_id,
+            "--plan",
+            &live_plan_id,
+            "--approval",
+            &approval_id,
+            "--idempotency-key",
+            "cli-live-1",
+            "--confirm",
+        ],
+    );
+    assert_eq!(live["dry_run"], false);
+    assert_eq!(live["status"], "completed");
+    let attempt_id = live["id"].as_str().unwrap().to_string();
+    let receipts = run_json(
+        &bin,
+        &data,
+        &["execute", "receipts", "--investigation", inv_id],
+    );
+    assert_eq!(receipts["receipts"].as_array().unwrap().len(), 2);
+    let receipt_id = receipts["receipts"][0]["id"].as_str().unwrap().to_string();
+    let exported = run_json(
+        &bin,
+        &data,
+        &[
+            "execute",
+            "export-receipt",
+            "--investigation",
+            inv_id,
+            "--receipt",
+            &receipt_id,
+        ],
+    );
+    assert_eq!(exported["id"], receipt_id);
+
+    // Mock state is process-local, so the CLI correctly refuses to invent an
+    // inverse when its immutable Receipt says the first write had no prior value.
+    let rollback_output = Command::new(&bin)
+        .args([
+            "--data-dir",
+            data.to_str().unwrap(),
+            "--json",
+            "execute",
+            "rollback-plan",
+            "--investigation",
+            inv_id,
+            "--attempt",
+            &attempt_id,
+        ])
+        .output()
+        .unwrap();
+    assert!(!rollback_output.status.success());
+    let rollback_err = String::from_utf8_lossy(&rollback_output.stderr);
+    assert!(
+        rollback_err.contains("does not define rollback")
+            || rollback_err.contains("rollback unavailable")
+            || rollback_err.contains("not available")
+            || rollback_err.contains("did not declare a reversible"),
+        "expected rollback-unavailable error, got: {rollback_err}"
+    );
+
+    let cancellable = run_json(
+        &bin,
+        &data,
+        &[
+            "execute",
+            "plan",
+            "--investigation",
+            inv_id,
+            "--proposal",
+            &proposal_id,
+            "--capability",
+            "mock.record",
+            "--action",
+            "record_mutation",
+            "--action-input",
+            r#"{"resource_key":"issue/1","field":"label","value":"critical"}"#,
+        ],
+    );
+    let cancellable_id = cancellable["id"].as_str().unwrap().to_string();
+
+    let rollback_revisions = run_json(
+        &bin,
+        &data,
+        &[
+            "execute",
+            "revisions",
+            "--investigation",
+            inv_id,
+            "--plan",
+            &cancellable_id,
+        ],
+    );
+    assert!(!rollback_revisions["plans"].as_array().unwrap().is_empty());
+
+    let cancelled = run_json(
+        &bin,
+        &data,
+        &[
+            "execute",
+            "cancel",
+            "--investigation",
+            inv_id,
+            "--plan",
+            &cancellable_id,
+            "--reason",
+            "rollback not required",
+        ],
+    );
+    assert_eq!(cancelled["status"], "cancelled");
 
     let trace = run_ok(
         &bin,

@@ -85,6 +85,34 @@ string_enum!(
     }
 );
 
+string_enum!(
+    /// Result reported by one execution capability invocation.
+    CapabilityExecutionStatus {
+        /// The requested mutation completed.
+        Success => "success",
+        /// The mutation definitely did not complete.
+        Failed => "failed",
+        /// The capability completed only part of the requested mutation.
+        Partial => "partial",
+        /// The request may have reached the external system but the outcome is unknown.
+        Uncertain => "uncertain",
+        /// The capability suppressed a duplicate mutation.
+        DuplicateSuppressed => "duplicate_suppressed"
+    }
+);
+
+string_enum!(
+    /// Capability-specific independent verification conclusion.
+    CapabilityVerificationStatus {
+        /// The exact requested postcondition was independently observed.
+        Passed => "passed",
+        /// Independent observation contradicted the requested postcondition.
+        Failed => "failed",
+        /// The exact requested postcondition could not be established.
+        Inconclusive => "inconclusive"
+    }
+);
+
 // ---------------------------------------------------------------------------
 // Plan lifecycle
 // ---------------------------------------------------------------------------
@@ -219,12 +247,73 @@ pub struct RollbackMetadata {
     pub capability_id: Option<String>,
     /// Suggested rollback inputs.
     pub inputs: Option<serde_json::Value>,
+    /// Explicit inverse action name. Never inferred from descriptor ordering.
+    #[serde(default)]
+    pub inverse_action_name: Option<String>,
     /// Risks of rollback.
     pub risks: Vec<String>,
     /// How to verify rollback.
     pub verification: Option<String>,
     /// Effects that cannot be reversed.
     pub irreversible_effects: Vec<String>,
+}
+
+/// Adapter-reported immutable external target identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityTarget {
+    /// External provider (`github`, `mock`, ...).
+    pub provider: String,
+    /// Account or repository owner, when applicable.
+    pub owner: Option<String>,
+    /// Repository or bounded target name, when applicable.
+    pub repository: Option<String>,
+    /// Branch or ref bound by the action, when applicable.
+    pub branch_or_ref: Option<String>,
+}
+
+/// Immutable target authorized by one exact Execution Plan revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetSnapshot {
+    /// External provider.
+    pub provider: String,
+    /// Account or repository owner, when applicable.
+    pub owner: Option<String>,
+    /// Repository or bounded target name, when applicable.
+    pub repository: Option<String>,
+    /// Target environment.
+    pub environment: String,
+    /// Exact execution capability.
+    pub capability_id: String,
+    /// Exact Plan snapshot.
+    pub plan_id: ObjectId,
+    /// Exact Plan revision.
+    pub plan_revision_number: u32,
+    /// Branch or ref, when applicable.
+    pub branch_or_ref: Option<String>,
+}
+
+impl TargetSnapshot {
+    /// Build a Plan-bound snapshot from a capability-reported target.
+    pub fn bind(plan: &ExecutionPlan, target: CapabilityTarget) -> Self {
+        Self {
+            provider: target.provider,
+            owner: target.owner,
+            repository: target.repository,
+            environment: plan.target_environment.clone(),
+            capability_id: plan.capability_id.clone(),
+            plan_id: plan.id,
+            plan_revision_number: plan.revision_number,
+            branch_or_ref: target.branch_or_ref,
+        }
+    }
+
+    /// Rebind immutable Plan identity after a preserved successor snapshot is created.
+    pub fn rebound_to(&self, plan_id: ObjectId, plan_revision_number: u32) -> Self {
+        let mut next = self.clone();
+        next.plan_id = plan_id;
+        next.plan_revision_number = plan_revision_number;
+        next
+    }
 }
 
 /// Immediate verification plan.
@@ -349,6 +438,9 @@ pub struct ExecutionPlan {
     pub target_system: String,
     /// Target environment.
     pub target_environment: String,
+    /// Exact immutable external target for this Plan revision.
+    #[serde(default)]
+    pub target_snapshot: Option<TargetSnapshot>,
     /// Ordered actions.
     pub actions: Vec<ExecutionAction>,
     /// Shared inputs (never secrets).
@@ -439,6 +531,7 @@ impl ExecutionPlan {
             capability_id,
             target_system,
             target_environment,
+            target_snapshot: None,
             actions,
             inputs: serde_json::json!({}),
             expected_effects: Vec::new(),
@@ -491,6 +584,10 @@ impl ExecutionPlan {
         next.parent_plan_id = Some(self.id);
         next.revision_number = self.revision_number.saturating_add(1);
         next.status = ExecutionPlanStatus::Draft;
+        next.target_snapshot = self
+            .target_snapshot
+            .as_ref()
+            .map(|target| target.rebound_to(next.id, next.revision_number));
         next.updated_at = at;
         next.last_policy_decision = None;
         next.provenance = Provenance::now(actor, "runtime")
@@ -533,6 +630,10 @@ impl ExecutionPlan {
         next.parent_plan_id = Some(self.id);
         next.revision_number = self.revision_number.saturating_add(1);
         next.status = to;
+        next.target_snapshot = self
+            .target_snapshot
+            .as_ref()
+            .map(|target| target.rebound_to(next.id, next.revision_number));
         next.updated_at = at;
         next.provenance = Provenance::now(&actor, "runtime")
             .with_capability("transition_execution_plan")
@@ -577,6 +678,9 @@ pub struct ExecutionApproval {
     pub environment: String,
     /// Approved capability.
     pub capability_id: String,
+    /// Exact external target authorized with the Plan revision.
+    #[serde(default)]
+    pub target_snapshot: Option<TargetSnapshot>,
     /// Policy decision at approval time.
     pub policy_decision: ExecutionPolicyDecision,
     /// Optional expiration.
@@ -638,6 +742,31 @@ impl ExecutionApproval {
                 "cannot approve live execution when policy does not permit live execution",
             ));
         }
+        let action_ids: std::collections::HashSet<&str> = plan
+            .actions
+            .iter()
+            .map(|action| action.action_id.as_str())
+            .collect();
+        if approved_actions
+            .iter()
+            .chain(denied_actions.iter())
+            .any(|action| !action_ids.contains(action.as_str()))
+        {
+            return Err(RivoraError::validation(
+                "approval scope contains an action not present in the Plan",
+            ));
+        }
+        if approved_actions
+            .iter()
+            .any(|action| denied_actions.contains(action))
+        {
+            return Err(RivoraError::validation(
+                "an action cannot be both approved and denied",
+            ));
+        }
+        let target_snapshot = plan.target_snapshot.clone().ok_or_else(|| {
+            RivoraError::validation("cannot approve a Plan without an immutable target snapshot")
+        })?;
         Ok(Self {
             id: ObjectId::new(),
             plan_id: plan.id,
@@ -650,6 +779,7 @@ impl ExecutionApproval {
             denied_actions,
             environment: plan.target_environment.clone(),
             capability_id: plan.capability_id.clone(),
+            target_snapshot: Some(target_snapshot),
             policy_decision,
             expires_at,
             one_time,
@@ -712,6 +842,19 @@ impl ExecutionApproval {
             return Err(RivoraError::precondition(
                 "approval capability does not match plan capability",
             ));
+        }
+        match (&self.target_snapshot, &plan.target_snapshot) {
+            (Some(approved), Some(planned)) if approved == planned => {}
+            (None, _) | (_, None) => {
+                return Err(RivoraError::precondition(
+                    "approval and Plan must both contain an immutable target snapshot",
+                ));
+            }
+            _ => {
+                return Err(RivoraError::precondition(
+                    "approval target snapshot does not match Plan target",
+                ));
+            }
         }
         Ok(())
     }
@@ -785,6 +928,15 @@ string_enum!(
 pub struct ExecutionAttempt {
     /// Attempt identifier.
     pub id: ObjectId,
+    /// Stable attempt lineage across Started and terminal snapshots.
+    #[serde(default)]
+    pub attempt_lineage_id: Option<ObjectId>,
+    /// Prior immutable Attempt snapshot.
+    #[serde(default)]
+    pub parent_attempt_id: Option<ObjectId>,
+    /// One-based Attempt snapshot revision.
+    #[serde(default = "default_revision")]
+    pub revision_number: u32,
     /// Owning Investigation.
     pub investigation_id: InvestigationId,
     /// Exact Plan snapshot.
@@ -803,6 +955,9 @@ pub struct ExecutionAttempt {
     pub target_system: String,
     /// Environment.
     pub environment: String,
+    /// Exact target snapshot used for this Attempt.
+    #[serde(default)]
+    pub target_snapshot: Option<TargetSnapshot>,
     /// Attempt status.
     pub status: ExecutionAttemptStatus,
     /// Requested action ids.
@@ -827,6 +982,9 @@ pub struct ExecutionAttempt {
     pub receipt_ids: Vec<ObjectId>,
     /// Linked verification id if any.
     pub verification_id: Option<ObjectId>,
+    /// Original Attempt when this request was durably duplicate-suppressed.
+    #[serde(default)]
+    pub duplicate_of_attempt_id: Option<ObjectId>,
     /// Whether this was a dry-run (must never mutate).
     pub dry_run: bool,
     /// Recommended next action.
@@ -864,8 +1022,12 @@ impl ExecutionAttempt {
             ));
         }
         let requested: Vec<String> = plan.actions.iter().map(|a| a.action_id.clone()).collect();
+        let id = ObjectId::new();
         Ok(Self {
-            id: ObjectId::new(),
+            id,
+            attempt_lineage_id: Some(id),
+            parent_attempt_id: None,
+            revision_number: 1,
             investigation_id: plan.investigation_id,
             plan_id: plan.id,
             plan_lineage_id: plan.lineage_id,
@@ -875,6 +1037,7 @@ impl ExecutionAttempt {
             capability_id: plan.capability_id.clone(),
             target_system: plan.target_system.clone(),
             environment: plan.target_environment.clone(),
+            target_snapshot: plan.target_snapshot.clone(),
             status: ExecutionAttemptStatus::Started,
             requested_actions: requested,
             completed_actions: Vec::new(),
@@ -887,6 +1050,7 @@ impl ExecutionAttempt {
             external_references: Vec::new(),
             receipt_ids: Vec::new(),
             verification_id: None,
+            duplicate_of_attempt_id: None,
             dry_run,
             recommended_next_action: None,
             rollback: plan.rollback.clone(),
@@ -895,6 +1059,26 @@ impl ExecutionAttempt {
             provenance,
         })
     }
+
+    /// Stable lineage identifier, including backward-compatible v0.6 snapshots.
+    pub fn lineage_id(&self) -> ObjectId {
+        self.attempt_lineage_id.unwrap_or(self.id)
+    }
+
+    /// Create a preserved successor snapshot for a terminal Attempt state.
+    pub fn revised(&self, provenance: Provenance) -> Self {
+        let mut next = self.clone();
+        next.id = ObjectId::new();
+        next.attempt_lineage_id = Some(self.lineage_id());
+        next.parent_attempt_id = Some(self.id);
+        next.revision_number = self.revision_number.saturating_add(1);
+        next.provenance = provenance;
+        next
+    }
+}
+
+fn default_revision() -> u32 {
+    1
 }
 
 /// Sanitization metadata for receipts.
@@ -969,6 +1153,9 @@ pub struct ExecutionCheckResult {
 pub struct ExecutionVerification {
     /// Verification identifier.
     pub id: ObjectId,
+    /// Prior verification revision for the same Attempt.
+    #[serde(default)]
+    pub parent_verification_id: Option<ObjectId>,
     /// Attempt verified.
     pub attempt_id: ObjectId,
     /// Receipts considered.
@@ -1119,6 +1306,24 @@ pub struct ExecutionReceiptListing {
     pub diagnostics: Vec<ExecutionStorageDiagnostic>,
 }
 
+/// Approval listing with corruption isolation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ExecutionApprovalListing {
+    /// Valid approvals.
+    pub approvals: Vec<ExecutionApproval>,
+    /// Corrupt or mis-owned records.
+    pub diagnostics: Vec<ExecutionStorageDiagnostic>,
+}
+
+/// Verification listing with corruption isolation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ExecutionVerificationListing {
+    /// Valid verification revisions.
+    pub verifications: Vec<ExecutionVerification>,
+    /// Corrupt or mis-owned records.
+    pub diagnostics: Vec<ExecutionStorageDiagnostic>,
+}
+
 /// Storage diagnostic for corrupt or mis-owned execution objects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionStorageDiagnostic {
@@ -1182,7 +1387,7 @@ mod tests {
 
     #[test]
     fn approval_binds_exact_revision() {
-        let plan = ExecutionPlan::draft(
+        let mut plan = ExecutionPlan::draft(
             InvestigationId::new(),
             ObjectId::new(),
             ObjectId::new(),
@@ -1194,6 +1399,15 @@ mod tests {
             Provenance::now("t", "t"),
         )
         .unwrap();
+        plan.target_snapshot = Some(TargetSnapshot::bind(
+            &plan,
+            CapabilityTarget {
+                provider: "mock".into(),
+                owner: None,
+                repository: Some("local".into()),
+                branch_or_ref: Some("sandbox".into()),
+            },
+        ));
         let ready = plan
             .transitioned(
                 ExecutionPlanStatus::ReadyForReview,

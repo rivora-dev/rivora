@@ -1197,8 +1197,8 @@ impl CapabilityService {
     pub fn register_execution_capability(
         &self,
         capability: std::sync::Arc<dyn crate::domain::ExecutionCapability>,
-    ) {
-        self.runtime.register_execution_capability(capability);
+    ) -> RivoraResult<()> {
+        self.runtime.register_execution_capability(capability)
     }
 
     /// List registered execution capabilities.

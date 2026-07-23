@@ -22,7 +22,10 @@ use rivora::runtime::proposal::{
     CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
 };
 use rivora::storage::LocalStore;
-use rivora::{CapabilityService, ExecutionAction, MockExecutionCapability, Runtime};
+use rivora::{
+    CapabilityService, ExecutionAction, ExecutionPlan, ExecutionPolicyDecision,
+    MockExecutionCapability, Runtime,
+};
 use rivora_connectors::github_actions::GitHubActionsConnector;
 use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
@@ -1820,6 +1823,79 @@ fn smoke_workflow(caps: &CapabilityService) -> Result<(), String> {
     );
     println!("{}", proposal_details(&accepted));
 
+    let execution_plan = caps
+        .create_execution_plan(
+            assist_inv.id,
+            CreateExecutionPlanRequest {
+                proposal_id: accepted.id,
+                capability_id: "mock.record".into(),
+                target_system: "mock".into(),
+                target_environment: "sandbox".into(),
+                actions: vec![ExecutionAction {
+                    action_id: "a1".into(),
+                    action_name: "record_mutation".into(),
+                    inputs: serde_json::json!({
+                        "resource_key": "workspace/smoke",
+                        "field": "status",
+                        "value": "reviewed"
+                    }),
+                    continue_on_failure: false,
+                }],
+                inputs: serde_json::json!({}),
+                expected_effects: vec![],
+                preconditions: vec![],
+                supports_dry_run: true,
+            },
+            "workspace",
+        )
+        .map_err(err)?;
+    let execution_plan = caps
+        .validate_execution_plan(
+            assist_inv.id,
+            execution_plan.id,
+            "workspace",
+            "smoke validation",
+        )
+        .map_err(err)?;
+    let (execution_plan, approval) = caps
+        .approve_execution_plan(
+            assist_inv.id,
+            execution_plan.id,
+            "workspace",
+            "smoke approval review",
+            vec![],
+            vec![],
+            None,
+            true,
+        )
+        .map_err(err)?;
+    let policy = caps
+        .explain_execution_policy(assist_inv.id, execution_plan.id)
+        .map_err(err)?;
+    println!(
+        "{}",
+        live_execution_confirmation(&execution_plan, &policy, approval.id)
+    );
+    let revisions = caps
+        .list_execution_plan_revisions(assist_inv.id, execution_plan.lineage_id)
+        .map_err(err)?;
+    println!(
+        "Workspace Execution plan revisions: {}",
+        revisions.plans.len()
+    );
+    let cancelled = caps
+        .cancel_execution_plan(
+            assist_inv.id,
+            execution_plan.id,
+            "workspace",
+            "smoke cancellation",
+        )
+        .map_err(err)?;
+    println!(
+        "Workspace Execution cancellation: {}",
+        cancelled.status.as_str()
+    );
+
     let alternatives = caps
         .generate_proposal_alternatives(assist_inv.id, "workspace")
         .map_err(err)?;
@@ -2278,6 +2354,11 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
             "Verify attempt",
             "Trace plan",
             "Explain policy",
+            "List plan revisions",
+            "Cancel plan",
+            "Create rollback plan",
+            "List receipts",
+            "Export receipt JSON",
             "Back",
         ];
         let choice = Select::new()
@@ -2309,6 +2390,14 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                         p.revision_number,
                         p.status.as_str(),
                         p.capability_id
+                    );
+                }
+                for diagnostic in listing.diagnostics {
+                    println!(
+                        "  {} corrupt plan isolated: {} ({})",
+                        style("!").yellow(),
+                        diagnostic.path,
+                        diagnostic.error
                     );
                 }
             }
@@ -2439,15 +2528,6 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                 );
             }
             7 => {
-                let confirm = Confirm::new()
-                    .with_prompt("Live execution mutates external systems. Continue?")
-                    .default(false)
-                    .interact()
-                    .map_err(|e| e.to_string())?;
-                if !confirm {
-                    println!("Cancelled.");
-                    continue;
-                }
                 let plan: String = Input::new()
                     .with_prompt("Plan id")
                     .interact_text()
@@ -2460,28 +2540,63 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                     .with_prompt("Idempotency key")
                     .interact_text()
                     .map_err(|e| e.to_string())?;
+                let plan_id = plan.parse().map_err(err)?;
+                let approval_id = approval.parse().map_err(err)?;
+                let snapshot = caps.get_execution_plan(id, plan_id).map_err(err)?;
+                let policy = caps.explain_execution_policy(id, plan_id).map_err(err)?;
+                println!(
+                    "{}",
+                    live_execution_confirmation(&snapshot, &policy, approval_id)
+                );
+                let confirm = Confirm::new()
+                    .with_prompt("Execute this exact approved target?")
+                    .default(false)
+                    .interact()
+                    .map_err(|e| e.to_string())?;
+                if !confirm {
+                    println!("Live execution cancelled before mutation.");
+                    continue;
+                }
                 let attempt = caps
-                    .execute_plan(
-                        id,
-                        plan.parse().map_err(err)?,
-                        approval.parse().map_err(err)?,
-                        "workspace",
-                        key,
-                        false,
-                    )
+                    .execute_plan(id, plan_id, approval_id, "workspace", key, false)
                     .map_err(err)?;
                 println!(
-                    "Live attempt {} [{}] completed={:?} failed={:?}",
+                    "Live attempt {} [{}] completed={:?} failed={:?} skipped={:?} uncertain={:?}",
                     attempt.id,
                     attempt.status.as_str(),
                     attempt.completed_actions,
-                    attempt.failed_actions
+                    attempt.failed_actions,
+                    attempt.skipped_actions,
+                    attempt.uncertain_actions
+                );
+                println!(
+                    "  retry_safety={} next={}",
+                    attempt.retry_safety.as_str(),
+                    attempt.recommended_next_action.as_deref().unwrap_or("-")
                 );
             }
             8 => {
                 let listing = caps.list_execution_attempts(id).map_err(err)?;
                 for a in listing.attempts {
-                    println!("  • {} [{}] plan={}", a.id, a.status.as_str(), a.plan_id);
+                    println!(
+                        "  • {} [{}] plan={} completed={:?} failed={:?} skipped={:?} uncertain={:?} retry={}",
+                        a.id,
+                        a.status.as_str(),
+                        a.plan_id,
+                        a.completed_actions,
+                        a.failed_actions,
+                        a.skipped_actions,
+                        a.uncertain_actions,
+                        a.retry_safety.as_str()
+                    );
+                }
+                for diagnostic in listing.diagnostics {
+                    println!(
+                        "  {} corrupt attempt isolated: {} ({})",
+                        style("!").yellow(),
+                        diagnostic.path,
+                        diagnostic.error
+                    );
                 }
             }
             9 => {
@@ -2509,10 +2624,22 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                     .map_err(err)?;
                 println!("{}", trace.explanation);
                 println!(
-                    "approvals={} attempts={} receipts={}",
+                    "approvals={} attempts={} receipts={} verifications={}",
                     trace.approval_ids.len(),
                     trace.attempt_ids.len(),
-                    trace.receipt_ids.len()
+                    trace.receipt_ids.len(),
+                    trace.verification_ids.len()
+                );
+                println!(
+                    "implementation_record={} measured_outcome={}",
+                    trace
+                        .implementation_record_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "-".into()),
+                    trace
+                        .measured_outcome_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "-".into())
                 );
             }
             11 => {
@@ -2530,19 +2657,159 @@ fn execution_session(caps: &CapabilityService, id: InvestigationId) -> Result<()
                     policy.reasons.join("; ")
                 );
             }
+            12 => {
+                let plan = input_object_id("Any plan snapshot id")?;
+                let snapshot = caps.get_execution_plan(id, plan).map_err(err)?;
+                let listing = caps
+                    .list_execution_plan_revisions(id, snapshot.lineage_id)
+                    .map_err(err)?;
+                for revision in listing.plans {
+                    println!(
+                        "  • rev {} {} [{}] target={}:{}",
+                        revision.revision_number,
+                        revision.id,
+                        revision.status.as_str(),
+                        revision.target_system,
+                        revision.target_environment
+                    );
+                }
+                for diagnostic in listing.diagnostics {
+                    println!(
+                        "  {} corrupt plan revision isolated: {} ({})",
+                        style("!").yellow(),
+                        diagnostic.path,
+                        diagnostic.error
+                    );
+                }
+            }
+            13 => {
+                let plan = input_object_id("Plan id")?;
+                let reason: String = Input::new()
+                    .with_prompt("Cancellation reason")
+                    .interact_text()
+                    .map_err(|e| e.to_string())?;
+                let cancelled = caps
+                    .cancel_execution_plan(id, plan, "workspace", reason)
+                    .map_err(err)?;
+                println!(
+                    "{} Cancelled plan {} rev {} [{}]",
+                    style("✓").green(),
+                    cancelled.id,
+                    cancelled.revision_number,
+                    cancelled.status.as_str()
+                );
+            }
+            14 => {
+                let attempt = input_object_id("Attempt id")?;
+                let rollback = caps
+                    .create_rollback_plan(id, attempt, "workspace")
+                    .map_err(err)?;
+                println!(
+                    "{} Rollback plan {} rev {} [{}]",
+                    style("✓").green(),
+                    rollback.id,
+                    rollback.revision_number,
+                    rollback.status.as_str()
+                );
+                println!(
+                    "  capability={} target={}:{} actions={}",
+                    rollback.capability_id,
+                    rollback.target_system,
+                    rollback.target_environment,
+                    rollback
+                        .actions
+                        .iter()
+                        .map(|action| action.action_name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                println!("  This is a separate draft. Validate and approve it before execution.");
+            }
+            15 => {
+                let listing = caps.list_execution_receipts(id).map_err(err)?;
+                if listing.receipts.is_empty() {
+                    println!("No execution receipts.");
+                }
+                for receipt in listing.receipts {
+                    println!(
+                        "  • {} [{}] attempt={} action={} capability={}",
+                        receipt.id,
+                        receipt.result_status.as_str(),
+                        receipt.attempt_id,
+                        receipt.action_name,
+                        receipt.capability_id
+                    );
+                }
+                for diagnostic in listing.diagnostics {
+                    println!(
+                        "  {} corrupt receipt isolated: {} ({})",
+                        style("!").yellow(),
+                        diagnostic.path,
+                        diagnostic.error
+                    );
+                }
+            }
+            16 => {
+                let receipt = input_object_id("Receipt id")?;
+                let json = caps.export_execution_receipt(id, receipt).map_err(err)?;
+                println!("{json}");
+            }
             _ => break,
         }
     }
     Ok(())
 }
 
+fn live_execution_confirmation(
+    plan: &ExecutionPlan,
+    policy: &ExecutionPolicyDecision,
+    approval_id: ObjectId,
+) -> String {
+    let bound_target = plan
+        .target_snapshot
+        .as_ref()
+        .map(|target| {
+            format!(
+                "provider={} owner={} repository={} ref={} environment={}",
+                target.provider,
+                target.owner.as_deref().unwrap_or("-"),
+                target.repository.as_deref().unwrap_or("-"),
+                target.branch_or_ref.as_deref().unwrap_or("-"),
+                target.environment
+            )
+        })
+        .unwrap_or_else(|| "unbound (validation required)".into());
+    format!(
+        "Live execution review\n  plan snapshot: {} (lineage {}, revision {})\n  target: {}:{}\n  bound target: {}\n  capability: {}\n  actions: {}\n  risk: {}\n  policy: {} (live={})\n  approval: {}\n  authority check: Runtime will revalidate target binding, scope, expiration, and one-time use before mutation.\n  API success will still require independent verification.",
+        plan.id,
+        plan.lineage_id,
+        plan.revision_number,
+        plan.target_system,
+        plan.target_environment,
+        bound_target,
+        plan.capability_id,
+        plan.actions
+            .iter()
+            .map(|action| format!("{}:{}", action.action_id, action.action_name))
+            .collect::<Vec<_>>()
+            .join(", "),
+        policy.risk_level.as_str(),
+        policy.decision.as_str(),
+        policy.live_execution_permitted,
+        approval_id
+    )
+}
+
 fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     let store = LocalStore::open(data_dir).map_err(err)?;
     let runtime = Arc::new(Runtime::new(Arc::new(store)));
-    runtime.register_execution_capability(Arc::new(MockExecutionCapability::new()));
+    runtime
+        .register_execution_capability(Arc::new(MockExecutionCapability::new()))
+        .map_err(err)?;
     if let Ok(repo) = std::env::var("RIVORA_GITHUB_REPO") {
         let token = std::env::var("GITHUB_TOKEN").ok();
-        register_github_execution_capabilities(runtime.execution_registry(), repo, token);
+        register_github_execution_capabilities(runtime.execution_registry(), repo, token)
+            .map_err(err)?;
     }
     Ok(CapabilityService::new(runtime))
 }
