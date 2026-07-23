@@ -12,29 +12,24 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Development: v0.4 — Improvement Proposals
+## Current Development: v0.5 — Measure and Learn
 
-Rivora v0.4 answers: **Can Rivora propose how the engineering system should improve?**
+Rivora v0.5 answers: **Which improvements worked, which failed, and why—using durable evidence without applying changes?**
 
-It turns investigation understanding and engineering assistance into durable, concrete, evidence-backed candidate improvements without applying them.
+It closes the feedback loop after a Proposal is implemented *outside* Rivora by recording external work, measuring outcomes, verifying conclusions, and deriving historical patterns.
 
 ```text
-Observe → Remember → Understand → Assist → Propose Improvement
+Observe → Remember → Understand → Assist → Propose → Measure → Learn
 ```
 
-Implemented for v0.4:
+Implemented for v0.5:
 
-- **Improvement Proposal model and lifecycle** (RFC-020) — durable Proposal lineages, immutable revisions, explicit human decisions, feedback, and provenance
-- **Evidence-backed generation and comparison** (RFC-021) — deterministic alternatives, visible contradictions, inspectable factors, implementation outlines, and proposed Verification Plans
-- **Proposal artifacts and experience** — Markdown/JSON export, bounded coding-agent handoffs, Investigation portfolios, traceability, CLI commands, and Workspace flows
+- **Implementation Records** (RFC-022) — durable, revisioned records of external work linked to exact Proposal snapshots
+- **Measured Learning Outcomes** (RFC-022/023) — expected results, typed evidence, deterministic evaluation, explicit verification with actor + reason
+- **Learning Patterns and influence** (RFC-024) — patterns from verified Outcomes; bounded advisory influence on Proposal ranking
+- **CLI and Workspace learning experience** — `implementation` / `learn` commands, Learning Outcomes surface, exports, and shared CapabilityService flows
 
-v0.1-v0.3 foundations remain operational. A Recommendation suggests a direction; an Improvement Proposal describes a concrete candidate change. Accepted means approved for possible external implementation—it never means implemented or verified. Connectors remain read-only and no external system is mutated.
-
-Deterministic generation requires durable evidence. Passing verification and supported hypotheses may support a Proposal; failed verification, contradictions, and unsuccessful outcomes remain contradicting evidence. Inconclusive records remain visible inputs without being mislabeled. Attached historical context records the authorizing Recalled Context and labels every historical source.
-
-Human-authored candidates without validated evidence remain Draft; evidence-backed explicit candidates may begin Proposed. Current Learning Outcomes and related-Investigation historical outcomes remain separately labeled. Export surfaces isolated Proposal-revision diagnostics when revision history may be incomplete; durable artifact listings separately preserve artifact-record diagnostics.
-
-Interfaces (Workspace and CLI) invoke the same Capability layer over the same Runtime.
+v0.1–v0.4 foundations remain operational. Accepted Proposal ≠ Implementation Record ≠ Verified Measured Outcome ≠ Learning Pattern. Connectors remain read-only and no external system is mutated. Interfaces (Workspace and CLI) invoke the same Capability layer over the same Runtime.
 
 ---
 
@@ -61,7 +56,8 @@ Runtime       (single source of reasoning)
       ├── Recalled Context / Patterns / Trends
       ├── Assisted Workflows
       ├── Engineering Assistance
-      └── Improvement Proposals
+      ├── Improvement Proposals
+      └── Implementation Records / Measured Outcomes / Patterns
       │
       ▼
 Local Store   (.rivora/data)
@@ -80,6 +76,8 @@ Connectors ──► Observations only ──► Runtime
 - Recommendations are directional assistance, never auto-applied.
 - Improvement Proposals are durable suggestions, never implementations.
 - Proposal acceptance is explicit and never implies implementation or verification.
+- Implementation Records record external work only; they never apply changes.
+- Measured Learning Outcomes require explicit evaluation and verification authority.
 - Learning records outcomes without rewriting history.
 - Investigations remain independent historical records; relationships do not merge them.
 - Recalled historical context is labeled and distinct from current evidence.

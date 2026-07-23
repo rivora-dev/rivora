@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.4.0 — Improvement Proposals (unreleased)
+## 0.5.0 — Learning Outcomes
+
+### Phase 1–2 — Implementation Records, Measured Outcomes, Patterns (RFC-022/023/024)
+
+- Durable Implementation Records for external work linked to Improvement Proposals
+- Measured Learning Outcomes with expected results, typed evidence, deterministic evaluation, and explicit verification
+- Learning Patterns derived from verified Outcomes with historical influence explanations
+- Acceptance never implies implementation; evaluation never implies verified; patterns never auto-apply changes
+
+### Phase 3 — CLI, Workspace, and learning experience
+
+- Thin CLI `implementation` and `learn` command trees over CapabilityService
+- Preserved v0.1 disposition recording as `record-outcome`
+- Workspace Learning Outcomes surface for record → measure → verify → pattern flows
+- Markdown/JSON export for Outcomes and Patterns; ranking factors include bounded pattern influence
+- End-to-end and CLI learning workflow tests; PROPOSAL and LEARNING boundary messaging
+
+## 0.4.0 — Improvement Proposals
 
 ### Phase 1 — Proposal Model and Lifecycle (RFC-020)
 
