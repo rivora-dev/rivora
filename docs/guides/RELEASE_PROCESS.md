@@ -2,7 +2,7 @@
 
 Rivora uses trunk-based development on `main`.
 
-## Version patch (example: v0.9.1)
+## Version patch (example: v0.9.2)
 
 1. Bump workspace version in root `Cargo.toml` (`[workspace.package].version`).
 2. Update `CHANGELOG.md`, README, install/distribution docs as needed.
@@ -22,8 +22,8 @@ Rivora uses trunk-based development on `main`.
 6. Create an annotated tag matching the workspace version:
 
    ```bash
-   git tag -a v0.9.1 -m "Rivora v0.9.1 — Binary Distribution and Installer"
-   git push origin v0.9.1
+   git tag -a v0.9.2 -m "Rivora v0.9.2 — Restore the Default Workspace Entry Point"
+   git push origin v0.9.2
    ```
 
 7. The `Release` GitHub Actions workflow (`.github/workflows/release.yml`) builds

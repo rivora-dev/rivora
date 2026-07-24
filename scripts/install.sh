@@ -3,7 +3,7 @@
 #
 # Usage:
 #   curl -fsSL https://rivora.dev/install | sh
-#   curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.1 sh
+#   curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.2 sh
 #   curl -fsSL https://rivora.dev/install | RIVORA_INSTALL_DIR=$HOME/.local/bin sh
 #
 # This script must work when executed via stdin (do not rely on $0 being a file).
@@ -21,7 +21,7 @@ GITHUB_RELEASES="${RIVORA_GITHUB_RELEASES:-https://github.com/${GITHUB_REPO}/rel
 DOWNLOAD_BASE="${RIVORA_DOWNLOAD_BASE:-https://github.com/${GITHUB_REPO}/releases/download}"
 
 # Optional overrides (documented):
-#   RIVORA_VERSION       — e.g. v0.9.1 or 0.9.1
+#   RIVORA_VERSION       — e.g. v0.9.2 or 0.9.2
 #   RIVORA_INSTALL_DIR   — destination directory for binaries
 #   RIVORA_GITHUB_REPO   — override repo (tests)
 #   RIVORA_GITHUB_API    — override API base (tests / mocks)
@@ -518,6 +518,7 @@ Binary was not left partially installed without verification — check ${INSTALL
 
     info ""
     info "Success. Try:"
+    info "  rivora"
     info "  rivora --version"
     info "  rivora --help"
 }

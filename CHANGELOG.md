@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.9.2 — Restore the Default Workspace Entry Point
+
+User-visible entrypoint fix. Bare `rivora` launches the Workspace again. No Runtime, Engineering Loop, Capability, Connector, or persistence redesign. Does not begin v1.0.
+
+### Highlights
+
+- Bare `rivora` launches the interactive Workspace (same shared path as `rivora-workspace`)
+- Explicit subcommands continue as one-shot CLI operations
+- `rivora --help` and `rivora --version` remain noninteractive
+- `rivora-workspace` remains supported for compatibility and debugging
+- Shared `run_workspace` prevents binary drift
+- Non-TTY and `--json` without a command return clear typed errors
+
+### Entry routing
+
+| Invocation | Behavior |
+|------------|----------|
+| `rivora` | Launch Workspace (requires a terminal) |
+| `rivora <command>` | One-shot CLI |
+| `rivora --help` | CLI help |
+| `rivora --version` | Version |
+| `rivora --json` (no command) | Error: `--json` requires a subcommand |
+| `rivora` non-TTY | Error: interactive Workspace requires a terminal; use a CLI subcommand |
+| `rivora-workspace` | Compatibility Workspace entrypoint (shared launcher) |
+
+### Packaging
+
+- Both `rivora` and `rivora-workspace` remain in release archives and the installer
+- Installer success message lists `rivora` as the primary first-run command
+
 ## 0.9.1 — Binary Distribution and Installer
 
 Distribution and installation patch. No Runtime, Engineering Loop, Capability, Connector, persistence, CLI command-surface, or Workspace architecture redesign. Does not begin v1.0.

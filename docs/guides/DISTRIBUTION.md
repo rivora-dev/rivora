@@ -1,6 +1,6 @@
 # Rivora Binary Distribution
 
-**Release:** v0.9.1 — Binary Distribution and Installer
+**Release:** v0.9.2 — Restore the Default Workspace Entry Point (distribution contract from v0.9.1)
 
 This guide defines the public binary distribution contract for Rivora.
 
@@ -37,8 +37,8 @@ For release tag `vX.Y.Z`, GitHub Release assets are:
 Each archive contains only intended distributables:
 
 ```text
-rivora
-rivora-workspace   # interactive Workspace binary
+rivora             # Workspace (bare) + one-shot CLI (subcommands)
+rivora-workspace   # compatibility Workspace binary (same shared launcher)
 LICENSE
 README.md
 ```
@@ -53,7 +53,7 @@ local stores, internal docs, benchmarks, or Git metadata.
 - `SHA256SUMS` uses the standard `sha256sum` text format:
   `<64-hex>  <filename>`.
 
-## Supported platforms (v0.9.1)
+## Supported platforms (v0.9.1+)
 
 | Target | OS | Arch | Notes |
 |--------|----|------|-------|
@@ -63,7 +63,7 @@ local stores, internal docs, benchmarks, or Git metadata.
 | `aarch64-unknown-linux-gnu` | Linux | ARM64 | Native `ubuntu-24.04-arm` |
 
 Windows is **not** supported in this release. A PowerShell installer
-(`install.ps1`) is out of scope for v0.9.1.
+(`install.ps1`) remains out of scope.
 
 ## Release pipeline
 
@@ -94,7 +94,7 @@ Source: `scripts/install.sh`
 | OS | Darwin → `apple-darwin`, Linux → `unknown-linux-gnu` |
 | Arch | `arm64`/`aarch64` → `aarch64`, `x86_64`/`amd64` → `x86_64` |
 | Version | Latest stable (non-draft, non-prerelease) by default |
-| Override | `RIVORA_VERSION=v0.9.1` or `0.9.1` |
+| Override | `RIVORA_VERSION=v0.9.2` or `0.9.2` |
 | Install dir | `RIVORA_INSTALL_DIR` → writable PATH dir → `$HOME/.local/bin` |
 | Integrity | Download `SHA256SUMS`, verify selected archive only |
 | Privilege | Never invokes `sudo`; never writes shell profiles |
@@ -107,7 +107,7 @@ Source: `scripts/install.sh`
 curl -fsSL https://rivora.dev/install | sh
 
 # Explicit version
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.1 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.2 sh
 
 # Custom directory
 curl -fsSL https://rivora.dev/install | RIVORA_INSTALL_DIR=$HOME/bin sh

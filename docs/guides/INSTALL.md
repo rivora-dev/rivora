@@ -13,6 +13,15 @@ SHA-256 checksums, and installs into a user-writable directory (default:
 
 It never runs `sudo` and never modifies shell profiles.
 
+After install:
+
+```bash
+rivora              # open the Workspace
+rivora <command>    # one-shot CLI operations
+rivora --help
+rivora --version
+```
+
 ## Supported platforms
 
 | Platform | Target triple |
@@ -29,9 +38,9 @@ Windows is not supported by the shell installer in this release.
 ### Explicit version
 
 ```bash
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.1 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.2 sh
 # also accepts:
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=0.9.1 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=0.9.2 sh
 ```
 
 ### Custom install directory
@@ -69,15 +78,15 @@ sh install-rivora.sh
 
 | Binary | Role |
 |--------|------|
-| `rivora` | CLI (one-shot and scripting) |
-| `rivora-workspace` | Interactive terminal Workspace |
+| `rivora` | Canonical entrypoint: bare invocation opens the Workspace; subcommands are one-shot CLI |
+| `rivora-workspace` | Compatibility / debugging Workspace entrypoint (same shared launcher) |
 
 ## Verify
 
 ```bash
 rivora --version
-rivora-workspace --version
 rivora --help
+rivora-workspace --version
 ```
 
 ## Uninstall
@@ -101,7 +110,7 @@ rm -f "$(command -v rivora)" "$(command -v rivora-workspace)"
 4. Extract and install:
 
    ```bash
-   tar -xzf rivora-v0.9.1-<target>.tar.gz
+   tar -xzf rivora-v0.9.2-<target>.tar.gz
    mkdir -p "$HOME/.local/bin"
    mv rivora rivora-workspace "$HOME/.local/bin/"
    ```
@@ -113,7 +122,7 @@ Requirements: Rust 1.75+ (edition 2021).
 ```bash
 git clone https://github.com/rivora-dev/rivora.git
 cd rivora
-git checkout v0.9.1   # or main
+git checkout v0.9.2   # or main
 cargo build --workspace --release
 ./target/release/rivora --version
 ./target/release/rivora-workspace --version
@@ -121,8 +130,8 @@ cargo build --workspace --release
 
 Binaries:
 
-- `target/release/rivora`
-- `target/release/rivora-workspace`
+- `target/release/rivora` — Workspace (bare) + CLI (subcommands)
+- `target/release/rivora-workspace` — compatibility Workspace entrypoint
 
 ## Troubleshooting
 

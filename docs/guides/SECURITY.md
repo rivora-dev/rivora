@@ -1,6 +1,6 @@
 # Security Notes (v0.9+)
 
-## Binary installation (v0.9.1)
+## Binary installation (v0.9.1+)
 
 - Primary install path: `curl -fsSL https://rivora.dev/install | sh`
 - Downloads use HTTPS with TLS verification always enabled

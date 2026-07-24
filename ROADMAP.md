@@ -15,10 +15,11 @@ engineering-system mutation boundaries.
 * v0.8 — Capability Coverage: every first-party Capability and Connector participates consistently in the Engineering Loop
 * v0.9 — Production Hardening: prove the architecture remains reliable at realistic local/on-prem scale
 * v0.9.1 — Binary Distribution and Installer: first-party `rivora.dev/install`, platform archives, checksums
+* v0.9.2 — Restore the Default Workspace Entry Point: bare `rivora` launches Workspace again
 
 ## Current boundary
 
-v0.9.1 ships binary distribution and installation on top of v0.9 production hardening.
+v0.9.2 restores bare `rivora` as the canonical Workspace entrypoint on top of v0.9.1 distribution.
 
 v0.9 is the architectural release gate between completeness and public stability.
 
@@ -38,10 +39,11 @@ v0.7 — Connect the architecture
 v0.8 — Apply the architecture across first-party Capabilities
 v0.9 — Prove the architecture remains reliable at realistic scale
 v0.9.1 — Make Rivora installable from rivora.dev with verified binaries
+v0.9.2 — Restore bare `rivora` as the Workspace entrypoint
 v1.0 — Freeze the validated contracts
 ```
 
-v0.9 / v0.9.1 do **not** introduce a new foundational Runtime subsystem, redesign the
+v0.9 / v0.9.1 / v0.9.2 do **not** introduce a new foundational Runtime subsystem, redesign the
 Engineering Loop, expand broad provider coverage, or begin v1.0 work.
 
 Hardening may not weaken determinism, provenance, append-only Memory,

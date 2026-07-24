@@ -12,7 +12,7 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Release: v0.9.1 — Binary Distribution and Installer
+## Current Release: v0.9.2 — Restore the Default Workspace Entry Point
 
 Primary install:
 
@@ -20,7 +20,14 @@ Primary install:
 curl -fsSL https://rivora.dev/install | sh
 ```
 
-v0.9.1 is a **distribution and installation patch** on top of v0.9.0 Production Hardening. It does not redesign Runtime, Engineering Loop, Capability, Connector, persistence, CLI, or Workspace architecture, and it does not begin v1.0 work.
+```bash
+rivora              # open the Workspace
+rivora <command>    # one-shot CLI
+rivora --help
+rivora --version
+```
+
+v0.9.2 restores bare `rivora` as the canonical Workspace entrypoint while preserving all explicit CLI commands. `rivora-workspace` remains available for compatibility. No Runtime, Engineering Loop, Capability, Connector, or persistence redesign.
 
 v0.9 answered: **Can Rivora preserve deterministic, explainable, durable engineering understanding when operating at realistic production scale and under imperfect conditions?**
 
@@ -120,14 +127,14 @@ curl -fsSL https://rivora.dev/install | sh
 - Detects OS and architecture
 - Downloads the latest stable GitHub Release archive
 - Verifies SHA-256 checksums
-- Installs `rivora` and `rivora-workspace` to a user-writable directory (default `$HOME/.local/bin`)
+- Installs `rivora` (Workspace + CLI) and `rivora-workspace` (compatibility) to a user-writable directory (default `$HOME/.local/bin`)
 - Never uses `sudo` and never modifies shell profiles
 
 Options:
 
 ```bash
 # Explicit version
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.1 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.2 sh
 
 # Custom directory
 curl -fsSL https://rivora.dev/install | RIVORA_INSTALL_DIR=$HOME/bin sh
@@ -152,17 +159,20 @@ cargo build --workspace --release
 
 Binaries:
 
-- `target/release/rivora` — CLI
-- `target/release/rivora-workspace` — interactive Workspace
+- `target/release/rivora` — Workspace (bare) + one-shot CLI (subcommands)
+- `target/release/rivora-workspace` — compatibility Workspace entrypoint
 
 Manual archives and checksums are published on [GitHub Releases](https://github.com/rivora-dev/rivora/releases).
 
 ---
 
-## Quick start (CLI)
+## Quick start
 
 ```sh
-# Create an Investigation
+# Open the interactive Workspace
+./target/release/rivora
+
+# Or create an Investigation from the CLI
 ./target/release/rivora investigation create "CI failure on main" \
   --description "Investigate recent pipeline failures"
 
@@ -305,12 +315,14 @@ Global flags:
 
 ## Workspace
 
-Primary interactive experience:
+Primary interactive experience — run bare `rivora` (or `rivora-workspace` for compatibility):
 
 ```sh
-./target/release/rivora-workspace
+./target/release/rivora
 # or with custom store
-./target/release/rivora-workspace --data-dir .rivora/data
+./target/release/rivora --data-dir .rivora/data
+# compatibility binary
+./target/release/rivora-workspace
 ```
 
 The Workspace lets you:
@@ -340,6 +352,8 @@ Non-interactive smoke mode (CI):
 ```sh
 ./target/release/rivora-workspace --smoke
 ```
+
+Bare `rivora` without a terminal prints a clear error and does not launch an interactive session. Use a CLI subcommand in scripts and CI.
 
 ---
 
@@ -450,7 +464,8 @@ Follow Red → Green → Refactor. See `.agents/skills/build-rivora/SKILL.md`.
 | `rivora` | Domain, Runtime, Capabilities, local store |
 | `rivora-connectors` | Local + GitHub observation connectors |
 | `rivora-cli` | Thin CLI over Capabilities |
-| `rivora-workspace` | Interactive Workspace over Capabilities |
+| `rivora` (bare) | Interactive Workspace (canonical entrypoint) |
+| `rivora-workspace` | Compatibility Workspace entrypoint (shared launcher) |
 
 ---
 
