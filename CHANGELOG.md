@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.9.1 — Binary Distribution and Installer
+
+Distribution and installation patch. No Runtime, Engineering Loop, Capability, Connector, persistence, CLI command-surface, or Workspace architecture redesign. Does not begin v1.0.
+
+### Highlights
+
+- First-party installation: `curl -fsSL https://rivora.dev/install | sh`
+- Platform-specific release archives on GitHub Releases
+- SHA-256 verification via `SHA256SUMS`
+- User-local install without implicit `sudo`
+- Explicit version install via `RIVORA_VERSION`
+
+### Distribution
+
+- Stable asset names: `rivora-vX.Y.Z-<target>.tar.gz` plus `SHA256SUMS`
+- Supported targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`
+- Archives contain `rivora`, `rivora-workspace`, `LICENSE`, `README.md`
+- Tag-triggered GitHub Actions release workflow (fmt, clippy, tests, package, checksum, upload)
+- Refuse silent overwrite when an existing release asset has a different checksum
+
+### Installer
+
+- Tracked installer: `scripts/install.sh` (served at `https://rivora.dev/install`)
+- OS/arch detection, latest stable resolution, optional `RIVORA_VERSION` / `RIVORA_INSTALL_DIR`
+- HTTPS download with retries, checksum verification before extract/install
+- Atomic install into user-writable directories; PATH guidance without profile mutation
+- Deterministic installer unit tests (`scripts/tests/install.test.sh`)
+
+### Cloudflare
+
+- New Worker `rivora-install` owns `/install` only (does not replace the marketing site origin)
+- Removed legacy commercial installers: deleted Worker `rivora-cli-installer` and unassigned `rivora.dev/install` from `rivora-mvp-workers` (no more `cli.rivora.dev` proxy)
+- Embeds `scripts/install.sh` at build time; `GET`/`HEAD` with shellscript content type and security headers; other methods `405`
+
+### Documentation
+
+- `docs/guides/INSTALL.md`, `docs/guides/DISTRIBUTION.md`
+- README install path updated; source-build and manual GitHub Release paths retained
+
 ## 0.9.0 — Production Hardening
 
 ### Phase 0–1 — Audit and operating envelope

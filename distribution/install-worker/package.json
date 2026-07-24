@@ -1,0 +1,9 @@
+{
+  "name": "rivora-install-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "deploy": "node build.mjs && wrangler deploy"
+  }
+}

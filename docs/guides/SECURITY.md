@@ -1,4 +1,13 @@
-# Security Notes (v0.9)
+# Security Notes (v0.9+)
+
+## Binary installation (v0.9.1)
+
+- Primary install path: `curl -fsSL https://rivora.dev/install | sh`
+- Downloads use HTTPS with TLS verification always enabled
+- Selected archive is verified against release `SHA256SUMS` before extract/install
+- Installer never invokes `sudo` and never modifies shell profiles
+- Prefer inspecting the script before piping to a shell
+- GitHub Releases remain the artifact store; `rivora.dev/install` is the stable install contract only
 
 ## Guarantees strengthened in v0.9
 

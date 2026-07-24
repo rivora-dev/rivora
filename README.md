@@ -12,11 +12,17 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Development: v0.9 — Production Hardening
+## Current Release: v0.9.1 — Binary Distribution and Installer
 
-Rivora v0.9 answers: **Can Rivora preserve deterministic, explainable, durable engineering understanding when operating at realistic production scale and under imperfect conditions?**
+Primary install:
 
-v0.9 does not add a new foundational subsystem. It hardens the architecture from v0.1–v0.8 for local and on-prem use before v1.0 freezes public contracts.
+```bash
+curl -fsSL https://rivora.dev/install | sh
+```
+
+v0.9.1 is a **distribution and installation patch** on top of v0.9.0 Production Hardening. It does not redesign Runtime, Engineering Loop, Capability, Connector, persistence, CLI, or Workspace architecture, and it does not begin v1.0 work.
+
+v0.9 answered: **Can Rivora preserve deterministic, explainable, durable engineering understanding when operating at realistic production scale and under imperfect conditions?**
 
 ```text
 External systems → Connectors → Validation/Dedup → Routing → Engineering Loop → Durable local store
@@ -103,7 +109,38 @@ See `docs/ARCHITECTURAL_INVARIANTS.md` and `docs/rfc/`.
 
 ---
 
-## Install / Build
+## Install
+
+### Binary install (recommended)
+
+```bash
+curl -fsSL https://rivora.dev/install | sh
+```
+
+- Detects OS and architecture
+- Downloads the latest stable GitHub Release archive
+- Verifies SHA-256 checksums
+- Installs `rivora` and `rivora-workspace` to a user-writable directory (default `$HOME/.local/bin`)
+- Never uses `sudo` and never modifies shell profiles
+
+Options:
+
+```bash
+# Explicit version
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.1 sh
+
+# Custom directory
+curl -fsSL https://rivora.dev/install | RIVORA_INSTALL_DIR=$HOME/bin sh
+
+# Inspect before execute
+curl -fsSL https://rivora.dev/install -o install-rivora.sh && less install-rivora.sh && sh install-rivora.sh
+```
+
+Supported platforms: macOS (Apple Silicon and Intel), Linux x86_64 and ARM64 (glibc). Windows is not supported in this release.
+
+See `docs/guides/INSTALL.md` and `docs/guides/DISTRIBUTION.md`.
+
+### Build from source
 
 Requirements: Rust 1.75+ (edition 2021).
 
@@ -117,6 +154,8 @@ Binaries:
 
 - `target/release/rivora` — CLI
 - `target/release/rivora-workspace` — interactive Workspace
+
+Manual archives and checksums are published on [GitHub Releases](https://github.com/rivora-dev/rivora/releases).
 
 ---
 

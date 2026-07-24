@@ -1,0 +1,292 @@
+# Rivora binary release pipeline
+#
+# Triggered by version tags (v*). Builds platform archives, generates
+# SHA256SUMS, and uploads assets to the matching GitHub Release.
+#
+# Minimum permissions: contents: write
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and package without uploading release assets"
+        type: boolean
+        default: true
+      tag:
+        description: "Tag to package (workflow_dispatch only; defaults to workspace version)"
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  validate:
+    name: Validate tag and quality gates
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      bare_version: ${{ steps.meta.outputs.bare_version }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Derive version metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          WORKSPACE_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+          if [ -z "$WORKSPACE_VERSION" ]; then
+            echo "Could not read workspace version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          DRY_RUN="false"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              DRY_RUN="true"
+            fi
+            if [ -n "${{ inputs.tag }}" ]; then
+              TAG="${{ inputs.tag }}"
+            else
+              TAG="v${WORKSPACE_VERSION}"
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          case "$TAG" in
+            v*) BARE="${TAG#v}" ;;
+            *)
+              echo "Tag must look like vX.Y.Z, got: ${TAG}" >&2
+              exit 1
+              ;;
+          esac
+
+          # Strict semver digits
+          if ! printf '%s' "$BARE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Tag must be vMAJOR.MINOR.PATCH, got: ${TAG}" >&2
+            exit 1
+          fi
+
+          if [ "$BARE" != "$WORKSPACE_VERSION" ]; then
+            echo "Tag ${TAG} does not match workspace version ${WORKSPACE_VERSION}" >&2
+            exit 1
+          fi
+
+          echo "version=v${BARE}" >> "$GITHUB_OUTPUT"
+          echo "bare_version=${BARE}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
+          echo "Validated tag v${BARE} (dry_run=${DRY_RUN})"
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --all-targets --all-features
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+            cross: false
+          - target: x86_64-apple-darwin
+            os: macos-14
+            cross: true
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            cross: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binaries
+        run: |
+          set -euo pipefail
+          cargo build --workspace --release --target "${{ matrix.target }}"
+
+      - name: Locate binary directory
+        id: bins
+        run: |
+          set -euo pipefail
+          BIN_DIR="target/${{ matrix.target }}/release"
+          test -f "${BIN_DIR}/rivora"
+          test -x "${BIN_DIR}/rivora" || chmod +x "${BIN_DIR}/rivora"
+          if [ -f "${BIN_DIR}/rivora-workspace" ]; then
+            chmod +x "${BIN_DIR}/rivora-workspace" || true
+          fi
+          echo "bin_dir=${BIN_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Native --version smoke
+        if: ${{ !matrix.cross }}
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/rivora"
+          OUT="$("$BIN" --version)"
+          echo "$OUT"
+          echo "$OUT" | grep -F "${{ needs.validate.outputs.bare_version }}"
+          if [ -x "target/${{ matrix.target }}/release/rivora-workspace" ]; then
+            WS_OUT="$(target/${{ matrix.target }}/release/rivora-workspace --version)"
+            echo "$WS_OUT"
+            echo "$WS_OUT" | grep -F "${{ needs.validate.outputs.bare_version }}"
+          fi
+
+      - name: Package archive
+        run: |
+          set -euo pipefail
+          chmod +x scripts/package-release.sh
+          mkdir -p dist
+          scripts/package-release.sh \
+            "${{ needs.validate.outputs.version }}" \
+            "${{ matrix.target }}" \
+            "${{ steps.bins.outputs.bin_dir }}" \
+            dist
+          ARCHIVE="dist/rivora-${{ needs.validate.outputs.version }}-${{ matrix.target }}.tar.gz"
+          test -f "$ARCHIVE"
+          echo "Archive members:"
+          tar -tzf "$ARCHIVE"
+          tar -tzf "$ARCHIVE" | grep -E '^rivora$'
+          tar -tzf "$ARCHIVE" | grep -E '^LICENSE$'
+          tar -tzf "$ARCHIVE" | grep -E '^README\.md$'
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: dist/rivora-${{ needs.validate.outputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Checksums and publish
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: archive-*
+          merge-multiple: true
+
+      - name: Verify expected archives and generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.validate.outputs.version }}"
+          EXPECTED=(
+            "rivora-${VERSION}-aarch64-apple-darwin.tar.gz"
+            "rivora-${VERSION}-x86_64-apple-darwin.tar.gz"
+            "rivora-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+            "rivora-${VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+          )
+          cd dist
+          ls -la
+          for f in "${EXPECTED[@]}"; do
+            test -f "$f" || { echo "Missing required archive: $f" >&2; exit 1; }
+          done
+          # Refuse unexpected empty files
+          for f in "${EXPECTED[@]}"; do
+            test -s "$f" || { echo "Empty archive: $f" >&2; exit 1; }
+          done
+          sha256sum "${EXPECTED[@]}" | tee SHA256SUMS
+          echo "---- SHA256SUMS ----"
+          cat SHA256SUMS
+
+      - name: Refuse silent overwrite of mismatched assets
+        if: ${{ needs.validate.outputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.validate.outputs.version }}"
+          if ! gh release view "$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release ${VERSION} does not exist yet; will create on upload."
+            exit 0
+          fi
+          mkdir -p existing
+          # Download any existing assets with the same names and compare checksums
+          while read -r sum file; do
+            [ -n "$file" ] || continue
+            if gh release download "$VERSION" --repo "${{ github.repository }}" --pattern "$file" --dir existing 2>/dev/null; then
+              if [ -f "existing/${file}" ]; then
+                OLD="$(sha256sum "existing/${file}" | awk '{print $1}')"
+                NEW="$(awk -v f="$file" '$2==f {print $1}' dist/SHA256SUMS)"
+                if [ -n "$OLD" ] && [ -n "$NEW" ] && [ "$OLD" != "$NEW" ]; then
+                  echo "Refusing to overwrite ${file}: existing checksum ${OLD} != new ${NEW}" >&2
+                  exit 1
+                fi
+                echo "Asset ${file} already present with matching checksum."
+              fi
+            fi
+          done < dist/SHA256SUMS
+
+      - name: Upload release assets
+        if: ${{ needs.validate.outputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.validate.outputs.version }}"
+          # Ensure the GitHub Release exists (notes may be added separately)
+          if ! gh release view "$VERSION" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$VERSION" \
+              --repo "${{ github.repository }}" \
+              --title "Rivora ${VERSION} — Binary Distribution and Installer" \
+              --notes "Binary assets for ${VERSION}. See CHANGELOG.md for full notes." \
+              --verify-tag
+          fi
+          # Upload without clobbering different content (checked above)
+          gh release upload "$VERSION" \
+            dist/*.tar.gz \
+            dist/SHA256SUMS \
+            --repo "${{ github.repository }}" \
+            --clobber
+          echo "Published assets for ${VERSION}:"
+          gh release view "$VERSION" --repo "${{ github.repository }}" --json assets --jq '.assets[].name'
+
+      - name: Dry-run summary
+        if: ${{ needs.validate.outputs.dry_run == 'true' }}
+        run: |
+          set -euo pipefail
+          echo "Dry-run complete. Archives ready, no upload performed."
+          ls -la dist/
+          cat dist/SHA256SUMS

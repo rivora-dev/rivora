@@ -1,4 +1,17 @@
-# Troubleshooting Guide (v0.9)
+# Troubleshooting Guide (v0.9+)
+
+## Installer / binary install
+
+**Primary install:** `curl -fsSL https://rivora.dev/install | sh`
+
+| Symptom | Fix |
+|---------|-----|
+| Unsupported OS/arch | macOS or Linux on aarch64/x86_64 only; no Windows installer yet |
+| Checksum mismatch | Do not install; re-download; report if it persists |
+| Not writable install dir | `RIVORA_INSTALL_DIR=$HOME/.local/bin` (never uses sudo) |
+| Binary not found after install | Add install dir to `PATH` (installer prints the exact line) |
+| Want a specific version | `RIVORA_VERSION=v0.9.1` |
+| Prefer manual install | GitHub Releases archives + `SHA256SUMS` — see `docs/guides/INSTALL.md` |
 
 ## Store lock conflict
 

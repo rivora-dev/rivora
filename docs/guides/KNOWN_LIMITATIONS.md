@@ -1,4 +1,12 @@
-# Known Limitations (v0.9)
+# Known Limitations (v0.9+)
+
+## Distribution (v0.9.1)
+
+- No Windows installer or Windows release binaries in this patch
+- Shell installer requires `curl` or `wget`, `tar`, and `sha256sum` or `shasum`
+- Install directory must be user-writable (no implicit sudo)
+- Linux builds target glibc (`unknown-linux-gnu`), not musl
+- Cross-platform support claims require published + verified release assets
 
 ## Intentional non-goals
 

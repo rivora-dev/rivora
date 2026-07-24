@@ -1,0 +1,23 @@
+# Rivora first-party installer endpoint
+# Serves scripts/install.sh at https://rivora.dev/install
+#
+# Deploy from this directory (or repo root via -c):
+#   wrangler deploy -c distribution/install-worker/wrangler.toml
+#
+# Replaces the prior commercial rivora-cli-installer content for /install*.
+# Does not claim the marketing website origin (my-next-app on rivora.dev/*).
+
+name = "rivora-install"
+main = "src/index.js"
+compatibility_date = "2025-04-01"
+
+# Narrow routes only — do not intercept unrelated website paths.
+routes = [
+  { pattern = "rivora.dev/install", zone_name = "rivora.dev" },
+  { pattern = "rivora.dev/install/", zone_name = "rivora.dev" },
+  { pattern = "rivora.dev/install.sh", zone_name = "rivora.dev" },
+]
+
+# Build embeds scripts/install.sh into src/script.generated.js.
+# Run from this directory: `npm run deploy` or `node build.mjs && wrangler deploy`
+# (Wrangler [build] cwd is the project root when -c is used from elsewhere.)
