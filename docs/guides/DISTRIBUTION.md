@@ -151,7 +151,7 @@ The script is embedded at Worker build time from `scripts/install.sh`.
 ```bash
 git clone https://github.com/rivora-dev/rivora.git
 cd rivora
-git checkout v0.9.1
+git checkout v0.9.2
 cargo build --workspace --release
 ./target/release/rivora --version
 ```

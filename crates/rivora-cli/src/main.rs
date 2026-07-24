@@ -8,7 +8,6 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -27,20 +26,17 @@ use rivora::runtime::proposal::{
     CreateProposalRequest, ProposalPortfolioFilter, RefineProposalRequest,
 };
 use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
-use rivora::storage::LocalStore;
 use rivora::{
-    CapabilityService, CliExitCode, ExecutionAction, ExecutionPrecondition,
-    MockExecutionCapability, OperatingEnvelope, OperatingProfile, PerformanceBudget,
-    ReplayContract, RivoraError, Runtime,
+    CapabilityService, CliExitCode, ExecutionAction, ExecutionPrecondition, OperatingEnvelope,
+    OperatingProfile, PerformanceBudget, ReplayContract, RivoraError,
 };
 use rivora_connectors::github::GitHubConnector;
 use rivora_connectors::github_actions::{ConnectorStatusReport, GitHubActionsConnector};
 use rivora_connectors::kubernetes::KubernetesConnector;
 use rivora_connectors::local::LocalConnector;
-use rivora_connectors::register_first_party_github_execution_capabilities;
 use rivora_connectors::sentry::SentryConnector;
 use rivora_connectors::NormalizedObservation;
-use rivora_workspace::{run_workspace, WorkspaceLaunchConfig};
+use rivora_workspace::{err, open_capabilities, run_workspace, WorkspaceLaunchConfig};
 
 const PROPOSAL_BOUNDARY: &str = "Proposal only — not applied, not implemented, not verified.";
 const LEARNING_BOUNDARY: &str = "Measured Learning Outcome — external implementation recorded, never auto-applied; verified only with explicit actor+reason.";
@@ -4695,20 +4691,6 @@ fn connector_collect(
     }
 }
 
-fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
-    let store = LocalStore::open(data_dir).map_err(err)?;
-    let runtime = Arc::new(Runtime::new(Arc::new(store)));
-    // Always register the in-process mock capability for local/tests.
-    runtime
-        .register_execution_capability(Arc::new(MockExecutionCapability::new()))
-        .map_err(err)?;
-    // v0.8: always register first-party GitHub adapters for Capability Coverage.
-    // Live execution still requires GITHUB_TOKEN + plan/approval; dry-run works without.
-    register_first_party_github_execution_capabilities(runtime.execution_registry())
-        .map_err(err)?;
-    Ok(CapabilityService::new(runtime))
-}
-
 fn parse_inv(s: &str) -> Result<InvestigationId, String> {
     s.parse().map_err(err)
 }
@@ -4735,10 +4717,6 @@ fn parse_kind(s: &str) -> ObservationKind {
         "observability" | "alert" | "sentry" => ObservationKind::Observability,
         other => ObservationKind::Other(other.into()),
     }
-}
-
-fn err(e: impl std::fmt::Display) -> String {
-    e.to_string()
 }
 
 fn parse_status(s: &str) -> Result<InvestigationStatus, String> {

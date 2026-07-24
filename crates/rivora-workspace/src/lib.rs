@@ -3192,7 +3192,7 @@ fn live_execution_confirmation(
     )
 }
 
-fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
+pub fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     let store = LocalStore::open(data_dir).map_err(err)?;
     let runtime = Arc::new(Runtime::new(Arc::new(store)));
     runtime
@@ -3204,6 +3204,6 @@ fn open_capabilities(data_dir: &PathBuf) -> Result<CapabilityService, String> {
     Ok(CapabilityService::new(runtime))
 }
 
-fn err(e: impl std::fmt::Display) -> String {
+pub fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
