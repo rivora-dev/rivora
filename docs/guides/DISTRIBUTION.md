@@ -1,6 +1,6 @@
 # Rivora Binary Distribution
 
-**Release:** v0.10.0 — Restore the Default Workspace Entry Point (distribution contract from v0.9.1)
+**Release:** v0.10.0 — Unified Workspace (distribution contract from v0.9.1)
 
 This guide defines the public binary distribution contract for Rivora.
 

@@ -477,7 +477,7 @@ Follow Red → Green → Refactor. See `.agents/skills/build-rivora/SKILL.md`.
 | `docs/ARCHITECTURAL_INVARIANTS.md` | Non-negotiable architectural invariants (tracked source of truth) |
 | `docs/internal/` | Local working notes only (gitignored; not required for contributors) |
 | `ROADMAP.md` | Release progression and future boundary |
-| `docs/rfc/RFC-000` … `RFC-028` | Architecture and feature RFCs, including Engineering Loop (RFC-028) validated across first-party coverage in v0.8 |
+| `docs/rfc/RFC-000` … `RFC-029` | Architecture and feature RFCs, including Engineering Loop (RFC-028) validated across first-party coverage in v0.8, and Unified Workspace (RFC-029) delivered in v0.10 |
 | `docs/guides/CAPABILITY_GUIDE.md` | Contributor guide for first-party Capabilities |
 | `docs/guides/CONNECTOR_GUIDE.md` | Contributor guide for Connectors |
 | `docs/guides/CAPABILITY_CATALOG.md` | First-party Capability catalog and lifecycle coverage matrix |
