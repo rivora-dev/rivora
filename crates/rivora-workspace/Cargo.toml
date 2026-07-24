@@ -19,11 +19,11 @@ rivora = { workspace = true }
 rivora-connectors = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
-console = { workspace = true }
-dialoguer = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-

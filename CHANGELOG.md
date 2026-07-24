@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.10.0 — Unified Workspace
+
+Conversation-first full-screen Workspace over the existing Runtime and Capabilities. Does not weaken execution authority, append-only Memory, or CLI compatibility. Does not begin v1.0.
+
+### Highlights
+
+- Bare `rivora` launches the Unified Workspace (persistent full-screen terminal app)
+- Conversation-first “Ask Rivora…” composer (not a menu wizard)
+- `/` searchable actions and `Ctrl+P` global command palette (one shared action registry)
+- Typed `WorkspaceIntent` boundary: natural language is interpreted, then executed via Capabilities
+- Deterministic intent interpreter with confirmation for mutating create flows
+- Investigation create/search/open without requiring opaque IDs in ordinary use
+- Timeline and inspector projections over durable objects
+- Engineering Loop surfaces: evaluate, verify, recommend, proposals, execution review, learning
+- Connectors and Doctor views with secret redaction
+- Bounded coding-agent handoff (typed, no auto-execution)
+- Panic-safe terminal lifecycle (raw mode + alternate screen restore)
+- Workspace UI state persistence (additive, corruption-isolated)
+- `rivora-workspace` remains a compatibility entrypoint to the same launcher
+- Explicit CLI subcommands unchanged
+
+### Interaction
+
+| Invocation | Behavior |
+|------------|----------|
+| `rivora` | Unified Workspace (requires a terminal) |
+| `rivora <command>` | One-shot CLI |
+| `rivora --help` / `--version` | Noninteractive |
+| `rivora-workspace` | Same Unified Workspace launcher |
+| Natural language | → typed intent → Capability (never direct authority) |
+| `/` and `Ctrl+P` | Shared action registry |
+| “Apply/run this fix” | Proposal/plan review — never live execution from chat |
+
+### Architecture
+
+- Presentation only: `crates/rivora-workspace`
+- CapabilityService remains the sole engineering API for Workspace
+- RFC-029 Unified Workspace Interaction Model
+
+### Compatibility
+
+- v0.1–v0.9 local Runtime data remains loadable
+- Installer and packages still ship `rivora` and `rivora-workspace`
+- Previous dialoguer menu Workspace is no longer the default UX
+
 ## 0.9.2 — Restore the Default Workspace Entry Point
 
 User-visible entrypoint fix. Bare `rivora` launches the Workspace again. No Runtime, Engineering Loop, Capability, Connector, or persistence redesign. Does not begin v1.0.

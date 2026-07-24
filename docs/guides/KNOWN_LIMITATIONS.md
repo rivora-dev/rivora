@@ -1,4 +1,4 @@
-# Known Limitations (v0.9+)
+# Known Limitations (v0.10+)
 
 ## Distribution (v0.9.1+)
 
@@ -27,7 +27,9 @@ See `OPERATING_ENVELOPE.md`. Workloads beyond **large_supported** are not valida
 - Search still scans store contents (bounded results, not a full inverted index service)
 - Single cross-process writer
 - Observation connectors remain single-page for some providers (documented in coverage)
-- Workspace is terminal-first (dialoguer), not a full multi-pane IDE
+- Workspace is terminal-first (Ratatui Unified Workspace), not a web or IDE host
+- Natural-language intent interpretation is deterministic/fixture-first in v0.10 (not a general-purpose chatbot)
+- Coding-agent handoff is a typed preview boundary — Rivora does not invoke agents autonomously
 
 ## Unresolved risks (accepted for v0.9)
 

@@ -16,10 +16,11 @@ engineering-system mutation boundaries.
 * v0.9 — Production Hardening: prove the architecture remains reliable at realistic local/on-prem scale
 * v0.9.1 — Binary Distribution and Installer: first-party `rivora.dev/install`, platform archives, checksums
 * v0.9.2 — Restore the Default Workspace Entry Point: bare `rivora` launches Workspace again
+* v0.10 — Unified Workspace: conversation-first full-screen Workspace over typed intents
 
 ## Current boundary
 
-v0.9.2 restores bare `rivora` as the canonical Workspace entrypoint on top of v0.9.1 distribution.
+v0.10 delivers the Unified Workspace (conversation-first, typed intents, full-screen terminal UI) on top of the v0.9 production-hardened Runtime.
 
 v0.9 is the architectural release gate between completeness and public stability.
 
@@ -40,6 +41,7 @@ v0.8 — Apply the architecture across first-party Capabilities
 v0.9 — Prove the architecture remains reliable at realistic scale
 v0.9.1 — Make Rivora installable from rivora.dev with verified binaries
 v0.9.2 — Restore bare `rivora` as the Workspace entrypoint
+v0.10 — Unified Workspace interaction model
 v1.0 — Freeze the validated contracts
 ```
 

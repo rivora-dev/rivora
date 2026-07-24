@@ -5,7 +5,7 @@
 #   scripts/package-release.sh <version> <target> <bin-dir> <out-dir>
 #
 # Example:
-#   scripts/package-release.sh v0.9.2 aarch64-apple-darwin target/release dist
+#   scripts/package-release.sh v0.10.0 aarch64-apple-darwin target/release dist
 #
 # Produces:
 #   rivora-<version>-<target>.tar.gz containing rivora, rivora-workspace (if present),

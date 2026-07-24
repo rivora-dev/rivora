@@ -10,7 +10,7 @@ use rivora_workspace::{run_workspace, WorkspaceLaunchConfig};
 #[command(
     name = "rivora-workspace",
     version,
-    about = "Rivora Workspace — interactive Investigations"
+    about = "Rivora Unified Workspace — conversation-first Investigations"
 )]
 struct Args {
     /// Data directory for local Runtime storage.

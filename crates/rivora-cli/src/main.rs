@@ -46,8 +46,8 @@ const EXECUTION_BOUNDARY: &str = "Execution Through External Systems — only ex
 #[command(
     name = "rivora",
     version,
-    about = "Rivora — Engineering Understanding Platform. Run with no subcommand to open the Workspace.",
-    after_help = "Run `rivora` with no subcommand to open the interactive Workspace.\nUse `rivora <command>` for one-shot CLI operations."
+    about = "Rivora — Engineering Understanding Platform. Run with no subcommand to open the Unified Workspace.",
+    after_help = "Run `rivora` with no subcommand to open the Unified Workspace (conversation-first).\nPress `/` for actions. Use `rivora <command>` for one-shot CLI operations."
 )]
 struct Cli {
     /// Data directory for local Runtime storage.

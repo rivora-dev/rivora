@@ -10,9 +10,9 @@
 | Checksum mismatch | Do not install; re-download; report if it persists |
 | Not writable install dir | `RIVORA_INSTALL_DIR=$HOME/.local/bin` (never uses sudo) |
 | Binary not found after install | Add install dir to `PATH` (installer prints the exact line) |
-| Want a specific version | `RIVORA_VERSION=v0.9.2` |
+| Want a specific version | `RIVORA_VERSION=v0.10.0` |
 | Prefer manual install | GitHub Releases archives + `SHA256SUMS` — see `docs/guides/INSTALL.md` |
-| `rivora` prints help and exits (pre-v0.9.2) | Upgrade to ≥0.9.2; bare `rivora` opens the Workspace |
+| `rivora` prints help and exits (pre-v0.10.0) | Upgrade to ≥0.10.0; bare `rivora` opens the Workspace |
 | `interactive Workspace requires a terminal` | Use a TTY for the Workspace, or a CLI subcommand in scripts/CI |
 
 ## Store lock conflict

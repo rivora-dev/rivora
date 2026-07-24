@@ -12,7 +12,7 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Release: v0.9.2 — Restore the Default Workspace Entry Point
+## Current Release: v0.10.0 — Unified Workspace
 
 Primary install:
 
@@ -21,30 +21,31 @@ curl -fsSL https://rivora.dev/install | sh
 ```
 
 ```bash
-rivora              # open the Workspace
+rivora              # open the Unified Workspace
 rivora <command>    # one-shot CLI
 rivora --help
 rivora --version
 ```
 
-v0.9.2 restores bare `rivora` as the canonical Workspace entrypoint while preserving all explicit CLI commands. `rivora-workspace` remains available for compatibility. No Runtime, Engineering Loop, Capability, Connector, or persistence redesign.
+Run `rivora` to open the Unified Workspace. Type naturally to work with Rivora. Press `/` to discover actions. Use `rivora <command>` for explicit one-shot CLI operations.
 
-v0.9 answered: **Can Rivora preserve deterministic, explainable, durable engineering understanding when operating at realistic production scale and under imperfect conditions?**
+v0.10 replaces the menu-driven Workspace with a conversation-first, full-screen terminal application. The Runtime, Capabilities, Execution authority, and durable Engineering Objects remain the source of truth — conversation is the interface, not the product.
 
 ```text
-External systems → Connectors → Validation/Dedup → Routing → Engineering Loop → Durable local store
-                                                                         ↓
-                                                              CLI / Workspace / Search
+launch → Ask Rivora… → typed WorkspaceIntent → Capability → Runtime → typed objects
+         / actions · Ctrl+P palette · inspector · Engineering Loop views
 ```
 
-Production hardening highlights:
+Workspace highlights:
 
-- **Operating envelope** — small / medium / large_supported profiles with explicit limits (not unlimited scale)
-- **Store integrity** — `store.json` schema, exclusive locks, durable writes, corruption isolation, backup/restore
-- **Replay safety** — observation idempotency indexes and documented replay contracts
-- **Connector resilience** — timeouts, payload bounds, rate-limit/auth errors, secret redaction
-- **CLI diagnostics** — stable exit codes and `rivora doctor` (health, export, backup, recover-lock, budgets)
-- **Bounded UX** — default search/list pagination for CLI and Workspace
+- **Conversation-first** — “Ask Rivora…” composer, not a dialoguer menu wizard
+- **Typed intents** — natural language is interpreted into `WorkspaceIntent` values
+- **One action registry** — `/` and `Ctrl+P` cannot drift
+- **Investigation UX** — search and open without pasting opaque IDs in ordinary use
+- **Engineering Loop views** — evaluate, verify, propose, review execution, learning
+- **Connectors & Doctor** — health and connector status without secret leakage
+- **Terminal safety** — alternate screen, panic-safe restore, non-TTY refusal
+- **Authority preserved** — chat cannot approve or execute external mutations
 
 ```bash
 rivora doctor health --json
@@ -52,7 +53,7 @@ rivora doctor envelope --profile medium
 rivora doctor exit-codes
 ```
 
-See `docs/guides/OPERATING_ENVELOPE.md`, `docs/guides/OPERATIONS.md`, and `docs/guides/PRODUCTION_READINESS_SCORECARD.md`.
+See `docs/rfc/RFC-029-Unified-Workspace.md` and `docs/guides/` for operations and hardening notes from v0.9.
 
 Execution safety from v0.6 and Capability coverage from v0.8 are preserved: only explicitly approved, bounded capabilities mutate external systems. Proposal acceptance never starts execution.
 
@@ -134,7 +135,7 @@ Options:
 
 ```bash
 # Explicit version
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.2 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.10.0 sh
 
 # Custom directory
 curl -fsSL https://rivora.dev/install | RIVORA_INSTALL_DIR=$HOME/bin sh

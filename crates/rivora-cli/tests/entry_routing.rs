@@ -1,4 +1,4 @@
-//! v0.9.2 entry routing: bare `rivora` launches Workspace; help/version/commands stay CLI.
+//! v0.10.0 entry routing: bare `rivora` launches Workspace; help/version/commands stay CLI.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -80,8 +80,8 @@ fn rivora_version_prints_version() {
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("rivora") && stdout.contains("0.9.2"),
-        "expected version 0.9.2, got: {stdout}"
+        stdout.contains("rivora") && stdout.contains("0.10.0"),
+        "expected version 0.10.0, got: {stdout}"
     );
 }
 
@@ -193,7 +193,7 @@ fn both_binaries_exist_in_cargo_target() {
         assert!(ver.status.success());
         let stdout = String::from_utf8_lossy(&ver.stdout);
         assert!(
-            stdout.contains("0.9.2"),
+            stdout.contains("0.10.0"),
             "workspace binary version: {stdout}"
         );
     }

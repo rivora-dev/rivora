@@ -172,20 +172,20 @@ TEST_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rivora-test-install.XXXXXX")"
 mkdir -p "${TEST_INSTALL}/pkg"
 cat > "${TEST_INSTALL}/pkg/rivora" <<'EOF'
 #!/bin/sh
-echo "rivora 0.9.2"
+echo "rivora 0.10.0"
 EOF
 chmod +x "${TEST_INSTALL}/pkg/rivora"
 cp "${ROOT}/LICENSE" "${TEST_INSTALL}/pkg/LICENSE"
 cp "${ROOT}/README.md" "${TEST_INSTALL}/pkg/README.md"
-tar -czf "${TEST_INSTALL}/rivora-v0.9.2-test.tar.gz" -C "${TEST_INSTALL}/pkg" rivora LICENSE README.md
+tar -czf "${TEST_INSTALL}/rivora-v0.10.0-test.tar.gz" -C "${TEST_INSTALL}/pkg" rivora LICENSE README.md
 mkdir -p "${TEST_INSTALL}/dest"
-install_from_archive "${TEST_INSTALL}/rivora-v0.9.2-test.tar.gz" "${TEST_INSTALL}/dest" "${TEST_INSTALL}/extract"
+install_from_archive "${TEST_INSTALL}/rivora-v0.10.0-test.tar.gz" "${TEST_INSTALL}/dest" "${TEST_INSTALL}/extract"
 assert_eq "installed binary exists" "1" "$([ -x "${TEST_INSTALL}/dest/rivora" ] && echo 1 || echo 0)"
-assert_contains "installed version" "0.9.2" "$("${TEST_INSTALL}/dest/rivora" --version)"
+assert_contains "installed version" "0.10.0" "$("${TEST_INSTALL}/dest/rivora" --version)"
 
 mkdir -p "${TEST_INSTALL}/nowrite"
 chmod 555 "${TEST_INSTALL}/nowrite"
-assert_fails "non-writable install dir" install_from_archive "${TEST_INSTALL}/rivora-v0.9.2-test.tar.gz" "${TEST_INSTALL}/nowrite" "${TEST_INSTALL}/extract2"
+assert_fails "non-writable install dir" install_from_archive "${TEST_INSTALL}/rivora-v0.10.0-test.tar.gz" "${TEST_INSTALL}/nowrite" "${TEST_INSTALL}/extract2"
 chmod 755 "${TEST_INSTALL}/nowrite" 2>/dev/null || true
 
 printf '== Packaging script ==\n'
@@ -193,13 +193,13 @@ if [ -f "${ROOT}/target/release/rivora" ]; then
     TEST_OUTPKG="$(mktemp -d "${TMPDIR:-/tmp}/rivora-test-pkg.XXXXXX")"
     binver="$("${ROOT}/target/release/rivora" --version 2>/dev/null || true)"
     case "$binver" in
-        *0.9.2*)
+        *0.10.0*)
             chmod +x "${ROOT}/scripts/package-release.sh"
-            assert_ok "package-release" "${ROOT}/scripts/package-release.sh" v0.9.2 aarch64-apple-darwin "${ROOT}/target/release" "$TEST_OUTPKG"
-            assert_eq "archive present" "1" "$([ -f "${TEST_OUTPKG}/rivora-v0.9.2-aarch64-apple-darwin.tar.gz" ] && echo 1 || echo 0)"
+            assert_ok "package-release" "${ROOT}/scripts/package-release.sh" v0.10.0 aarch64-apple-darwin "${ROOT}/target/release" "$TEST_OUTPKG"
+            assert_eq "archive present" "1" "$([ -f "${TEST_OUTPKG}/rivora-v0.10.0-aarch64-apple-darwin.tar.gz" ] && echo 1 || echo 0)"
             ;;
         *)
-            pass "package-release skip (binary not 0.9.2 yet)"
+            pass "package-release skip (binary not 0.10.0 yet)"
             ;;
     esac
 else

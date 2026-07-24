@@ -57,5 +57,5 @@ fn binary_version_is_release() {
     let out = Command::new(bin).arg("--version").output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("0.9.2"), "expected 0.9.2, got: {stdout}");
+    assert!(stdout.contains("0.10.0"), "expected 0.10.0, got: {stdout}");
 }

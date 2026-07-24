@@ -38,9 +38,9 @@ Windows is not supported by the shell installer in this release.
 ### Explicit version
 
 ```bash
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.2 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.10.0 sh
 # also accepts:
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=0.9.2 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=0.10.0 sh
 ```
 
 ### Custom install directory
@@ -110,7 +110,7 @@ rm -f "$(command -v rivora)" "$(command -v rivora-workspace)"
 4. Extract and install:
 
    ```bash
-   tar -xzf rivora-v0.9.2-<target>.tar.gz
+   tar -xzf rivora-v0.10.0-<target>.tar.gz
    mkdir -p "$HOME/.local/bin"
    mv rivora rivora-workspace "$HOME/.local/bin/"
    ```
@@ -122,7 +122,7 @@ Requirements: Rust 1.75+ (edition 2021).
 ```bash
 git clone https://github.com/rivora-dev/rivora.git
 cd rivora
-git checkout v0.9.2   # or main
+git checkout v0.10.0   # or main
 cargo build --workspace --release
 ./target/release/rivora --version
 ./target/release/rivora-workspace --version

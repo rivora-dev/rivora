@@ -1,6 +1,6 @@
 # Rivora Binary Distribution
 
-**Release:** v0.9.2 — Restore the Default Workspace Entry Point (distribution contract from v0.9.1)
+**Release:** v0.10.0 — Restore the Default Workspace Entry Point (distribution contract from v0.9.1)
 
 This guide defines the public binary distribution contract for Rivora.
 
@@ -94,7 +94,7 @@ Source: `scripts/install.sh`
 | OS | Darwin → `apple-darwin`, Linux → `unknown-linux-gnu` |
 | Arch | `arm64`/`aarch64` → `aarch64`, `x86_64`/`amd64` → `x86_64` |
 | Version | Latest stable (non-draft, non-prerelease) by default |
-| Override | `RIVORA_VERSION=v0.9.2` or `0.9.2` |
+| Override | `RIVORA_VERSION=v0.10.0` or `0.10.0` |
 | Install dir | `RIVORA_INSTALL_DIR` → writable PATH dir → `$HOME/.local/bin` |
 | Integrity | Download `SHA256SUMS`, verify selected archive only |
 | Privilege | Never invokes `sudo`; never writes shell profiles |
@@ -107,7 +107,7 @@ Source: `scripts/install.sh`
 curl -fsSL https://rivora.dev/install | sh
 
 # Explicit version
-curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.9.2 sh
+curl -fsSL https://rivora.dev/install | RIVORA_VERSION=v0.10.0 sh
 
 # Custom directory
 curl -fsSL https://rivora.dev/install | RIVORA_INSTALL_DIR=$HOME/bin sh
@@ -151,7 +151,7 @@ The script is embedded at Worker build time from `scripts/install.sh`.
 ```bash
 git clone https://github.com/rivora-dev/rivora.git
 cd rivora
-git checkout v0.9.2
+git checkout v0.10.0
 cargo build --workspace --release
 ./target/release/rivora --version
 ```
