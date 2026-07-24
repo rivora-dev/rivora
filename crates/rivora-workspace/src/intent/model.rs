@@ -178,10 +178,6 @@ pub enum WorkspaceIntent {
     Navigate {
         route: WorkspaceRoute,
     },
-    /// Confirm a pending mutating intent.
-    ConfirmPending,
-    /// Cancel a pending confirmation or task.
-    CancelPending,
 }
 
 /// High-level Workspace routes (presentation only).
@@ -201,6 +197,37 @@ pub enum WorkspaceRoute {
     Help,
 }
 
+/// How an intent is scheduled relative to the Workspace render/event loop.
+///
+/// Scheduling is a presentation concern. It MUST NOT change authority:
+/// a background write still requires confirmation, Proposal acceptance,
+/// Execution Plan approval where required, exact revision binding, and
+/// normal Capability invocation. Background execution only moves work
+/// off the render thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntentExecutionMode {
+    /// Pure UI transition — no Runtime / Capability work. Runs inline.
+    Local,
+    /// Read-only Capability work that may scale with store size. Backgrounded.
+    BackgroundRead,
+    /// Mutating Capability work. Backgrounded; authority path is unchanged.
+    BackgroundWrite,
+}
+
+/// Cancellation safety class for a background task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellationPolicy {
+    /// A read whose result can be discarded safely. The underlying work may
+    /// still run to completion on the worker thread, but discarding the
+    /// result has no durability consequence.
+    Immediate,
+    /// A mutation that may have already reached durable Runtime state by
+    /// the time the UI attempts to cancel. Cancelling discards the UI
+    /// result; it does NOT guarantee the underlying operation stopped or
+    /// rolled back. Runtime idempotency remains authoritative for replays.
+    DetachResult,
+}
+
 impl WorkspaceIntent {
     /// Whether executing this intent may mutate durable Runtime state.
     pub fn is_mutating(&self) -> bool {
@@ -214,13 +241,57 @@ impl WorkspaceIntent {
                 | Self::CreateProposal { .. }
                 | Self::CreateExecutionPlan { .. }
                 | Self::AgentHandoff { .. }
-                | Self::ConfirmPending
         )
     }
 
     /// External execution is never implied by natural language alone.
     pub fn requires_execution_authority(&self) -> bool {
         matches!(self, Self::CreateExecutionPlan { .. })
+    }
+
+    /// Single source of truth for scheduling an intent relative to the
+    /// render thread. UI-only intents are `Local`. Any intent that calls
+    /// `CapabilityService` is backgrounded so slow Runtime / model /
+    /// connector work cannot freeze the event loop.
+    pub fn execution_mode(&self) -> IntentExecutionMode {
+        if self.is_mutating() {
+            IntentExecutionMode::BackgroundWrite
+        } else if self.calls_capabilities() {
+            IntentExecutionMode::BackgroundRead
+        } else {
+            IntentExecutionMode::Local
+        }
+    }
+
+    /// Cancellation safety for the background execution of this intent.
+    /// Pure reads discard results safely (`Immediate`). Mutations may have
+    /// reached durable Runtime state, so cancelling only detaches the UI
+    /// result (`DetachResult`).
+    pub fn cancellation_policy(&self) -> CancellationPolicy {
+        if self.is_mutating() {
+            CancellationPolicy::DetachResult
+        } else {
+            CancellationPolicy::Immediate
+        }
+    }
+
+    /// Whether this intent dispatches work through `CapabilityService`.
+    /// Local-only intents (navigation, help, static info stubs, free-form
+    /// prompts) return `false` and stay synchronous.
+    fn calls_capabilities(&self) -> bool {
+        matches!(
+            self,
+            Self::ShowDoctor
+                | Self::ShowPriorOutcomes
+                | Self::ShowPatterns
+                | Self::ShowHistoricalTrends
+                | Self::ListInvestigations
+                | Self::SearchInvestigations { .. }
+                | Self::OpenInvestigation { .. }
+                | Self::ReviewProposals { .. }
+                | Self::ReviewExecutions { .. }
+                | Self::ShowLearning { .. }
+        )
     }
 }
 

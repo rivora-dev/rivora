@@ -340,16 +340,27 @@ impl WorkspaceApp {
             match msg.result {
                 Ok(result) => crate::app::update::apply_result(self, result),
                 Err(e) => {
+                    // Infrastructural failure (worker panic / channel
+                    // disconnect), not a Runtime error (those arrive as
+                    // `IntentExecutionResult::Error` on the Ok path). Project
+                    // to a user-readable Workspace error and keep running.
                     self.composer.mode = ComposerMode::Prompt;
                     self.notify(NotificationKind::Error, e.clone());
                     self.conversation
                         .push(crate::conversation::WorkspaceMessage::error(
-                            "Task failed",
-                            e,
+                            "Background task failed",
+                            e.clone(),
                         ));
+                    self.modal = Some(WorkspaceModal::Error {
+                        title: "Background task failed".into(),
+                        body: e,
+                    });
                 }
             }
         }
+        // Completion / failure / cancellation flips `is_busy()` to false;
+        // restore the composer so the user can continue. A newer task that
+        // has since started stays busy (is_busy() true → guard skips).
         if !self.tasks.is_busy() && matches!(self.composer.mode, ComposerMode::Busy) {
             self.composer.mode = ComposerMode::Prompt;
         }

@@ -25,6 +25,32 @@ use std::sync::Arc;
 pub use launch::{open_capabilities, WorkspaceLaunchConfig};
 pub use terminal::is_interactive_terminal;
 
+/// Test-only surface exposing Workspace internals so integration tests can
+/// assert the async / confirmation / terminal contracts without leaking
+/// impl details into the stable public API. `#[doc(hidden)]` keeps it out of
+/// generated docs; production code must not depend on it.
+#[doc(hidden)]
+pub mod testing {
+    pub use crate::app::state::{
+        ActiveInvestigationState, CommandPaletteState, ComposerMode, Notification,
+        NotificationKind, WorkspaceApp, WorkspaceFocus, WorkspaceModal,
+    };
+    pub use crate::app::update::{
+        apply_result, cancel_pending_for_test, confirm_pending_for_test, handle_key,
+        request_confirmation_for_test,
+    };
+    pub use crate::conversation::{MessageContent, WorkspaceMessage};
+    pub use crate::effects::{
+        busy_label_for, set_test_task_delay_ms, CancellationOutcome, TaskId, TaskManager,
+        TaskStatus, WorkspaceTask,
+    };
+    pub use crate::intent::{
+        CancellationPolicy, IntentExecutionMode, IntentExecutionResult, WorkspaceIntent,
+        WorkspaceRoute,
+    };
+    pub use crate::terminal::TerminalGuard;
+}
+
 use app::run_unified_workspace;
 use smoke::smoke_workflow;
 

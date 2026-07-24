@@ -67,7 +67,11 @@ pub enum IntentExecutionResult {
         object_refs: Vec<String>,
         route: Option<WorkspaceRoute>,
     },
-    /// Needs confirmation before a subsequent ConfirmPending.
+    /// Needs confirmation before the app re-dispatches the original typed
+    /// intent via the normal authority path. Confirmation is a UI state
+    /// transition handled in the app layer (`confirm_pending`), not a
+    /// workspace intent variant; `Apply` here means "the app now re-runs
+    /// `dispatch_intent(pending)`" which routes through Capabilities as usual.
     NeedsConfirmation {
         preview_title: String,
         preview_body: String,
@@ -190,11 +194,6 @@ pub fn execute_intent(caps: &CapabilityService, intent: &WorkspaceIntent) -> Int
             investigation_id,
             proposal_id,
         } => agent_handoff(caps, *investigation_id, *proposal_id),
-        WorkspaceIntent::ConfirmPending | WorkspaceIntent::CancelPending => {
-            IntentExecutionResult::Clarification {
-                message: "No pending confirmation.".into(),
-            }
-        }
     }
 }
 

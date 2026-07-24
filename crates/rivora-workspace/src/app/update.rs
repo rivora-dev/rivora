@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::actions::ActionContext;
 use crate::conversation::WorkspaceMessage;
+use crate::effects::CancellationOutcome;
 use crate::intent::execute::IntentExecutionResult;
 use crate::intent::{
     execute_intent, interpret_prompt, InvestigationDraft, WorkspaceIntent, WorkspaceRoute,
@@ -21,11 +22,25 @@ fn refresh_app_palette(app: &mut WorkspaceApp) {
 
 /// Handle a key press. Returns Ok when processed.
 pub fn handle_key(app: &mut WorkspaceApp, key: KeyEvent) -> Result<(), String> {
-    // Global quit
+    // Global quit / cancel-task
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         if app.tasks.is_busy() {
-            app.tasks.cancel_active();
-            app.notify(NotificationKind::Warning, "Cancelled background task");
+            // Cancellation is context-aware: never falsely claim the
+            // underlying operation stopped. Reads discard safely; mutations
+            // may have already reached durable Runtime state.
+            match app.tasks.cancel_active() {
+                CancellationOutcome::CancelledRead => {
+                    app.notify(NotificationKind::Info, "Cancelled running read");
+                }
+                CancellationOutcome::CancelledMutationMayHaveCompleted => {
+                    app.notify(
+                        NotificationKind::Warning,
+                        "Background mutation cancelled — the underlying operation may still \
+                         complete. Runtime idempotency remains authoritative for replays.",
+                    );
+                }
+                CancellationOutcome::NothingRunning => {}
+            }
             app.composer.mode = ComposerMode::Prompt;
             return Ok(());
         }
@@ -49,8 +64,15 @@ pub fn handle_key(app: &mut WorkspaceApp, key: KeyEvent) -> Result<(), String> {
         return handle_palette_key(app, key);
     }
 
-    // Pending confirmation via composer mode
-    if matches!(app.composer.mode, ComposerMode::Confirm) || app.pending_intent.is_some() {
+    // Pending confirmation via composer mode. The inline confirm control lives
+    // in the composer, so it only intercepts keys when the composer is
+    // focused. A modal confirmation (WorkspaceModal::Confirm) is handled
+    // earlier as a global overlay. Enter while focus is outside the
+    // confirmation control must NOT accidentally confirm — it routes to the
+    // focused pane instead (focus-safety, audit requirement P).
+    if app.focus == WorkspaceFocus::Composer
+        && (matches!(app.composer.mode, ComposerMode::Confirm) || app.pending_intent.is_some())
+    {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 confirm_pending(app);
@@ -512,6 +534,16 @@ fn confirmation_copy(intent: &WorkspaceIntent, rationale: Option<&str>) -> (Stri
     }
 }
 
+/// Request confirmation for a pending mutating intent.
+///
+/// Confirmation is an app-local UI state transition, NOT a `WorkspaceIntent`
+/// variant. The exact pending intent is bound in `app.pending_intent` (and
+/// mirrored in the confirm modal). Confirming re-dispatches the original
+/// typed intent through the normal authority path (`dispatch_intent` →
+/// Capabilities). Confirmation never grants Runtime authority by itself;
+/// Proposal acceptance and Execution Plan approval remain separate Runtime
+/// transitions (`WorkspaceIntent::ConfirmPending` / `CancelPending` were
+/// removed as dead, architecturally inconsistent variants — see RFC-029).
 fn request_confirmation(
     app: &mut WorkspaceApp,
     title: impl Into<String>,
@@ -531,6 +563,9 @@ fn request_confirmation(
     });
 }
 
+/// Confirm the pending intent: pure UI action. Clears pending state and
+/// re-dispatches the original typed intent through the normal authority
+/// path. Does not itself approve a Proposal or Execution Plan.
 fn confirm_pending(app: &mut WorkspaceApp) {
     app.modal = None;
     app.composer.mode = ComposerMode::Prompt;
@@ -539,6 +574,8 @@ fn confirm_pending(app: &mut WorkspaceApp) {
     }
 }
 
+/// Cancel the pending confirmation: pure UI action. Clears pending state
+/// only and performs no Runtime call.
 fn cancel_pending(app: &mut WorkspaceApp) {
     app.modal = None;
     app.pending_intent = None;
@@ -548,8 +585,45 @@ fn cancel_pending(app: &mut WorkspaceApp) {
     app.notify(NotificationKind::Info, "Cancelled");
 }
 
+// Confirmation is an app-local UI state transition (see M2 fix). These
+// test-only pub wrappers expose the internal confirmation helpers so the
+// integration-test regression suite can assert the exact-pending, stale-
+// confirmation, cancel, and authority-boundary contracts without relying on
+// private module access. They are intentionally not used by production code.
+#[doc(hidden)]
+pub fn request_confirmation_for_test(
+    app: &mut WorkspaceApp,
+    title: impl Into<String>,
+    body: impl Into<String>,
+    pending: WorkspaceIntent,
+) {
+    request_confirmation(app, title, body, pending);
+}
+
+#[doc(hidden)]
+pub fn confirm_pending_for_test(app: &mut WorkspaceApp) {
+    confirm_pending(app);
+}
+
+#[doc(hidden)]
+pub fn cancel_pending_for_test(app: &mut WorkspaceApp) {
+    cancel_pending(app);
+}
+
+/// Dispatch a typed intent. Classification is the single source of truth
+/// in [`WorkspaceIntent::execution_mode`]:
+///   - `Local` runs inline on the render thread (UI navigation, help,
+///     static info stubs, free-form prompts).
+///   - `BackgroundRead` / `BackgroundWrite` move work onto a background
+///     worker via [`TaskManager::spawn_intent`] so slow Runtime / model /
+///     connector work cannot freeze the event loop.
+///
+/// Background scheduling never changes authority: a background write still
+/// requires confirmation, Proposal acceptance, Execution Plan approval,
+/// exact revision binding, and normal Capability invocation. Scheduling
+/// only changes which thread the work runs on.
 fn dispatch_intent(app: &mut WorkspaceApp, intent: WorkspaceIntent) {
-    // UI-only fast path (no background thread needed).
+    // UI-only fast path (no Capability work, no background thread).
     match &intent {
         WorkspaceIntent::Quit => {
             app.should_quit = true;
@@ -571,13 +645,43 @@ fn dispatch_intent(app: &mut WorkspaceApp, intent: WorkspaceIntent) {
         _ => {}
     }
 
-    // Synchronous execute for responsiveness in local store ops.
-    // Capability calls are local and typically fast; slow work can move to tasks later.
-    app.composer.mode = ComposerMode::Busy;
-    app.notify(NotificationKind::Progress, "Working…");
-    let result = execute_intent(&app.caps, &intent);
-    app.composer.mode = ComposerMode::Prompt;
-    apply_result(app, result);
+    match intent.execution_mode() {
+        crate::intent::IntentExecutionMode::Local => {
+            // Cheap, no Capability work; runs inline so the user sees the
+            // result immediately.
+            let result = execute_intent(&app.caps, &intent);
+            apply_result(app, result);
+        }
+        crate::intent::IntentExecutionMode::BackgroundRead => {
+            // Replace any in-flight read: a newer search/list supersedes an
+            // older one. Generation is bumped in spawn_intent so the older
+            // worker's late result is dropped (stale-result protection).
+            app.composer.mode = ComposerMode::Busy;
+            app.notify(
+                NotificationKind::Progress,
+                crate::effects::busy_label_for(&intent).to_string(),
+            );
+            app.tasks.spawn_intent(app.caps.clone(), intent);
+        }
+        crate::intent::IntentExecutionMode::BackgroundWrite => {
+            // Mutating work: suppress obvious duplicate submissions while a
+            // task is already running. Runtime idempotency remains the
+            // authoritative duplicate guard for any replay.
+            if app.tasks.is_busy() {
+                app.notify(
+                    NotificationKind::Warning,
+                    "A task is running. Press Ctrl+C to cancel it before starting another.",
+                );
+                return;
+            }
+            app.composer.mode = ComposerMode::Busy;
+            app.notify(
+                NotificationKind::Progress,
+                crate::effects::busy_label_for(&intent).to_string(),
+            );
+            app.tasks.spawn_intent(app.caps.clone(), intent);
+        }
+    }
 }
 
 /// Apply a typed intent result to application state.
