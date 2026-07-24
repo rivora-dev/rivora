@@ -1,0 +1,32 @@
+# Known Limitations (v0.9)
+
+## Intentional non-goals
+
+- No cloud control plane / multi-tenancy
+- No distributed execution
+- No autonomous remediation
+- No automatic Proposal acceptance or rollback
+- No Capability/Connector marketplace or dynamic plugins
+- No Web UI
+- No daemon architecture
+
+## Operating envelope limits
+
+See `OPERATING_ENVELOPE.md`. Workloads beyond **large_supported** are not validated.
+
+## Remaining product limits
+
+- Search still scans store contents (bounded results, not a full inverted index service)
+- Single cross-process writer
+- Observation connectors remain single-page for some providers (documented in coverage)
+- Workspace is terminal-first (dialoguer), not a full multi-pane IDE
+
+## Unresolved risks (accepted for v0.9)
+
+- Hard-link exclusive create may fall back on some filesystems (covered by create_new fallback)
+- Process liveness probe uses `kill -0` on Unix
+- Very large Investigation timelines can still be slow near envelope upper bounds
+
+## v1.0 blockers
+
+None identified that prevent contract freeze preparation; freeze classifications live in `V1_FREEZE_ASSESSMENT.md`.

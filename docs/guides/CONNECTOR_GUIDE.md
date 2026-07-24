@@ -1,7 +1,18 @@
-# Connector Guide (v0.8)
+# Connector Guide (v0.8 / hardened in v0.9)
 
 This guide explains how first-party Rivora Connectors must behave so they feed
 the Capability Engineering Loop with canonical Runtime inputs (RFC-012, RFC-028).
+
+## v0.9 resilience requirements
+
+Shared helpers live in `rivora_connectors::resilience`:
+
+- HTTP connect timeout **5s**, request timeout **30s**
+- Max response body **1 MiB**; max Observation payload **1 MiB**
+- Max event batch **500** (excess truncated at the Connector boundary)
+- Structured errors: rate limited, timeout, auth, payload too large
+- Recursive JSON secret redaction + sanitized error strings
+- No reasoning, evaluation, verification, or Learning writes
 
 ## Connector responsibilities
 

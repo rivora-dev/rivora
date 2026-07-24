@@ -8,6 +8,7 @@ use rivora::domain::ObservationKind;
 use serde_json::{json, Value};
 
 use crate::github_actions::ConnectorStatusReport;
+use crate::resilience::{bound_batch, ensure_payload_size, redact_json, sanitize_error};
 use crate::{ConnectorError, ConnectorResult, NormalizedObservation};
 
 /// Read-only Kubernetes connector.
@@ -87,8 +88,16 @@ impl KubernetesConnector {
                 "kubectl get pods failed: {redacted}"
             )));
         }
-        let body: Value = serde_json::from_slice(&output.stdout)
-            .map_err(|e| ConnectorError::Normalize(e.to_string()))?;
+        if output.stdout.len() > crate::resilience::max_response_bytes() {
+            return Err(ConnectorError::PayloadTooLarge(format!(
+                "kubectl response is {} bytes; max is {}",
+                output.stdout.len(),
+                crate::resilience::max_response_bytes()
+            )));
+        }
+        let mut body: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|e| ConnectorError::Normalize(sanitize_error(&e.to_string())))?;
+        redact_json(&mut body);
         Self::normalize_pod_list(&self.namespace, &body)
     }
 
@@ -131,7 +140,8 @@ impl KubernetesConnector {
             out.extend(Self::normalize_resource(namespace, item)?);
         }
         if out.is_empty() {
-            // Empty cluster is valid — emit a health snapshot.
+            // Empty cluster is valid — emit an infrastructure fact snapshot
+            // (not a health conclusion).
             out.push(NormalizedObservation::new(
                 ObservationKind::Infrastructure,
                 format!("Kubernetes namespace `{namespace}` has no pods"),
@@ -142,7 +152,10 @@ impl KubernetesConnector {
                 "kubernetes-connector",
             ));
         }
-        Ok(out)
+        for obs in &mut out {
+            ensure_payload_size(&obs.payload)?;
+        }
+        Ok(bound_batch(out))
     }
 
     fn normalize_resource(

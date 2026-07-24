@@ -94,6 +94,29 @@ impl Runtime {
     pub fn embedding(&self) -> &Arc<dyn EmbeddingProvider> {
         &self.embedding
     }
+
+    /// Local store health report (v0.9 production diagnostics).
+    pub fn store_health(&self) -> crate::error::RivoraResult<crate::domain::StoreHealthReport> {
+        self.store.health_report()
+    }
+
+    /// Sanitized diagnostic export (v0.9).
+    pub fn diagnostic_export(&self) -> crate::error::RivoraResult<serde_json::Value> {
+        self.store.diagnostic_export()
+    }
+
+    /// Backup the store to a destination directory.
+    pub fn backup_store(
+        &self,
+        dest: impl AsRef<std::path::Path>,
+    ) -> crate::error::RivoraResult<()> {
+        self.store.backup_to(dest.as_ref())
+    }
+
+    /// Rebuild derived observation indexes from canonical records.
+    pub fn rebuild_observation_indexes(&self) -> crate::error::RivoraResult<u64> {
+        self.store.rebuild_observation_indexes()
+    }
 }
 
 impl std::fmt::Debug for Runtime {

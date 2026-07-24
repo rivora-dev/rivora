@@ -14,6 +14,7 @@ pub mod github;
 pub mod github_actions;
 pub mod kubernetes;
 pub mod local;
+pub mod resilience;
 pub mod sentry;
 
 pub use execution::{
@@ -21,6 +22,10 @@ pub use execution::{
     DEFAULT_GITHUB_EXECUTION_REPO,
 };
 pub use github_actions::ConnectorStatusReport;
+pub use resilience::{
+    bound_batch, ensure_payload_size, http_client, map_http_status, max_event_batch_size,
+    max_payload_bytes, max_response_bytes, read_response_limited, redact_json, sanitize_error,
+};
 
 use rivora::domain::{ObservationKind, Provenance};
 use thiserror::Error;
@@ -40,6 +45,18 @@ pub enum ConnectorError {
     /// Normalization failure.
     #[error("normalization error: {0}")]
     Normalize(String),
+    /// Provider rate limited the request.
+    #[error("rate limited: {0}")]
+    RateLimited(String),
+    /// Request timed out.
+    #[error("timeout: {0}")]
+    Timeout(String),
+    /// Authentication / authorization failure.
+    #[error("auth error: {0}")]
+    Auth(String),
+    /// Response or payload exceeds supported limits.
+    #[error("payload too large: {0}")]
+    PayloadTooLarge(String),
 }
 
 /// Result type for connectors.

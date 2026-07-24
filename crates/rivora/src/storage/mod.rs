@@ -4,6 +4,8 @@ mod local;
 
 pub use local::LocalStore;
 
+use std::path::Path;
+
 use crate::domain::{
     AssistedWorkflow, CapabilityLifecycleRun, CapabilityLifecycleRunListing, DeploymentReadiness,
     EngineeringReport, Evaluation, ExecutionApproval, ExecutionApprovalListing, ExecutionAttempt,
@@ -13,7 +15,8 @@ use crate::domain::{
     InvestigationId, InvestigationRelationship, KnowledgeObject, LearningOutcome, LearningPattern,
     MeasuredLearningOutcome, MeasuredOutcomeListing, MemoryRecord, ObjectId, Observation,
     ProposalArtifact, ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation,
-    RiskForecast, RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    RiskForecast, RootCauseGuidance, StoreHealthReport, TimelineEntry, VerificationReceipt,
+    VerificationSuggestion,
 };
 use crate::error::RivoraResult;
 
@@ -385,4 +388,16 @@ pub trait Store: Send + Sync {
         investigation_id: &InvestigationId,
         key: &str,
     ) -> RivoraResult<Option<CapabilityLifecycleRun>>;
+
+    /// Local store health / integrity report (v0.9).
+    fn health_report(&self) -> RivoraResult<StoreHealthReport>;
+
+    /// Sanitized diagnostic export as JSON (v0.9).
+    fn diagnostic_export(&self) -> RivoraResult<serde_json::Value>;
+
+    /// Copy store contents to a backup directory (excludes live lock file).
+    fn backup_to(&self, dest: &Path) -> RivoraResult<()>;
+
+    /// Rebuild derived observation idempotency indexes from canonical records.
+    fn rebuild_observation_indexes(&self) -> RivoraResult<u64>;
 }

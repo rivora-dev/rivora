@@ -5,6 +5,10 @@ use rivora::domain::ObservationKind;
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::resilience::{
+    bound_batch, ensure_payload_size, http_client, map_http_status, read_response_limited,
+    redact_json, sanitize_error,
+};
 use crate::{ConnectorError, ConnectorResult, NormalizedObservation};
 
 /// Read-only GitHub connector configuration.
@@ -62,7 +66,7 @@ impl GitHubConnector {
             }
         }
 
-        Ok(out)
+        Ok(bound_batch(out))
     }
 
     /// Observe using a provided JSON fixture (for offline tests / demos).
@@ -170,14 +174,16 @@ impl GitHubConnector {
                 "fixture contained no supported GitHub objects".into(),
             ));
         }
-        Ok(out)
+        // Redact secrets from fixture payloads before Runtime ingestion.
+        for obs in &mut out {
+            redact_json(&mut obs.payload);
+            ensure_payload_size(&obs.payload)?;
+        }
+        Ok(bound_batch(out))
     }
 
     fn client(&self) -> ConnectorResult<reqwest::blocking::Client> {
-        reqwest::blocking::Client::builder()
-            .user_agent("rivora-github-connector/0.1")
-            .build()
-            .map_err(|e| ConnectorError::Api(e.to_string()))
+        http_client("rivora-github-connector/0.9")
     }
 
     fn get_json(
@@ -192,16 +198,19 @@ impl GitHubConnector {
         if let Some(token) = &self.token {
             req = req.bearer_auth(token);
         }
-        let response = req.send().map_err(|e| ConnectorError::Api(e.to_string()))?;
-        if !response.status().is_success() {
-            return Err(ConnectorError::Api(format!(
-                "GET {path} failed: {}",
-                response.status()
-            )));
+        let response = req
+            .send()
+            .map_err(|e| ConnectorError::Api(sanitize_error(&e.to_string())))?;
+        let (status, bytes) = read_response_limited(response)?;
+        let preview = String::from_utf8_lossy(&bytes);
+        if let Some(err) = map_http_status(status, &preview) {
+            return Err(err);
         }
-        response
-            .json()
-            .map_err(|e| ConnectorError::Normalize(e.to_string()))
+        let mut data: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| ConnectorError::Normalize(sanitize_error(&e.to_string())))?;
+        redact_json(&mut data);
+        ensure_payload_size(&data)?;
+        Ok(data)
     }
 
     fn fetch_repository(

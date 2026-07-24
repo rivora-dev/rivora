@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.9.0 — Production Hardening
+
+### Phase 0–1 — Audit and operating envelope
+
+- Production readiness audit and hardening matrix (`docs/guides/HARDENING_MATRIX.md`)
+- Measurable operating envelope profiles: small / medium / large_supported
+- Performance budgets and replay contract tables exposed via Runtime domain types and CLI
+
+### Phase 2–6 — Persistence, integrity, replay
+
+- `store.json` schema manifest (schema v1) with future-version rejection
+- Exclusive cross-process store lock with same-process refcount and stale-lock recovery
+- Durable writes: unique temps + `fsync` before rename; exclusive append creates
+- Observation idempotency key indexes (claim-first, rebuildable)
+- Corruption isolation for core history listings (observations/memory)
+- Store health report, diagnostic export, backup/restore, index rebuild
+- Payload size limits (1 MiB) on Observation ingestion
+
+### Phase 7–9 — Concurrency, Connectors, Loop resilience
+
+- Explicit concurrency contract (reject multi-process writers; no silent corruption)
+- Connector resilience helpers: timeouts, response bounds, rate-limit/auth mapping, redaction
+- GitHub / Actions / Sentry / Kubernetes / Local observation paths hardened
+- Engineering Loop and execution authority boundaries preserved (no silent skips)
+
+### Phase 10–13 — CLI, Workspace, security, diagnostics
+
+- Stable CLI exit codes (0–14) and structured JSON errors
+- `rivora doctor` surface: health, export, backup, rebuild-indexes, recover-lock, envelope, budgets, replay-contracts, exit-codes
+- Default/max search and list bounds for CLI and Workspace
+- Secret redaction and sanitized diagnostics (local only; no telemetry)
+
+### Phase 14–19 — Scenarios, scorecard, freeze, docs
+
+- Automated production scenarios in `v0_9_production_hardening` tests
+- Architecture gates for budgets, replay contracts, doctor/resilience surfaces
+- Production readiness scorecard, architecture debt register, v1.0 freeze assessment
+- Operations, troubleshooting, recovery, backup, concurrency, security, and envelope guides
+
 ## 0.8.0 — Capability Coverage
 
 ### Phase 0–1 — Inventory and standard lifecycle for every first-party Capability

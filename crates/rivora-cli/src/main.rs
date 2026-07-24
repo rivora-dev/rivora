@@ -26,7 +26,9 @@ use rivora::runtime::proposal::{
 use rivora::runtime::search::{OutcomeFilter, SearchQuery, SearchResult};
 use rivora::storage::LocalStore;
 use rivora::{
-    CapabilityService, ExecutionAction, ExecutionPrecondition, MockExecutionCapability, Runtime,
+    CapabilityService, CliExitCode, ExecutionAction, ExecutionPrecondition,
+    MockExecutionCapability, OperatingEnvelope, OperatingProfile, PerformanceBudget,
+    ReplayContract, RivoraError, Runtime,
 };
 use rivora_connectors::github::GitHubConnector;
 use rivora_connectors::github_actions::{ConnectorStatusReport, GitHubActionsConnector};
@@ -149,7 +151,7 @@ enum Commands {
         /// Only Investigations created before this RFC3339 timestamp.
         #[arg(long)]
         before: Option<String>,
-        /// Maximum number of results.
+        /// Maximum number of results (default 100 within supported envelope).
         #[arg(long)]
         limit: Option<usize>,
         /// Explain a specific result instead of listing all matches.
@@ -249,6 +251,44 @@ enum Commands {
         #[command(subcommand)]
         action: CapabilityCmd,
     },
+    /// Local diagnostics, store health, envelope, and recovery helpers (v0.9).
+    Doctor {
+        #[command(subcommand)]
+        action: DoctorCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DoctorCmd {
+    /// Store integrity health report.
+    Health,
+    /// Sanitized diagnostic export (JSON always).
+    Export {
+        /// Optional path to write the export (stdout when omitted).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Backup the local store to a destination directory.
+    Backup {
+        /// Destination directory (must not already exist).
+        dest: PathBuf,
+    },
+    /// Rebuild observation idempotency indexes from canonical records.
+    RebuildIndexes,
+    /// Recover a stale store lock when the holding process is gone.
+    RecoverLock,
+    /// Show the supported operating envelope for a profile.
+    Envelope {
+        /// Profile: small | medium | large_supported (default medium).
+        #[arg(long, default_value = "medium")]
+        profile: String,
+    },
+    /// List performance budgets.
+    Budgets,
+    /// List replay / idempotency contracts.
+    ReplayContracts,
+    /// Print stable CLI exit-code contract.
+    ExitCodes,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1413,20 +1453,257 @@ impl From<ProposalFeedbackCategoryArg> for ProposalFeedbackCategory {
 }
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("error: {err}");
-            ExitCode::from(1)
+    let cli = Cli::parse();
+    match run_cli(cli) {
+        Ok(code) => code,
+        Err(failure) => {
+            if failure.json {
+                eprintln!(
+                    "{}",
+                    serde_json::to_string_pretty(&failure.error.to_json_value()).unwrap_or_else(
+                        |_| format!(r#"{{"error":true,"message":"{}"}}"#, failure.error)
+                    )
+                );
+            } else {
+                eprintln!(
+                    "error: {} (code={}, class={}, retryable={})",
+                    failure.error,
+                    failure.error.code(),
+                    failure.error.failure_class().as_str(),
+                    failure.error.is_retryable()
+                );
+            }
+            ExitCode::from(failure.error.exit_code().code())
         }
     }
 }
 
-fn run() -> Result<(), String> {
-    let cli = Cli::parse();
+/// Structured CLI failure carrying JSON preference.
+struct CliFailure {
+    error: RivoraError,
+    json: bool,
+}
+
+fn run_cli(cli: Cli) -> Result<ExitCode, CliFailure> {
+    let json = cli.json;
+    match run(cli) {
+        Ok(code) => Ok(code),
+        Err(message) => Err(CliFailure {
+            // Preserve structured errors when possible; otherwise map generic messages.
+            error: classify_cli_message(&message),
+            json,
+        }),
+    }
+}
+
+fn classify_cli_message(message: &str) -> RivoraError {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("store lock") || lower.contains("store already locked") {
+        RivoraError::store_locked(message.to_string())
+    } else if lower.contains("schema mismatch") {
+        RivoraError::SchemaMismatch {
+            found: 0,
+            supported_max: 1,
+        }
+    } else if lower.contains("not found") {
+        RivoraError::validation(message.to_string())
+    } else if lower.contains("payload too large") {
+        RivoraError::payload_too_large(message.to_string())
+    } else if lower.contains("rate limit") {
+        RivoraError::RateLimited(message.to_string())
+    } else if lower.contains("timeout") {
+        RivoraError::timeout(message.to_string())
+    } else if lower.contains("auth") || lower.contains("token") && lower.contains("required") {
+        RivoraError::auth_failure(message.to_string())
+    } else if lower.contains("partial") {
+        RivoraError::partial(message.to_string())
+    } else if lower.contains("unsupported") {
+        RivoraError::unsupported(message.to_string())
+    } else if lower.contains("policy") {
+        RivoraError::PolicyDenial(message.to_string())
+    } else {
+        RivoraError::validation(message.to_string())
+    }
+}
+
+fn run(cli: Cli) -> Result<ExitCode, String> {
+    // Doctor recover-lock must run before open (lock may block open).
+    if let Commands::Doctor {
+        action: DoctorCmd::RecoverLock,
+    } = &cli.command
+    {
+        let recovered = rivora::storage::LocalStore::recover_stale_lock(&cli.data_dir)
+            .map_err(|e| e.to_string())?;
+        if cli.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "recovered": recovered,
+                    "data_dir": cli.data_dir.display().to_string(),
+                }))
+                .map_err(|e| e.to_string())?
+            );
+        } else if recovered {
+            println!("Recovered stale lock at {}", cli.data_dir.display());
+        } else {
+            println!("No lock file to recover at {}", cli.data_dir.display());
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let caps = open_capabilities(&cli.data_dir)?;
 
+    let mut exit = ExitCode::SUCCESS;
     match cli.command {
+        Commands::Doctor { action } => match action {
+            DoctorCmd::Health => {
+                let report = caps.store_health().map_err(err)?;
+                print_value(cli.json, &report, || {
+                    format!(
+                        "Store health\n  root: {}\n  schema: {}\n  lock_held: {}\n  investigations: {}\n  observations: {}\n  memory: {}\n  corrupt: {}\n  disk_bytes: {}\n  migration: {}",
+                        report.root,
+                        report.schema_version,
+                        report.lock_held,
+                        report.investigation_count,
+                        report.observation_count,
+                        report.memory_count,
+                        report.corrupt_records.len(),
+                        report.disk_bytes,
+                        report.migration_status
+                    )
+                });
+                if !report.is_healthy() {
+                    exit = ExitCode::from(CliExitCode::CorruptStore.code());
+                }
+            }
+            DoctorCmd::Export { out } => {
+                let export = caps.diagnostic_export().map_err(err)?;
+                let text = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
+                if let Some(path) = out {
+                    std::fs::write(&path, text.as_bytes()).map_err(|e| e.to_string())?;
+                    if !cli.json {
+                        println!("Wrote diagnostic export to {}", path.display());
+                    } else {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "wrote": path.display().to_string()
+                            }))
+                            .map_err(|e| e.to_string())?
+                        );
+                    }
+                } else {
+                    println!("{text}");
+                }
+            }
+            DoctorCmd::Backup { dest } => {
+                caps.backup_store(&dest).map_err(err)?;
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "backup": dest.display().to_string()
+                        }))
+                        .map_err(|e| e.to_string())?
+                    );
+                } else {
+                    println!("Backup written to {}", dest.display());
+                }
+            }
+            DoctorCmd::RebuildIndexes => {
+                let n = caps.rebuild_observation_indexes().map_err(err)?;
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({ "rebuilt": n }))
+                            .map_err(|e| e.to_string())?
+                    );
+                } else {
+                    println!("Rebuilt {n} observation idempotency index entries");
+                }
+            }
+            DoctorCmd::RecoverLock => {
+                // Handled before open_capabilities.
+            }
+            DoctorCmd::Envelope { profile } => {
+                let profile = match profile.to_ascii_lowercase().as_str() {
+                    "small" => OperatingProfile::Small,
+                    "large" | "large_supported" => OperatingProfile::LargeSupported,
+                    _ => OperatingProfile::Medium,
+                };
+                let envelope = OperatingEnvelope::for_profile(profile);
+                print_value(cli.json, &envelope, || {
+                    format!(
+                        "Operating envelope ({})\n  max investigations/store: {}\n  max observations/investigation: {}\n  max payload bytes: {}\n  max connector latency ms: {}\n  concurrent writers: {}",
+                        envelope.profile.as_str(),
+                        envelope.max_investigations_per_store,
+                        envelope.max_observations_per_investigation,
+                        envelope.max_payload_bytes,
+                        envelope.max_connector_latency_ms,
+                        envelope.max_concurrent_writers
+                    )
+                });
+            }
+            DoctorCmd::Budgets => {
+                let budgets = PerformanceBudget::v0_9_budgets();
+                print_value(cli.json, &budgets, || {
+                    let mut lines = vec!["Performance budgets (v0.9):".to_string()];
+                    for b in &budgets {
+                        lines.push(format!(
+                            "  {} target={}ms max={}ms variance={}",
+                            b.scenario, b.target_ms, b.max_ms, b.variance_tolerance
+                        ));
+                    }
+                    lines.join("\n")
+                });
+            }
+            DoctorCmd::ReplayContracts => {
+                let contracts = ReplayContract::v0_9_contracts();
+                print_value(cli.json, &contracts, || {
+                    let mut lines = vec!["Replay contracts (v0.9):".to_string()];
+                    for c in &contracts {
+                        lines.push(format!(
+                            "  {} — reuses_lineage={} dry_run_suppresses_live={}",
+                            c.operation, c.reuses_lineage, c.dry_run_suppresses_live
+                        ));
+                    }
+                    lines.join("\n")
+                });
+            }
+            DoctorCmd::ExitCodes => {
+                let codes = vec![
+                    ("success", CliExitCode::Success.code()),
+                    ("internal", CliExitCode::Internal.code()),
+                    ("validation", CliExitCode::Validation.code()),
+                    ("not_found", CliExitCode::NotFound.code()),
+                    ("unsupported", CliExitCode::Unsupported.code()),
+                    ("blocked", CliExitCode::Blocked.code()),
+                    ("partial", CliExitCode::Partial.code()),
+                    ("provider_failure", CliExitCode::ProviderFailure.code()),
+                    ("auth_failure", CliExitCode::AuthFailure.code()),
+                    ("timeout", CliExitCode::Timeout.code()),
+                    ("corrupt_store", CliExitCode::CorruptStore.code()),
+                    ("schema_mismatch", CliExitCode::SchemaMismatch.code()),
+                    ("lock_conflict", CliExitCode::LockConflict.code()),
+                    ("policy_denial", CliExitCode::PolicyDenial.code()),
+                    (
+                        "verification_failure",
+                        CliExitCode::VerificationFailure.code(),
+                    ),
+                ];
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&codes).map_err(|e| e.to_string())?
+                    );
+                } else {
+                    println!("CLI exit codes:");
+                    for (name, code) in codes {
+                        println!("  {code:>3}  {name}");
+                    }
+                }
+            }
+        },
         Commands::Investigation { action } => match action {
             InvestigationCmd::Create { title, description } => {
                 let inv = caps
@@ -1493,9 +1770,17 @@ fn run() -> Result<(), String> {
                 } else if ids.is_empty() {
                     println!("No investigations found.");
                 } else {
-                    for id in ids {
+                    let total = ids.len();
+                    let limit = rivora::DEFAULT_LIST_LIMIT.min(total);
+                    for id in ids.into_iter().take(limit) {
                         let inv = caps.open_investigation(id).map_err(err)?;
                         println!("{}  [{}]  {}", inv.id, inv.status, inv.title);
+                    }
+                    if total > limit {
+                        println!(
+                            "… showing {limit} of {total} (default page size {}); narrow with search",
+                            rivora::DEFAULT_LIST_LIMIT
+                        );
                     }
                 }
             }
@@ -1893,7 +2178,13 @@ fn run() -> Result<(), String> {
                 file,
                 created_after: after.map(|d| parse_datetime(&d)).transpose()?,
                 created_before: before.map(|d| parse_datetime(&d)).transpose()?,
-                limit,
+                // Default to the supported envelope list limit so CLI never
+                // silently dumps unbounded result sets.
+                limit: Some(
+                    limit
+                        .unwrap_or(rivora::DEFAULT_LIST_LIMIT)
+                        .min(rivora::MAX_LIST_LIMIT),
+                ),
             };
             if let Some(id) = explain {
                 let result = caps
@@ -4141,7 +4432,7 @@ fn run() -> Result<(), String> {
         },
     }
 
-    Ok(())
+    Ok(exit)
 }
 
 fn transition_proposal(

@@ -8,6 +8,10 @@ use rivora::domain::ObservationKind;
 use serde_json::{json, Value};
 
 use crate::github_actions::ConnectorStatusReport;
+use crate::resilience::{
+    bound_batch, ensure_payload_size, http_client, map_http_status, read_response_limited,
+    redact_json, sanitize_error,
+};
 use crate::{ConnectorError, ConnectorResult, NormalizedObservation};
 
 /// Read-only Sentry connector.
@@ -86,10 +90,7 @@ impl SentryConnector {
         let token = self.token.as_ref().ok_or_else(|| {
             ConnectorError::Config("SENTRY_AUTH_TOKEN required for live Sentry observe".into())
         })?;
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("rivora-sentry-connector")
-            .build()
-            .map_err(|e| ConnectorError::Api(e.to_string()))?;
+        let client = http_client("rivora-sentry-connector/0.9")?;
         let url = format!(
             "{}/projects/{}/{}/issues/?limit={}",
             self.api_base.trim_end_matches('/'),
@@ -101,21 +102,15 @@ impl SentryConnector {
             .get(&url)
             .header("Authorization", format!("Bearer {token}"))
             .send()
-            .map_err(|e| ConnectorError::Api(e.to_string()))?;
-        if response.status().as_u16() == 429 {
-            return Err(ConnectorError::Api(
-                "rate limited by Sentry API (no secrets leaked)".into(),
-            ));
+            .map_err(|e| ConnectorError::Api(sanitize_error(&e.to_string())))?;
+        let (status, bytes) = read_response_limited(response)?;
+        let preview = String::from_utf8_lossy(&bytes);
+        if let Some(err) = map_http_status(status, &preview) {
+            return Err(err);
         }
-        if !response.status().is_success() {
-            return Err(ConnectorError::Api(format!(
-                "Sentry API status {}",
-                response.status()
-            )));
-        }
-        let body: Value = response
-            .json()
-            .map_err(|e| ConnectorError::Normalize(e.to_string()))?;
+        let mut body: Value = serde_json::from_slice(&bytes)
+            .map_err(|e| ConnectorError::Normalize(sanitize_error(&e.to_string())))?;
+        redact_json(&mut body);
         Self::normalize_issues(&self.organization, &self.project, &body)
     }
 
@@ -185,13 +180,8 @@ impl SentryConnector {
                 .unwrap_or_else(Utc::now);
 
             let mut payload = issue.clone();
-            if let Some(obj) = payload.as_object_mut() {
-                for key in ["token", "authToken", "dsn", "secret"] {
-                    if obj.contains_key(key) {
-                        obj.insert(key.into(), json!("[redacted]"));
-                    }
-                }
-            }
+            redact_json(&mut payload);
+            ensure_payload_size(&payload)?;
 
             out.push(NormalizedObservation::new(
                 ObservationKind::Observability,
@@ -216,7 +206,7 @@ impl SentryConnector {
                 "sentry-connector",
             ));
         }
-        Ok(out)
+        Ok(bound_batch(out))
     }
 }
 

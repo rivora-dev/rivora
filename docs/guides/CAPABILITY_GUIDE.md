@@ -1,7 +1,11 @@
-# Capability Guide (v0.8)
+# Capability Guide (v0.8 / production-hardened in v0.9)
 
 This guide explains how to implement a first-party Rivora Capability so it
 participates consistently in the Capability Engineering Loop (RFC-028).
+
+v0.9 does not change Capability semantics. It hardens surrounding Runtime
+persistence, replay, timeouts, and diagnostics so Capability lifecycle runs
+remain durable and inspectable under production conditions.
 
 ## What a Capability is
 

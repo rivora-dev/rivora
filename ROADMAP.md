@@ -13,54 +13,39 @@ engineering-system mutation boundaries.
 * v0.6 — Execute through external systems: approved bounded capabilities, plans, receipts, verification
 * v0.7 — Engineering Loop Integration: formal Capability participation in Memory → Evaluation → Verification → Improvement → Learning
 * v0.8 — Capability Coverage: every first-party Capability and Connector participates consistently in the Engineering Loop
+* v0.9 — Production Hardening: prove the architecture remains reliable at realistic local/on-prem scale
 
 ## Current boundary
 
-v0.8 expands the Capability Engineering Loop from a validated vertical slice into
-the standard model for all first-party Capabilities and Connectors.
+v0.9 is the release gate between architectural completeness and public stability.
 
-Every registered first-party Capability:
+It strengthens existing systems under imperfect production conditions:
 
-* exposes a complete descriptor (identity, provider, operation, risk, permissions,
-  inputs/outputs, limitations, lifecycle participation)
-* uses shared Runtime orchestration for Memory → Evaluation → Verification →
-  Improvement → Learning
-* never writes lifecycle artifacts directly
-* routes via canonical, provider-independent input type identifiers
-
-Every first-party Connector:
-
-* authenticates, collects, normalizes, sanitizes, preserves provenance, and delivers
-* emits canonical Observation kinds as Runtime inputs
-* never evaluates, verifies, recommends, improves, or learns
-
-CLI and Workspace always expose the same registered first-party set and a shared
-coverage/health report. Live mutation still requires plan, policy, exact-revision
-approval, confirmation, and independent verification.
+* operating envelope (small / medium / large_supported)
+* performance budgets and micro-benchmarks
+* store lock, durable writes, corruption isolation, backup/restore
+* replay contracts and observation idempotency indexes
+* Connector timeouts, payload limits, rate-limit errors, redaction
+* CLI exit codes, JSON errors, `doctor` diagnostics
+* Workspace bounded lists
+* production readiness scorecard and v1.0 freeze assessment
 
 ```text
-Connectors provide normalized facts
-Capabilities express intent and typed contributions
-Runtime produces engineering knowledge through the Engineering Loop
+v0.7 — Connect the architecture
+v0.8 — Apply the architecture across first-party Capabilities
+v0.9 — Prove the architecture remains reliable at realistic scale
+v1.0 — Freeze the validated contracts
 ```
 
-```text
-Proposal Accepted
-  ≠ Execution Approved
-  ≠ Execution Started
-  ≠ Execution Completed
-  ≠ Execution Verified
-  ≠ Outcome Successful
-  ≠ Learning complete
-```
+v0.9 does **not** introduce a new foundational Runtime subsystem, redesign the
+Engineering Loop, expand broad provider coverage, or begin v1.0 work.
 
-v0.8 cannot: Capability marketplace/SDK, automatic Proposal acceptance, automatic
-execution or rollback, connector reasoning, dynamic plugins, cloud control plane,
-or production-hardening work reserved for v0.9.
+Hardening may not weaken determinism, provenance, append-only Memory,
+Connector/Capability boundaries, Verification independence, or execution authority.
 
 ## Future backlog
 
-Autonomous remediation, inferred implementation tracking, collaboration, SDKs,
+v1.0 Stable Engineering Platform (contract freeze after v0.9 release soak),
+autonomous remediation, inferred implementation tracking, collaboration, SDKs,
 marketplaces, hosted control planes, multi-tenancy, multi-user approval workflows,
-production hardening (v0.9), and enterprise administration remain future work.
-They are not part of v0.8.
+and enterprise administration remain future work.

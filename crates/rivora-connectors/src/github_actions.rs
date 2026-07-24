@@ -6,6 +6,10 @@ use chrono::{DateTime, Utc};
 use rivora::domain::ObservationKind;
 use serde_json::{json, Value};
 
+use crate::resilience::{
+    bound_batch, ensure_payload_size, http_client, map_http_status, read_response_limited,
+    redact_json, sanitize_error,
+};
 use crate::{ConnectorError, ConnectorResult, NormalizedObservation};
 
 /// Read-only GitHub Actions connector.
@@ -77,10 +81,7 @@ impl GitHubActionsConnector {
         let token = self.token.as_ref().ok_or_else(|| {
             ConnectorError::Config("GITHUB_TOKEN required for live GitHub Actions observe".into())
         })?;
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("rivora-github-actions-connector")
-            .build()
-            .map_err(|e| ConnectorError::Api(e.to_string()))?;
+        let client = http_client("rivora-github-actions-connector/0.9")?;
 
         let url = format!(
             "{}/repos/{}/actions/runs?per_page={}",
@@ -92,27 +93,17 @@ impl GitHubActionsConnector {
             .get(&url)
             .header("Accept", "application/vnd.github+json");
         req = req.bearer_auth(token);
-        let response = req.send().map_err(|e| ConnectorError::Api(e.to_string()))?;
-        if response.status().as_u16() == 403 {
-            let body = response.text().unwrap_or_default();
-            if body.to_lowercase().contains("rate limit") {
-                return Err(ConnectorError::Api(
-                    "rate limited by GitHub Actions API (no secrets leaked)".into(),
-                ));
-            }
-            return Err(ConnectorError::Api(
-                "GitHub Actions API forbidden (credentials or permissions)".into(),
-            ));
+        let response = req
+            .send()
+            .map_err(|e| ConnectorError::Api(sanitize_error(&e.to_string())))?;
+        let (status, bytes) = read_response_limited(response)?;
+        let preview = String::from_utf8_lossy(&bytes);
+        if let Some(err) = map_http_status(status, &preview) {
+            return Err(err);
         }
-        if !response.status().is_success() {
-            return Err(ConnectorError::Api(format!(
-                "GitHub Actions API status {}",
-                response.status()
-            )));
-        }
-        let body: Value = response
-            .json()
-            .map_err(|e| ConnectorError::Normalize(e.to_string()))?;
+        let mut body: Value = serde_json::from_slice(&bytes)
+            .map_err(|e| ConnectorError::Normalize(sanitize_error(&e.to_string())))?;
+        redact_json(&mut body);
         Self::normalize_runs(&self.repository, &body)
     }
 
@@ -172,15 +163,9 @@ impl GitHubActionsConnector {
                 .map(|d| d.with_timezone(&Utc))
                 .unwrap_or_else(Utc::now);
 
-            // Redact any accidental token-like fields.
             let mut payload = run.clone();
-            if let Some(obj) = payload.as_object_mut() {
-                for key in ["token", "secret", "authorization", "password"] {
-                    if let Some(val) = obj.get_mut(key) {
-                        *val = json!("[redacted]");
-                    }
-                }
-            }
+            redact_json(&mut payload);
+            ensure_payload_size(&payload)?;
 
             out.push(NormalizedObservation::new(
                 ObservationKind::WorkflowRun,
@@ -225,7 +210,7 @@ impl GitHubActionsConnector {
                 "no workflow runs found to normalize".into(),
             ));
         }
-        Ok(out)
+        Ok(bound_batch(out))
     }
 }
 

@@ -485,9 +485,12 @@ impl Runtime {
         }
 
         sort_results(&mut results);
-        if let Some(limit) = query.limit {
-            results.truncate(limit);
-        }
+        // Always bound results to the supported operating envelope.
+        let limit = query
+            .limit
+            .unwrap_or(crate::domain::DEFAULT_LIST_LIMIT)
+            .min(crate::domain::MAX_LIST_LIMIT);
+        results.truncate(limit);
         Ok(results)
     }
 
@@ -751,9 +754,10 @@ impl Runtime {
         }
 
         sort_results(&mut results);
-        if let Some(limit) = limit {
-            results.truncate(limit);
-        }
+        let limit = limit
+            .unwrap_or(crate::domain::DEFAULT_LIST_LIMIT)
+            .min(crate::domain::MAX_LIST_LIMIT);
+        results.truncate(limit);
         Ok(results)
     }
 

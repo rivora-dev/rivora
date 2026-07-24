@@ -1,6 +1,8 @@
 //! Observation ingestion (Phase 2).
 
-use crate::domain::{InvestigationStatus, MemoryRecord, Observation, ObservationKind, Provenance};
+use crate::domain::{
+    InvestigationStatus, MemoryRecord, Observation, ObservationKind, Provenance, MAX_PAYLOAD_BYTES,
+};
 use crate::error::{RivoraError, RivoraResult};
 use crate::runtime::Runtime;
 use chrono::{DateTime, Utc};
@@ -50,27 +52,22 @@ impl Runtime {
     ) -> RivoraResult<IngestObservationResult> {
         let mut inv = self.store.load_investigation(&request.investigation_id)?;
 
+        // Bound payload size to the supported operating envelope.
+        let payload_bytes = serde_json::to_vec(&request.payload)
+            .map_err(|e| RivoraError::serialization(e.to_string()))?
+            .len();
+        if payload_bytes > MAX_PAYLOAD_BYTES {
+            return Err(RivoraError::payload_too_large(format!(
+                "observation payload is {payload_bytes} bytes; max is {MAX_PAYLOAD_BYTES}"
+            )));
+        }
+
         // Idempotency check first.
         if let Some(ref key) = request.idempotency_key {
-            if let Some(existing) = self
-                .store
-                .find_observation_by_idempotency(&request.investigation_id, key)?
+            if let Some(result) =
+                self.replay_observation_if_present(&request.investigation_id, key)?
             {
-                let memory = self
-                    .store
-                    .list_memory(&request.investigation_id)?
-                    .into_iter()
-                    .find(|m| m.observation_id == existing.id)
-                    .ok_or_else(|| {
-                        RivoraError::Precondition(
-                            "idempotent observation missing memory record".into(),
-                        )
-                    })?;
-                return Ok(IngestObservationResult {
-                    observation: existing,
-                    memory,
-                    idempotent_replay: true,
-                });
+                return Ok(result);
             }
         }
 
@@ -92,7 +89,7 @@ impl Runtime {
             request.payload,
             request.source,
             request.observed_at,
-            request.idempotency_key,
+            request.idempotency_key.clone(),
             provenance.clone(),
         )?;
 
@@ -105,7 +102,23 @@ impl Runtime {
             self.store.save_investigation(&inv)?;
         }
 
-        self.store.append_observation(&observation)?;
+        match self.store.append_observation(&observation) {
+            Ok(()) => {}
+            Err(RivoraError::Conflict(_)) => {
+                // Concurrent claim of the same idempotency key — reuse winner.
+                if let Some(ref key) = request.idempotency_key {
+                    if let Some(result) =
+                        self.replay_observation_if_present(&request.investigation_id, key)?
+                    {
+                        return Ok(result);
+                    }
+                }
+                return Err(RivoraError::conflict(
+                    "observation append conflict without recoverable idempotency key",
+                ));
+            }
+            Err(e) => return Err(e),
+        }
 
         let memory = MemoryRecord::from_observation(
             observation.id,
@@ -169,5 +182,31 @@ impl Runtime {
             memory,
             idempotent_replay: false,
         })
+    }
+
+    fn replay_observation_if_present(
+        &self,
+        investigation_id: &crate::domain::InvestigationId,
+        key: &str,
+    ) -> RivoraResult<Option<IngestObservationResult>> {
+        let Some(existing) = self
+            .store
+            .find_observation_by_idempotency(investigation_id, key)?
+        else {
+            return Ok(None);
+        };
+        let memory = self
+            .store
+            .list_memory(investigation_id)?
+            .into_iter()
+            .find(|m| m.observation_id == existing.id)
+            .ok_or_else(|| {
+                RivoraError::Precondition("idempotent observation missing memory record".into())
+            })?;
+        Ok(Some(IngestObservationResult {
+            observation: existing,
+            memory,
+            idempotent_replay: true,
+        }))
     }
 }

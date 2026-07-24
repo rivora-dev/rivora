@@ -12,29 +12,36 @@ Instead of replacing GitHub, CI/CD, cloud providers, observability platforms, or
 
 ---
 
-## Current Development: v0.8 — Capability Coverage
+## Current Development: v0.9 — Production Hardening
 
-Rivora v0.8 answers: **Can every first-party Capability and Connector participate consistently in the Capability Engineering Loop without special-case Runtime behavior or architectural exceptions?**
+Rivora v0.9 answers: **Can Rivora preserve deterministic, explainable, durable engineering understanding when operating at realistic production scale and under imperfect conditions?**
+
+v0.9 does not add a new foundational subsystem. It hardens the architecture from v0.1–v0.8 for local and on-prem use before v1.0 freezes public contracts.
 
 ```text
-Connectors → Normalized facts
-      ↓
-Capabilities → Intent + typed lifecycle contributions
-      ↓
-Runtime → Memory → Evaluation → Verification → Improvement → Learning
+External systems → Connectors → Validation/Dedup → Routing → Engineering Loop → Durable local store
+                                                                         ↓
+                                                              CLI / Workspace / Search
 ```
 
-Built on v0.7 (Engineering Loop Integration) and earlier releases:
+Production hardening highlights:
 
-- **Full first-party coverage** — all six execution Capabilities (`mock.record` + GitHub adapters) use the same descriptor, lifecycle, contribution, Runtime, persistence, CLI, and Workspace models
-- **Complete descriptors** — identity, provider, operation, risk, permissions, inputs/outputs, limitations, and explicit loop participation
-- **Connector canonical inputs** — local, GitHub, GitHub Actions, Kubernetes, and Sentry emit Observation kinds without inventing health/failure conclusions
-- **Coverage surface** — `rivora capability coverage` and Workspace health view report registration, completeness, lifecycle support, and gaps
-- **Deterministic routing** — zero / one / many matches with stable ordering; no string-name-only routing
+- **Operating envelope** — small / medium / large_supported profiles with explicit limits (not unlimited scale)
+- **Store integrity** — `store.json` schema, exclusive locks, durable writes, corruption isolation, backup/restore
+- **Replay safety** — observation idempotency indexes and documented replay contracts
+- **Connector resilience** — timeouts, payload bounds, rate-limit/auth errors, secret redaction
+- **CLI diagnostics** — stable exit codes and `rivora doctor` (health, export, backup, recover-lock, budgets)
+- **Bounded UX** — default search/list pagination for CLI and Workspace
 
-**Connectors provide normalized engineering data. Capabilities express engineering intent. The Runtime produces engineering knowledge through the Engineering Loop.**
+```bash
+rivora doctor health --json
+rivora doctor envelope --profile medium
+rivora doctor exit-codes
+```
 
-Execution safety from v0.6 is preserved: only explicitly approved, bounded capabilities mutate external systems. Proposal acceptance never starts execution. External API success is not verified success or Outcome success.
+See `docs/guides/OPERATING_ENVELOPE.md`, `docs/guides/OPERATIONS.md`, and `docs/guides/PRODUCTION_READINESS_SCORECARD.md`.
+
+Execution safety from v0.6 and Capability coverage from v0.8 are preserved: only explicitly approved, bounded capabilities mutate external systems. Proposal acceptance never starts execution.
 
 ---
 

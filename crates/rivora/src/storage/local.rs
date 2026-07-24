@@ -44,10 +44,25 @@
 //! `learning/patterns/` are also lazy and additive.
 //! v0.6 execution directories are lazy and additive.
 //! v0.7 `lifecycle_runs/` is lazy and additive.
+//! v0.9 adds `store.json` manifest, exclusive process lock, durable
+//! writes with unique temps + fsync, observation key indexes, and
+//! corruption isolation for core history directories.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Process-local refcounts for store locks.
+///
+/// Multiple `LocalStore` handles in the same process may share one exclusive
+/// lock (refcounted). Cross-process access remains exclusive via the lock file.
+fn process_lock_table() -> &'static Mutex<HashMap<PathBuf, usize>> {
+    static TABLE: OnceLock<Mutex<HashMap<PathBuf, usize>>> = OnceLock::new();
+    TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 use crate::domain::{
     AssistedWorkflow, CapabilityLifecycleRun, CapabilityLifecycleRunListing, DeploymentReadiness,
@@ -60,30 +75,374 @@ use crate::domain::{
     LifecycleStorageDiagnostic, MeasuredLearningOutcome, MeasuredOutcomeListing,
     MeasuredOutcomeStorageDiagnostic, MemoryRecord, ObjectId, Observation, ProposalArtifact,
     ProposalArtifactListing, ProposalListing, RecalledContext, Recommendation, RiskForecast,
-    RootCauseGuidance, TimelineEntry, VerificationReceipt, VerificationSuggestion,
+    RootCauseGuidance, StoreHealthReport, StoreManifest, StoreRecordDiagnostic, TimelineEntry,
+    VerificationReceipt, VerificationSuggestion, STALE_LOCK_SECS, STORE_SCHEMA_VERSION,
+    STORE_SCHEMA_VERSION_MAX, SUPPORTED_PRIOR_STORE_VERSIONS,
 };
 use crate::error::{RivoraError, RivoraResult};
 
 use super::Store;
 
+/// Exclusive process lock for a LocalStore root.
+#[derive(Debug)]
+struct StoreLock {
+    path: PathBuf,
+    /// When true, this handle only decremented the in-process refcount
+    /// (another handle already owns the lock file).
+    shared_in_process: bool,
+}
+
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        let mut table = process_lock_table()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let count = table.get(&self.path).copied().unwrap_or(0);
+        if count > 1 {
+            table.insert(self.path.clone(), count - 1);
+            return;
+        }
+        table.remove(&self.path);
+        // Only the last in-process holder removes the lock file.
+        if !self.shared_in_process || count == 1 {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
 /// Local directory-based store.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LocalStore {
     root: PathBuf,
+    /// Held exclusive lock (released on drop).
+    _lock: Option<StoreLock>,
 }
 
 impl LocalStore {
-    /// Open or create a store at `root`.
+    /// Open or create a store at `root`, acquiring an exclusive process lock.
     pub fn open(root: impl Into<PathBuf>) -> RivoraResult<Self> {
+        Self::open_with_options(root, true)
+    }
+
+    /// Open without acquiring the exclusive lock (read-only diagnostics / tests).
+    ///
+    /// Concurrent use with a locked writer is unsupported for mutations; this
+    /// path exists for health inspection and stale-lock recovery helpers.
+    pub fn open_unlocked(root: impl Into<PathBuf>) -> RivoraResult<Self> {
+        Self::open_with_options(root, false)
+    }
+
+    fn open_with_options(root: impl Into<PathBuf>, acquire_lock: bool) -> RivoraResult<Self> {
         let root = root.into();
         fs::create_dir_all(root.join("investigations"))
             .map_err(|e| RivoraError::storage(format!("failed to create store root: {e}")))?;
-        Ok(Self { root })
+        let lock = if acquire_lock {
+            Some(Self::acquire_lock(&root)?)
+        } else {
+            None
+        };
+        let store = Self { root, _lock: lock };
+        store.ensure_manifest()?;
+        store.cleanup_orphan_temps()?;
+        Ok(store)
     }
 
     /// Store root path.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Whether this instance holds the exclusive store lock.
+    pub fn lock_held(&self) -> bool {
+        self._lock.is_some()
+    }
+
+    /// Force-release a stale lock file when the holding process is gone.
+    ///
+    /// Safe recovery only: refuses to remove a lock owned by a live process
+    /// younger than [`STALE_LOCK_SECS`].
+    pub fn recover_stale_lock(root: impl AsRef<Path>) -> RivoraResult<bool> {
+        let lock_path = root.as_ref().join(".rivora.lock");
+        if !lock_path.exists() {
+            return Ok(false);
+        }
+        let content = fs::read_to_string(&lock_path)
+            .map_err(|e| RivoraError::storage(format!("failed to read lock file: {e}")))?;
+        let (pid, created_at) = parse_lock_contents(&content)?;
+        if process_alive(pid) && !lock_is_stale(created_at) {
+            return Err(RivoraError::store_locked(format!(
+                "store lock held by live process {pid} (not stale)"
+            )));
+        }
+        fs::remove_file(&lock_path)
+            .map_err(|e| RivoraError::storage(format!("failed to remove stale lock: {e}")))?;
+        Ok(true)
+    }
+
+    fn acquire_lock(root: &Path) -> RivoraResult<StoreLock> {
+        let lock_path = root.join(".rivora.lock");
+        let key = root
+            .canonicalize()
+            .unwrap_or_else(|_| root.to_path_buf())
+            .join(".rivora.lock");
+
+        // Same-process re-entrant lock: share one exclusive lock file.
+        {
+            let mut table = process_lock_table()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some(count) = table.get_mut(&key) {
+                *count += 1;
+                return Ok(StoreLock {
+                    path: key,
+                    shared_in_process: true,
+                });
+            }
+        }
+
+        if lock_path.exists() {
+            let content = fs::read_to_string(&lock_path).unwrap_or_default();
+            if let Ok((pid, created_at)) = parse_lock_contents(&content) {
+                // Another live process holds the lock.
+                if pid != std::process::id() && process_alive(pid) && !lock_is_stale(created_at) {
+                    return Err(RivoraError::store_locked(format!(
+                        "store already locked by process {pid} at {}",
+                        lock_path.display()
+                    )));
+                }
+                // Same process without table entry (e.g. after panic) or stale/dead — reclaim.
+                let _ = fs::remove_file(&lock_path);
+            } else {
+                // Unparseable lock — reclaim if stale mtime.
+                if let Ok(meta) = fs::metadata(&lock_path) {
+                    if let Ok(modified) = meta.modified() {
+                        if let Ok(age) = SystemTime::now().duration_since(modified) {
+                            if age.as_secs() < STALE_LOCK_SECS {
+                                return Err(RivoraError::store_locked(format!(
+                                    "unparseable store lock at {} (not stale)",
+                                    lock_path.display()
+                                )));
+                            }
+                        }
+                    }
+                }
+                let _ = fs::remove_file(&lock_path);
+            }
+        }
+        let pid = std::process::id();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let body = format!("pid={pid}\ncreated_at={now}\n");
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut file) => {
+                file.write_all(body.as_bytes())
+                    .map_err(|e| RivoraError::storage(format!("failed to write lock file: {e}")))?;
+                file.sync_all()
+                    .map_err(|e| RivoraError::storage(format!("failed to sync lock file: {e}")))?;
+                let mut table = process_lock_table()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                table.insert(key.clone(), 1);
+                Ok(StoreLock {
+                    path: key,
+                    shared_in_process: false,
+                })
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(
+                RivoraError::store_locked(format!("store lock race at {}", lock_path.display())),
+            ),
+            Err(e) => Err(RivoraError::storage(format!("failed to create lock: {e}"))),
+        }
+    }
+
+    fn ensure_manifest(&self) -> RivoraResult<()> {
+        let path = self.root.join("store.json");
+        if path.exists() {
+            let manifest: StoreManifest = self.read_json(&path)?;
+            if manifest.schema_version > STORE_SCHEMA_VERSION_MAX {
+                return Err(RivoraError::SchemaMismatch {
+                    found: manifest.schema_version,
+                    supported_max: STORE_SCHEMA_VERSION_MAX,
+                });
+            }
+            let mut updated = manifest;
+            updated.last_opened_at = chrono::Utc::now().to_rfc3339();
+            if updated.schema_version < STORE_SCHEMA_VERSION {
+                // Additive migration: bump manifest only; directories remain lazy.
+                updated.schema_version = STORE_SCHEMA_VERSION;
+                updated.rivora_version = env!("CARGO_PKG_VERSION").to_string();
+            }
+            self.write_json(&path, &updated)?;
+            return Ok(());
+        }
+        let manifest = StoreManifest::new_now(env!("CARGO_PKG_VERSION"));
+        self.write_json(&path, &manifest)
+    }
+
+    fn cleanup_orphan_temps(&self) -> RivoraResult<()> {
+        // Best-effort: remove leftover *.tmp files under the store root.
+        let mut stack = vec![self.root.clone()];
+        while let Some(dir) = stack.pop() {
+            let entries = match fs::read_dir(&dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.ends_with(".tmp") || n.contains(".tmp."))
+                    .unwrap_or(false)
+                {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compute a store health report (isolates corrupt records).
+    pub fn health_report(&self) -> RivoraResult<StoreHealthReport> {
+        let mut corrupt = Vec::new();
+        let mut observation_count = 0u64;
+        let mut memory_count = 0u64;
+        let mut lifecycle_run_count = 0u64;
+        let ids = self.list_investigations()?;
+        for id in &ids {
+            let (obs, obs_diag) =
+                self.list_json_dir_isolated::<Observation>(&self.inv_dir(id).join("observations"))?;
+            observation_count += obs.len() as u64;
+            for d in obs_diag {
+                corrupt.push(StoreRecordDiagnostic {
+                    path: d.0,
+                    error: d.1,
+                    kind: "observation".into(),
+                });
+            }
+            let (mem, mem_diag) =
+                self.list_json_dir_isolated::<MemoryRecord>(&self.inv_dir(id).join("memory"))?;
+            memory_count += mem.len() as u64;
+            for d in mem_diag {
+                corrupt.push(StoreRecordDiagnostic {
+                    path: d.0,
+                    error: d.1,
+                    kind: "memory".into(),
+                });
+            }
+            let listing = self.list_lifecycle_runs(id)?;
+            lifecycle_run_count += listing.runs.len() as u64;
+            for d in listing.diagnostics {
+                corrupt.push(StoreRecordDiagnostic {
+                    path: d.path,
+                    error: d.error,
+                    kind: "lifecycle_run".into(),
+                });
+            }
+        }
+        let relationship_count = self.list_relationships()?.len() as u64;
+        let learning_pattern_count = self.list_learning_patterns()?.len() as u64;
+        let schema_version = if self.root.join("store.json").exists() {
+            self.read_json::<StoreManifest>(&self.root.join("store.json"))?
+                .schema_version
+        } else {
+            STORE_SCHEMA_VERSION
+        };
+        let disk_bytes = dir_size(&self.root).unwrap_or(0);
+        let lock_path = self.root.join(".rivora.lock");
+        Ok(StoreHealthReport {
+            root: self.root.display().to_string(),
+            schema_version,
+            lock_held: self.lock_held(),
+            lock_path: if lock_path.exists() {
+                Some(lock_path.display().to_string())
+            } else {
+                None
+            },
+            investigation_count: ids.len() as u64,
+            observation_count,
+            memory_count,
+            lifecycle_run_count,
+            relationship_count,
+            learning_pattern_count,
+            disk_bytes,
+            corrupt_records: corrupt,
+            orphan_temp_files: Vec::new(),
+            notes: vec![
+                "Local-only diagnostics; no remote telemetry.".into(),
+                "Corrupt records are isolated where possible; healthy siblings remain readable."
+                    .into(),
+            ],
+            migration_status: if schema_version <= STORE_SCHEMA_VERSION_MAX {
+                "compatible".into()
+            } else {
+                "incompatible".into()
+            },
+            supported_prior_versions: SUPPORTED_PRIOR_STORE_VERSIONS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+        })
+    }
+
+    /// Sanitized diagnostic export as JSON value (no secrets).
+    pub fn diagnostic_export(&self) -> RivoraResult<serde_json::Value> {
+        let health = self.health_report()?;
+        Ok(serde_json::json!({
+            "schema_version": 1,
+            "rivora_version": env!("CARGO_PKG_VERSION"),
+            "health": health,
+            "operating_envelope": crate::domain::OperatingEnvelope::medium(),
+            "replay_contracts": crate::domain::ReplayContract::v0_9_contracts(),
+            "performance_budgets": crate::domain::PerformanceBudget::v0_9_budgets(),
+        }))
+    }
+
+    /// Create a simple directory backup of the store (copy tree).
+    pub fn backup_to(&self, dest: impl AsRef<Path>) -> RivoraResult<()> {
+        let dest = dest.as_ref();
+        if dest.exists() {
+            return Err(RivoraError::validation(format!(
+                "backup destination already exists: {}",
+                dest.display()
+            )));
+        }
+        copy_dir_excluding_lock(&self.root, dest)?;
+        Ok(())
+    }
+
+    /// Rebuild observation idempotency indexes from canonical records.
+    pub fn rebuild_observation_indexes(&self) -> RivoraResult<u64> {
+        let mut rebuilt = 0u64;
+        for id in self.list_investigations()? {
+            let obs = self.list_observations(&id)?;
+            let index_dir = self.inv_dir(&id).join("indexes").join("observation_keys");
+            if index_dir.exists() {
+                let _ = fs::remove_dir_all(&index_dir);
+            }
+            fs::create_dir_all(&index_dir)
+                .map_err(|e| RivoraError::storage(format!("failed to create index dir: {e}")))?;
+            for o in obs {
+                if let Some(key) = o.idempotency_key.as_deref() {
+                    let path = index_dir.join(format!("{}.json", stable_key_hash(key)));
+                    let body = serde_json::json!({
+                        "object_id": o.id.to_string(),
+                        "idempotency_key": key,
+                    });
+                    self.write_json(&path, &body)?;
+                    rebuilt += 1;
+                }
+            }
+        }
+        Ok(rebuilt)
     }
 
     fn inv_dir(&self, id: &InvestigationId) -> PathBuf {
@@ -121,11 +480,21 @@ impl LocalStore {
         }
         let data = serde_json::to_vec_pretty(value)
             .map_err(|e| RivoraError::serialization(e.to_string()))?;
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, &data)
-            .map_err(|e| RivoraError::storage(format!("failed to write temp file: {e}")))?;
-        fs::rename(&tmp, path)
-            .map_err(|e| RivoraError::storage(format!("failed to finalize write: {e}")))?;
+        // Unique temp name avoids concurrent same-path writers clobbering
+        // a shared `.json.tmp` file. sync_all before rename improves durability.
+        let tmp = path.with_extension(format!("{}.tmp", ObjectId::new()));
+        {
+            let mut file = fs::File::create(&tmp)
+                .map_err(|e| RivoraError::storage(format!("failed to create temp file: {e}")))?;
+            file.write_all(&data)
+                .map_err(|e| RivoraError::storage(format!("failed to write temp file: {e}")))?;
+            file.sync_all()
+                .map_err(|e| RivoraError::storage(format!("failed to sync temp file: {e}")))?;
+        }
+        fs::rename(&tmp, path).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            RivoraError::storage(format!("failed to finalize write: {e}"))
+        })?;
         Ok(())
     }
 
@@ -148,19 +517,41 @@ impl LocalStore {
             file.sync_all()
                 .map_err(|e| RivoraError::storage(format!("failed to sync temp file: {e}")))?;
         }
+        // Prefer exclusive create via hard_link; fall back to create_new + rename
+        // when hard links are unavailable (e.g. some network filesystems).
         let linked = match fs::hard_link(&tmp, path) {
             Ok(()) => true,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
-            Err(error) => {
-                let _ = fs::remove_file(&tmp);
-                return Err(RivoraError::storage(format!(
-                    "failed to atomically append {}: {error}",
-                    path.display()
-                )));
+            Err(_) => {
+                match fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)
+                {
+                    Ok(mut file) => {
+                        if let Err(e) = file.write_all(&data) {
+                            let _ = fs::remove_file(path);
+                            let _ = fs::remove_file(&tmp);
+                            return Err(RivoraError::storage(format!(
+                                "failed to atomically append {}: {e}",
+                                path.display()
+                            )));
+                        }
+                        let _ = file.sync_all();
+                        true
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+                    Err(error) => {
+                        let _ = fs::remove_file(&tmp);
+                        return Err(RivoraError::storage(format!(
+                            "failed to atomically append {}: {error}",
+                            path.display()
+                        )));
+                    }
+                }
             }
         };
-        fs::remove_file(&tmp)
-            .map_err(|e| RivoraError::storage(format!("failed to remove temp file: {e}")))?;
+        let _ = fs::remove_file(&tmp);
         Ok(linked)
     }
 
@@ -171,10 +562,21 @@ impl LocalStore {
     }
 
     fn list_json_dir<T: serde::de::DeserializeOwned>(&self, dir: &Path) -> RivoraResult<Vec<T>> {
+        let (items, _diag) = self.list_json_dir_isolated(dir)?;
+        Ok(items)
+    }
+
+    /// List JSON objects, isolating corrupt files instead of failing the whole directory.
+    #[allow(clippy::type_complexity)]
+    fn list_json_dir_isolated<T: serde::de::DeserializeOwned>(
+        &self,
+        dir: &Path,
+    ) -> RivoraResult<(Vec<T>, Vec<(String, String)>)> {
         if !dir.exists() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         let mut items = Vec::new();
+        let mut diagnostics = Vec::new();
         let entries = fs::read_dir(dir).map_err(|e| {
             RivoraError::storage(format!("failed to read dir {}: {e}", dir.display()))
         })?;
@@ -182,11 +584,24 @@ impl LocalStore {
             let entry = entry
                 .map_err(|e| RivoraError::storage(format!("failed to read dir entry: {e}")))?;
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                items.push(self.read_json(&path)?);
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            // Skip temp files that might still be present.
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.contains(".tmp"))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            match self.read_json::<T>(&path) {
+                Ok(item) => items.push(item),
+                Err(error) => diagnostics.push((path.display().to_string(), error.to_string())),
             }
         }
-        Ok(items)
+        Ok((items, diagnostics))
     }
 
     fn object_path(
@@ -599,6 +1014,16 @@ impl Store for LocalStore {
 
     fn append_observation(&self, observation: &Observation) -> RivoraResult<()> {
         self.ensure_inv_dirs(&observation.investigation_id)?;
+        // Claim idempotency key first so concurrent same-key ingests cannot double-write.
+        if let Some(key) = observation.idempotency_key.as_deref() {
+            let claimed =
+                self.claim_observation_key(&observation.investigation_id, key, &observation.id)?;
+            if !claimed {
+                return Err(RivoraError::conflict(format!(
+                    "observation idempotency key already claimed: {key}"
+                )));
+            }
+        }
         let path = self.object_path(
             &observation.investigation_id,
             "observations",
@@ -610,7 +1035,14 @@ impl Store for LocalStore {
                 observation.id
             )));
         }
-        self.write_json(&path, observation)
+        // Use exclusive create for append-only observation bodies.
+        if !self.write_json_new(&path, observation)? {
+            return Err(RivoraError::storage(format!(
+                "observation {} already exists",
+                observation.id
+            )));
+        }
+        Ok(())
     }
 
     fn list_observations(&self, id: &InvestigationId) -> RivoraResult<Vec<Observation>> {
@@ -625,6 +1057,24 @@ impl Store for LocalStore {
         investigation_id: &InvestigationId,
         key: &str,
     ) -> RivoraResult<Option<Observation>> {
+        // Prefer durable key index; fall back to scan for pre-v0.9 stores.
+        let index_path = self
+            .inv_dir(investigation_id)
+            .join("indexes")
+            .join("observation_keys")
+            .join(format!("{}.json", stable_key_hash(key)));
+        if index_path.exists() {
+            if let Ok(value) = self.read_json::<serde_json::Value>(&index_path) {
+                if let Some(id_str) = value.get("object_id").and_then(|v| v.as_str()) {
+                    if let Ok(object_id) = id_str.parse::<ObjectId>() {
+                        let path = self.object_path(investigation_id, "observations", &object_id);
+                        if path.exists() {
+                            return Ok(Some(self.read_json(&path)?));
+                        }
+                    }
+                }
+            }
+        }
         Ok(self
             .list_observations(investigation_id)?
             .into_iter()
@@ -640,7 +1090,13 @@ impl Store for LocalStore {
                 record.id
             )));
         }
-        self.write_json(&path, record)
+        if !self.write_json_new(&path, record)? {
+            return Err(RivoraError::storage(format!(
+                "memory record {} already exists (append-only)",
+                record.id
+            )));
+        }
+        Ok(())
     }
 
     fn list_memory(&self, id: &InvestigationId) -> RivoraResult<Vec<MemoryRecord>> {
@@ -1650,6 +2106,22 @@ impl Store for LocalStore {
         });
         Ok(matches.pop())
     }
+
+    fn health_report(&self) -> RivoraResult<StoreHealthReport> {
+        LocalStore::health_report(self)
+    }
+
+    fn diagnostic_export(&self) -> RivoraResult<serde_json::Value> {
+        LocalStore::diagnostic_export(self)
+    }
+
+    fn backup_to(&self, dest: &std::path::Path) -> RivoraResult<()> {
+        LocalStore::backup_to(self, dest)
+    }
+
+    fn rebuild_observation_indexes(&self) -> RivoraResult<u64> {
+        LocalStore::rebuild_observation_indexes(self)
+    }
 }
 
 impl LocalStore {
@@ -1661,6 +2133,153 @@ impl LocalStore {
         self.lifecycle_runs_dir(investigation_id)
             .join(format!("{id}.json"))
     }
+
+    /// Atomically claim an observation idempotency key. Returns false if already claimed.
+    fn claim_observation_key(
+        &self,
+        investigation_id: &InvestigationId,
+        key: &str,
+        object_id: &ObjectId,
+    ) -> RivoraResult<bool> {
+        let index_dir = self
+            .inv_dir(investigation_id)
+            .join("indexes")
+            .join("observation_keys");
+        fs::create_dir_all(&index_dir)
+            .map_err(|e| RivoraError::storage(format!("failed to create key index: {e}")))?;
+        let path = index_dir.join(format!("{}.json", stable_key_hash(key)));
+        let body = serde_json::json!({
+            "object_id": object_id.to_string(),
+            "idempotency_key": key,
+        });
+        self.write_json_new(&path, &body)
+    }
+}
+
+fn parse_lock_contents(content: &str) -> RivoraResult<(u32, u64)> {
+    let mut pid = None;
+    let mut created_at = None;
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("pid=") {
+            pid = rest.trim().parse().ok();
+        } else if let Some(rest) = line.strip_prefix("created_at=") {
+            created_at = rest.trim().parse().ok();
+        }
+    }
+    match (pid, created_at) {
+        (Some(p), Some(c)) => Ok((p, c)),
+        _ => Err(RivoraError::storage("unparseable lock file")),
+    }
+}
+
+fn lock_is_stale(created_at: u64) -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now.saturating_sub(created_at) >= STALE_LOCK_SECS
+}
+
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    // Same process always counts as alive.
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        // `kill -0` checks process existence without delivering a signal.
+        use std::process::{Command, Stdio};
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(true)
+    }
+    #[cfg(not(unix))]
+    {
+        // Conservative: treat foreign PIDs as alive so we do not steal locks
+        // on platforms without a cheap existence probe.
+        let _ = pid;
+        true
+    }
+}
+
+fn stable_key_hash(key: &str) -> String {
+    // Deterministic non-crypto fingerprint for index filenames (not a security boundary).
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn dir_size(path: &Path) -> std::io::Result<u64> {
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let meta = entry.metadata()?;
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn copy_dir_excluding_lock(src: &Path, dest: &Path) -> RivoraResult<()> {
+    let src = src.canonicalize().unwrap_or_else(|_| src.to_path_buf());
+    // Refuse nested destinations that would recurse into the live store.
+    if dest.starts_with(&src) {
+        return Err(RivoraError::validation(
+            "backup destination must not be inside the store root",
+        ));
+    }
+    fs::create_dir_all(dest)
+        .map_err(|e| RivoraError::storage(format!("failed to create backup root: {e}")))?;
+    let mut stack = vec![src.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir)
+            .map_err(|e| RivoraError::storage(format!("failed to read for backup: {e}")))?
+        {
+            let entry =
+                entry.map_err(|e| RivoraError::storage(format!("failed to read entry: {e}")))?;
+            let path = entry.path();
+            let name = entry.file_name();
+            if name == ".rivora.lock" {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(&src)
+                .map_err(|e| RivoraError::storage(format!("backup path strip failed: {e}")))?;
+            let target = dest.join(rel);
+            if path.is_dir() {
+                fs::create_dir_all(&target).map_err(|e| {
+                    RivoraError::storage(format!("failed to create backup dir: {e}"))
+                })?;
+                stack.push(path);
+            } else {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent).map_err(|e| {
+                        RivoraError::storage(format!("failed to create backup parent: {e}"))
+                    })?;
+                }
+                fs::copy(&path, &target).map_err(|e| {
+                    RivoraError::storage(format!("failed to copy {}: {e}", path.display()))
+                })?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1779,16 +2398,105 @@ mod tests {
         });
         assert_eq!(all, sorted, "list order must be deterministic");
 
-        // Survives reopen.
+        // Survives reopen (drop first holder to release exclusive lock).
+        drop(store);
         let reopened = LocalStore::open(dir.path()).unwrap();
         assert_eq!(reopened.list_relationships().unwrap().len(), 2);
         assert_eq!(reopened.load_relationship(&rel_b.id).unwrap(), rel_b);
 
-        store.delete_relationship(&rel_a.id).unwrap();
-        let missing = store.load_relationship(&rel_a.id).unwrap_err();
+        reopened.delete_relationship(&rel_a.id).unwrap();
+        let missing = reopened.load_relationship(&rel_a.id).unwrap_err();
         assert!(matches!(missing, RivoraError::ObjectNotFound(_)));
-        let gone = store.delete_relationship(&rel_a.id).unwrap_err();
+        let gone = reopened.delete_relationship(&rel_a.id).unwrap_err();
         assert!(matches!(gone, RivoraError::ObjectNotFound(_)));
-        assert_eq!(store.list_relationships().unwrap().len(), 1);
+        assert_eq!(reopened.list_relationships().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn same_process_lock_is_reentrant() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = LocalStore::open(dir.path()).unwrap();
+        // Same process may open again (shared refcount); cross-process is exclusive.
+        let second = LocalStore::open(dir.path()).unwrap();
+        assert!(first.lock_held());
+        assert!(second.lock_held());
+        drop(second);
+        assert!(dir.path().join(".rivora.lock").exists());
+        drop(first);
+        assert!(!dir.path().join(".rivora.lock").exists());
+    }
+
+    #[test]
+    fn stale_lock_can_be_recovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join(".rivora.lock");
+        // Fake dead PID with old timestamp.
+        fs::write(&lock_path, "pid=999999\ncreated_at=1\n").unwrap();
+        assert!(LocalStore::recover_stale_lock(dir.path()).unwrap());
+        let store = LocalStore::open(dir.path()).unwrap();
+        assert!(store.lock_held());
+    }
+
+    #[test]
+    fn corrupt_memory_is_isolated() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::open(dir.path()).unwrap();
+        let inv = Investigation::create("T", None, Provenance::now("t", "t")).unwrap();
+        store.save_investigation(&inv).unwrap();
+        let obs = Observation::new(
+            inv.id,
+            ObservationKind::Event,
+            "happened",
+            serde_json::json!({}),
+            "test",
+            Utc::now(),
+            Some("k1".into()),
+            Provenance::now("t", "t"),
+        )
+        .unwrap();
+        store.append_observation(&obs).unwrap();
+        let mem = MemoryRecord::from_observation(
+            obs.id,
+            inv.id,
+            "happened",
+            Utc::now(),
+            Provenance::now("t", "t"),
+        );
+        store.append_memory(&mem).unwrap();
+        // Plant a corrupt sibling.
+        let bad = store
+            .root()
+            .join("investigations")
+            .join(inv.id.to_string())
+            .join("memory")
+            .join("corrupt.json");
+        fs::write(&bad, "{not-json").unwrap();
+        let listed = store.list_memory(&inv.id).unwrap();
+        assert_eq!(listed.len(), 1);
+        let health = store.health_report().unwrap();
+        assert!(!health.corrupt_records.is_empty());
+    }
+
+    #[test]
+    fn future_schema_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalStore::open(dir.path()).unwrap();
+        let path = store.root().join("store.json");
+        drop(store);
+        let future = serde_json::json!({
+            "schema_version": 99,
+            "rivora_version": "9.9.9",
+            "created_at": "2020-01-01T00:00:00Z",
+            "last_opened_at": "2020-01-01T00:00:00Z",
+        });
+        fs::write(&path, serde_json::to_vec_pretty(&future).unwrap()).unwrap();
+        let err = LocalStore::open(dir.path()).unwrap_err();
+        assert!(matches!(
+            err,
+            RivoraError::SchemaMismatch {
+                found: 99,
+                supported_max: _
+            }
+        ));
     }
 }

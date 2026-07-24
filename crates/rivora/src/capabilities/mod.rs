@@ -1273,6 +1273,26 @@ impl CapabilityService {
         self.runtime.capability_coverage_report()
     }
 
+    /// Local store health report (v0.9 production diagnostics).
+    pub fn store_health(&self) -> RivoraResult<crate::domain::StoreHealthReport> {
+        self.runtime.store_health()
+    }
+
+    /// Sanitized diagnostic export (v0.9).
+    pub fn diagnostic_export(&self) -> RivoraResult<serde_json::Value> {
+        self.runtime.diagnostic_export()
+    }
+
+    /// Backup the store to a destination directory.
+    pub fn backup_store(&self, dest: impl AsRef<std::path::Path>) -> RivoraResult<()> {
+        self.runtime.backup_store(dest)
+    }
+
+    /// Rebuild derived observation indexes from canonical records.
+    pub fn rebuild_observation_indexes(&self) -> RivoraResult<u64> {
+        self.runtime.rebuild_observation_indexes()
+    }
+
     /// Create an Execution Plan for an accepted Proposal.
     pub fn create_execution_plan(
         &self,

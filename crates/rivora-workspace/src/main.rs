@@ -127,9 +127,16 @@ fn run() -> Result<(), String> {
                 if ids.is_empty() {
                     println!("No investigations yet.");
                 } else {
-                    for id in ids {
+                    let total = ids.len();
+                    let limit = rivora::DEFAULT_LIST_LIMIT.min(total);
+                    for id in ids.into_iter().take(limit) {
                         let inv = caps.open_investigation(id).map_err(err)?;
                         println!("  {}  [{}]  {}", inv.id, inv.status, inv.title);
+                    }
+                    if total > limit {
+                        println!(
+                            "  … showing {limit} of {total} (bounded for Workspace responsiveness)"
+                        );
                     }
                 }
             }

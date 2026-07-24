@@ -511,6 +511,77 @@ fn v0_8_capability_coverage_architecture_gates() {
 }
 
 #[test]
+fn v0_9_production_hardening_architecture_gates() {
+    use rivora::domain::{
+        PerformanceBudget, ReplayContract, STORE_SCHEMA_VERSION, STORE_SCHEMA_VERSION_MAX,
+    };
+    use rivora::{LocalStore, RivoraError};
+
+    // Store manifest + schema gate.
+    let dir = tempfile::tempdir().unwrap();
+    let store = LocalStore::open(dir.path()).unwrap();
+    assert!(dir.path().join("store.json").exists());
+    assert!(store.lock_held());
+    let health = store.health_report().unwrap();
+    assert_eq!(health.schema_version, STORE_SCHEMA_VERSION);
+    assert!(health.schema_version <= STORE_SCHEMA_VERSION_MAX);
+
+    // Replay contracts must never allow dry-run to suppress live or bypass authority.
+    for c in ReplayContract::v0_9_contracts() {
+        assert!(!c.dry_run_suppresses_live, "{}", c.operation);
+        assert!(!c.retry_bypasses_authority, "{}", c.operation);
+    }
+
+    // Performance budgets must cover required production scenarios.
+    let names: Vec<_> = PerformanceBudget::v0_9_budgets()
+        .into_iter()
+        .map(|b| b.scenario)
+        .collect();
+    for required in [
+        "cli_startup",
+        "store_open",
+        "ingestion",
+        "duplicate_ingestion",
+        "lifecycle_run",
+        "search",
+        "diagnostic_export",
+    ] {
+        assert!(
+            names.iter().any(|n| n == required),
+            "missing budget {required}"
+        );
+    }
+
+    // Structured errors expose stable exit codes and failure classes.
+    assert_eq!(
+        RivoraError::store_locked("x").exit_code(),
+        rivora::CliExitCode::LockConflict
+    );
+    assert_eq!(
+        RivoraError::partial("x").exit_code(),
+        rivora::CliExitCode::Partial
+    );
+    assert!(!RivoraError::validation("x").is_retryable());
+    assert!(RivoraError::timeout("x").is_retryable());
+
+    // Connector resilience module must exist and forbid reasoning imports (covered elsewhere).
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
+    let resilience = workspace_root.join("crates/rivora-connectors/src/resilience.rs");
+    assert!(
+        resilience.exists(),
+        "v0.9 requires connector resilience helpers"
+    );
+    let content = std::fs::read_to_string(&resilience).unwrap();
+    assert!(content.contains("redact_json"));
+    assert!(content.contains("http_client"));
+    assert!(content.contains("max_response_bytes"));
+}
+
+#[test]
 fn policy_denies_high_risk_and_prohibited() {
     use rivora::domain::{
         default_accepted_input_types, evaluate_execution_policy, CapabilityRiskLevel,

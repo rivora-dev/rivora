@@ -8,6 +8,7 @@ use chrono::Utc;
 use rivora::domain::ObservationKind;
 use serde_json::json;
 
+use crate::resilience::{bound_batch, ensure_payload_size, redact_json, sanitize_error};
 use crate::{ConnectorError, ConnectorResult, NormalizedObservation};
 
 /// Read-only local project connector.
@@ -56,7 +57,17 @@ impl LocalConnector {
             out.append(&mut events);
         }
 
-        Ok(out)
+        for obs in &mut out {
+            redact_json(&mut obs.payload);
+            // Oversized payloads are rejected rather than silently truncated.
+            if let Err(e) = ensure_payload_size(&obs.payload) {
+                return Err(ConnectorError::PayloadTooLarge(sanitize_error(
+                    &e.to_string(),
+                )));
+            }
+        }
+
+        Ok(bound_batch(out))
     }
 
     /// Observe from a fixture directory layout (v0.8 offline parity).
