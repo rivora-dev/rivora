@@ -14,7 +14,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.9.1"
+version = "0.9.2"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/rivora-dev/rivora"
@@ -23,6 +23,7 @@ rust-version = "1.75"
 [workspace.dependencies]
 rivora = { path = "crates/rivora" }
 rivora-connectors = { path = "crates/rivora-connectors" }
+rivora-workspace = { path = "crates/rivora-workspace" }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

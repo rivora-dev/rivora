@@ -6,6 +6,10 @@ license.workspace = true
 description = "Rivora Workspace — primary interactive Investigation experience"
 rust-version.workspace = true
 
+[lib]
+name = "rivora_workspace"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rivora-workspace"
 path = "src/main.rs"

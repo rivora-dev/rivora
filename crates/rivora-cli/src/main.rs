@@ -2,6 +2,9 @@
 //!
 //! No Runtime business logic lives here. All reasoning is invoked via
 //! `CapabilityService`.
+//!
+//! Bare `rivora` (no subcommand) launches the shared Workspace entrypoint
+//! (`rivora_workspace::run_workspace`). Explicit subcommands remain one-shot CLI.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -37,6 +40,7 @@ use rivora_connectors::local::LocalConnector;
 use rivora_connectors::register_first_party_github_execution_capabilities;
 use rivora_connectors::sentry::SentryConnector;
 use rivora_connectors::NormalizedObservation;
+use rivora_workspace::{run_workspace, WorkspaceLaunchConfig};
 
 const PROPOSAL_BOUNDARY: &str = "Proposal only — not applied, not implemented, not verified.";
 const LEARNING_BOUNDARY: &str = "Measured Learning Outcome — external implementation recorded, never auto-applied; verified only with explicit actor+reason.";
@@ -46,19 +50,22 @@ const EXECUTION_BOUNDARY: &str = "Execution Through External Systems — only ex
 #[command(
     name = "rivora",
     version,
-    about = "Rivora — Engineering Understanding Platform CLI"
+    about = "Rivora — Engineering Understanding Platform. Run with no subcommand to open the Workspace.",
+    after_help = "Run `rivora` with no subcommand to open the interactive Workspace.\nUse `rivora <command>` for one-shot CLI operations."
 )]
 struct Cli {
     /// Data directory for local Runtime storage.
     #[arg(long, global = true, default_value = ".rivora/data")]
     data_dir: PathBuf,
 
-    /// Emit JSON instead of human-readable text.
+    /// Emit JSON instead of human-readable text (requires a subcommand).
     #[arg(long, global = true)]
     json: bool,
 
+    /// When present, run the requested one-shot CLI command.
+    /// When absent, launch the interactive Workspace (same path as `rivora-workspace`).
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1527,10 +1534,22 @@ fn classify_cli_message(message: &str) -> RivoraError {
 }
 
 fn run(cli: Cli) -> Result<ExitCode, String> {
+    // Bare invocation: launch the shared Workspace (canonical interactive entrypoint).
+    let Some(command) = cli.command else {
+        if cli.json {
+            return Err(
+                "--json requires a CLI subcommand; bare `rivora` launches the interactive Workspace"
+                    .to_string(),
+            );
+        }
+        run_workspace(WorkspaceLaunchConfig::interactive(cli.data_dir))?;
+        return Ok(ExitCode::SUCCESS);
+    };
+
     // Doctor recover-lock must run before open (lock may block open).
     if let Commands::Doctor {
         action: DoctorCmd::RecoverLock,
-    } = &cli.command
+    } = &command
     {
         let recovered = rivora::storage::LocalStore::recover_stale_lock(&cli.data_dir)
             .map_err(|e| e.to_string())?;
@@ -1554,7 +1573,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
     let caps = open_capabilities(&cli.data_dir)?;
 
     let mut exit = ExitCode::SUCCESS;
-    match cli.command {
+    match command {
         Commands::Doctor { action } => match action {
             DoctorCmd::Health => {
                 let report = caps.store_health().map_err(err)?;
